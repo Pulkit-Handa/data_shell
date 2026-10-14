@@ -1,0 +1,196 @@
+# NOTE: In enterprise production, secrets must be provisioned externally via HashiCorp Vault,
+# AWS Secrets Manager, Kubernetes External Secrets Operator, or kubectl:
+#   kubectl create secret generic datashell-secrets \
+#     --from-literal=master-api-key="$(openssl rand -hex 32)" \
+#     --from-literal=hmac-signing-secret="$(openssl rand -hex 32)"
+#     --from-literal=hmac-keyring='{}' # replace with retained key IDs/secrets during rotation
+#
+# Hardcoded placeholder secrets in source control are strictly forbidden and rejected at startup.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: data-shell-config
+data:
+  # Replace this example with the exact HTTPS origins trusted by your deployment.
+  allowed-origins: "https://console.example.com"
+  # Replace with exact ingress-controller source IPs/CIDRs; never use '*'.
+  trusted-proxy-ips: "127.0.0.1"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: data-shell-storage
+spec:
+  # Single replica until distributed locking and shared rate limiting are deployed.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # ~6x the 20 GiB upload default: source spool + staged target + immutable
+      # lineage + worst-case quarantine plus DuckDB spill headroom.
+      storage: 120Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: data-shell
+  labels:
+    app: data-shell
+spec:
+  # Keep one replica until API-key revocation and rate limiting use shared state.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: data-shell
+  template:
+    metadata:
+      labels:
+        app: data-shell
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: datashell-gateway
+        image: ghcr.io/REPLACE_WITH_ORG/data-shell:REPLACE_WITH_IMMUTABLE_TAG
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        - name: ALLOWED_ORIGINS
+          valueFrom:
+            configMapKeyRef:
+              name: data-shell-config
+              key: allowed-origins
+        - name: FORWARDED_ALLOW_IPS
+          valueFrom:
+            configMapKeyRef:
+              name: data-shell-config
+              key: trusted-proxy-ips
+        - name: DATASHELL_STORAGE_ROOT
+          value: "/app/storage"
+        - name: DATASHELL_CONTRACTS_DIR
+          value: "/app/storage/contracts_registry"
+        - name: DATASHELL_DATA_DIR
+          value: "/app/storage/data"
+        - name: DATASHELL_OUTPUT_DIR
+          value: "/app/storage/output"
+        - name: DATASHELL_AUDIT_DIR
+          value: "/app/storage/output/audits"
+        - name: DATASHELL_QUARANTINE_DIR
+          value: "/app/storage/output/quarantine"
+        # Large upload spools and DuckDB external sorts live on the persistent
+        # volume, not the bounded memory-backed /tmp emptyDir.
+        - name: TMPDIR
+          value: "/app/storage/tmp"
+        - name: DATASHELL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: datashell-secrets
+              key: master-api-key
+        - name: DATASHELL_HMAC_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: datashell-secrets
+              key: hmac-signing-secret
+        - name: DATASHELL_KEY_ID
+          value: "datashell-hmac-v1"
+        - name: DATASHELL_HMAC_KEYRING
+          valueFrom:
+            secretKeyRef:
+              name: datashell-secrets
+              key: hmac-keyring
+              optional: true
+        - name: MAX_UPLOAD_SIZE_BYTES
+          # 20 GiB built-in default, set explicitly for the reference deployment.
+          value: "21474836480"
+        - name: MAX_REQUEST_BODY_BYTES
+          # MAX_UPLOAD_SIZE_BYTES + 1 MiB multipart overhead.
+          value: "21475836416"
+        - name: MAX_CONCURRENT_RUNS
+          value: "2"
+        - name: MAX_CONCURRENT_REQUESTS
+          value: "2"
+        - name: MAX_CONTROL_BODY_BYTES
+          value: "1048576"
+        - name: DUCKDB_MEMORY_LIMIT
+          value: "1GB"
+        - name: MIN_FREE_DISK_BYTES
+          # Floor kept at one full 20 GiB upload so a run can always be staged.
+          value: "21474836480"
+        - name: DATASHELL_DISK_HEADROOM_MULTIPLIER
+          # Per-run preflight: source_bytes * 2.0 must fit on the volume.
+          value: "2.0"
+        - name: STREAM_AUTO_THRESHOLD_BYTES
+          value: "67108864"
+        - name: STREAM_CHUNK_ROWS
+          value: "100000"
+        - name: RATE_LIMIT_REQUESTS_PER_MINUTE
+          value: "120"
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: persistent-storage
+          mountPath: /app/storage
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+          requests:
+            cpu: "500m"
+            memory: "1Gi"
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 10
+          failureThreshold: 30
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          periodSeconds: 15
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: tmp
+        emptyDir:
+          # Only small OS scratch now that TMPDIR targets the PersistentVolume;
+          # size this far below the memory limit so a runaway temp file cannot
+          # pressure the container.
+          medium: Memory
+          sizeLimit: 512Mi
+      - name: persistent-storage
+        persistentVolumeClaim:
+          claimName: data-shell-storage
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-shell-service
+spec:
+  type: ClusterIP
+  selector:
+    app: data-shell
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http

@@ -1,0 +1,56 @@
+services:
+  datashell-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL: info
+      DATASHELL_API_KEY: ${DATASHELL_API_KEY:?Set DATASHELL_API_KEY to a unique high-entropy secret}
+      DATASHELL_HMAC_SECRET: ${DATASHELL_HMAC_SECRET:?Set DATASHELL_HMAC_SECRET to a unique high-entropy secret}
+      DATASHELL_KEY_ID: ${DATASHELL_KEY_ID:-datashell-hmac-v1}
+      DATASHELL_HMAC_KEYRING: ${DATASHELL_HMAC_KEYRING-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:?Set ALLOWED_ORIGINS to exact trusted browser origins}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+      MAX_UPLOAD_SIZE_BYTES: ${MAX_UPLOAD_SIZE_BYTES:-21474836480}
+      MAX_REQUEST_BODY_BYTES: ${MAX_REQUEST_BODY_BYTES:-21475836416}
+      MAX_CONCURRENT_RUNS: ${MAX_CONCURRENT_RUNS:-2}
+      MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-2}
+      MAX_CONTROL_BODY_BYTES: ${MAX_CONTROL_BODY_BYTES:-1048576}
+      DUCKDB_MEMORY_LIMIT: ${DUCKDB_MEMORY_LIMIT:-1GB}
+      MIN_FREE_DISK_BYTES: ${MIN_FREE_DISK_BYTES:-21474836480}
+      STREAM_AUTO_THRESHOLD_BYTES: ${STREAM_AUTO_THRESHOLD_BYTES:-67108864}
+      STREAM_CHUNK_ROWS: ${STREAM_CHUNK_ROWS:-100000}
+      DATASHELL_DISK_HEADROOM_MULTIPLIER: ${DATASHELL_DISK_HEADROOM_MULTIPLIER:-2.0}
+    volumes:
+      - datashell-storage:/app/storage
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      # /app/storage/tmp (TMPDIR) holds multi-gigabyte upload spools and DuckDB
+      # external sorts on the disk-backed volume; this tmpfs now only backs
+      # small OS scratch, so it does not need to track MAX_UPLOAD_SIZE_BYTES.
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8000/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4096M
+        reservations:
+          cpus: '1.0'
+          memory: 1024M
+
+volumes:
+  datashell-storage:

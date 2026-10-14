@@ -1,0 +1,107 @@
+"""Enterprise Telemetry: Prometheus Metrics & Structured Logging."""
+
+from __future__ import annotations
+import logging
+import json
+import time
+from typing import Dict, Any, Optional
+from prometheus_client import (
+    Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
+)
+
+# ----------------- Prometheus Metrics -----------------
+
+# Avoid tenant, contract, and rule identifiers as metric labels: these are
+# unbounded and may contain sensitive business metadata. Use structured audit
+# logs for per-tenant investigations and aggregate metrics for alerting.
+RUNS_TOTAL = Counter(
+    "datashell_runs_total",
+    "Total boundary enforcement runs executed",
+    ["status"],
+)
+
+ROWS_READ_TOTAL = Counter("datashell_rows_read_total", "Total rows read at the boundary")
+ROWS_DELIVERED_TOTAL = Counter("datashell_rows_delivered_total", "Total rows delivered to target storage")
+ROWS_HELD_TOTAL = Counter("datashell_rows_held_total", "Total rows held by semantic quality rules")
+ROWS_REFUSED_TOTAL = Counter(
+    "datashell_rows_refused_total", "Total rows refused due to structural schema mismatch"
+)
+FOOTING_ERRORS_TOTAL = Counter(
+    "datashell_footing_errors_total", "Total footing reconciliation balance failures"
+)
+RUN_DURATION_SECONDS = Histogram(
+    "datashell_run_duration_seconds",
+    "Latency distribution of boundary runs in seconds",
+    buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0],
+)
+
+ACTIVE_RUNS = Gauge(
+    "datashell_active_runs",
+    "Currently running pipeline boundary executions"
+)
+
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "datashell_http_requests_total",
+    "HTTP requests handled by the Data Shell API",
+    ["method", "route", "status_code"],
+)
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    "datashell_http_request_duration_seconds",
+    "HTTP request latency in seconds",
+    ["method", "route"],
+    buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0],
+)
+HTTP_IN_FLIGHT_REQUESTS = Gauge(
+    "datashell_http_in_flight_requests",
+    "HTTP requests currently being handled",
+)
+STORAGE_FREE_BYTES = Gauge(
+    "datashell_storage_free_bytes",
+    "Free bytes on the persistent storage filesystem",
+)
+STORAGE_TOTAL_BYTES = Gauge(
+    "datashell_storage_total_bytes",
+    "Total bytes on the persistent storage filesystem",
+)
+
+
+# ----------------- Structured Logging -----------------
+
+class StructuredLogger:
+    """Emits production JSON logs with correlation trace IDs."""
+    
+    def __init__(self, name: str = "datashell"):
+        self.logger = logging.getLogger(name)
+        self.logger.setLevel(logging.INFO)
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            self.logger.addHandler(handler)
+
+    def log(self, level: str, message: str, **kwargs: Any) -> None:
+        payload = {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "level": level.upper(),
+            "message": message,
+            **kwargs
+        }
+        json_line = json.dumps(payload, default=str)
+        if level.upper() == "ERROR":
+            self.logger.error(json_line)
+        elif level.upper() == "WARNING":
+            self.logger.warning(json_line)
+        else:
+            self.logger.info(json_line)
+
+    def info(self, message: str, **kwargs: Any) -> None:
+        self.log("INFO", message, **kwargs)
+
+    def warning(self, message: str, **kwargs: Any) -> None:
+        self.log("WARNING", message, **kwargs)
+
+    def error(self, message: str, **kwargs: Any) -> None:
+        self.log("ERROR", message, **kwargs)
+
+
+telemetry_logger = StructuredLogger("datashell.telemetry")

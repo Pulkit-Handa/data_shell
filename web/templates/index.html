@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Data Shell — Boundary Enforcement Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <header class="nav">
+    <div class="container nav-inner">
+      <div class="brand">
+        <span class="brand-mark">🧱</span>
+        <span class="brand-name">Data Shell</span>
+      </div>
+      <nav class="links">
+        <a href="/">Home</a>
+        <a href="/playground">Playground</a>
+        <a href="https://github.com/your-org/data-shell" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://colab.research.google.com/github/your-org/data-shell/blob/main/examples/notebook/demo.ipynb" target="_blank" rel="noopener">Colab</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container">
+        <h1>"Bad data never lands, and never leaves."</h1>
+        <p class="sub">Contract-driven boundary enforcement with cryptographic auditability, out-of-core scale, and a durable forensic ledger.</p>
+        <div class="actions">
+          <button class="btn primary" id="runDemo">Run 60-Second Demo</button>
+          <a class="btn ghost" href="/playground">Try Playground</a>
+          <a class="btn ghost" href="https://github.com/your-org/data-shell#try-it-in-60-seconds" target="_blank" rel="noopener">Quickstart</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="grid">
+          <div class="card">
+            <h3>Refusal at the boundary</h3>
+            <p>Four-stage write-gate (structural → semantic → reconciliation → atomic publish). Rejected rows never land.</p>
+          </div>
+          <div class="card">
+            <h3>Tamper-evident proofs</h3>
+            <p>Signed audit certificates with SHA-256 + Merkle roots. Any post-delivery byte-flip is detected.</p>
+          </div>
+          <div class="card">
+            <h3>Scale without bloat</h3>
+            <p>Out-of-core streaming to 20 GiB, bounded memory, disk headroom preflight. Runs locally or in the gateway.</p>
+          </div>
+          <div class="card">
+            <h3>Forensic by default</h3>
+            <p>Durable boundary ledger, quarantine index, usage metering, signed run webhooks.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <h2>Live Demo Results</h2>
+        <pre class="terminal" id="demoOutput">Click "Run 60-Second Demo" to see refusal, held rows, verification, tamper detection, and recovery.</pre>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container">
+      <small>Apache 2.0 · <a href="https://github.com/your-org/data-shell">GitHub</a> · <a href="https://colab.research.google.com/github/your-org/data-shell/blob/main/examples/notebook/demo.ipynb">Colab</a></small>
+    </div>
+  </footer>
+
+  <script src="/static/js/demo.js"></script>
+</body>
+</html>

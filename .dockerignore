@@ -1,0 +1,31 @@
+# Build context exclusions: keep the image small and never ship local runtime
+# state (delivered data, quarantine, audit certificates, credential databases)
+# or development-only assets into a container image.
+.git
+.github
+.gitignore
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+.eggs
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+venv
+env
+build
+dist
+output
+data
+tests
+benchmarks
+integrations
+docs
+docker-compose.yml
+k8s-deployment.yaml
+render.yaml
+render-api.yaml
+*.log
+.DS_Store

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-shell-airflow"
+version = "1.0.2"
+description = "Apache Airflow provider that gates DAGs on Data Shell boundary enforcement."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Data Shell" }]
+keywords = ["airflow", "data-quality", "data-contracts", "data-shell", "boundary"]
+classifiers = [
+    "Framework :: Apache Airflow",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+]
+dependencies = ["apache-airflow>=2.7"]
+
+[project.optional-dependencies]
+tests = ["pytest>=8"]
+
+[project.entry-points."apache_airflow_provider"]
+get_provider_info = "datashell_airflow:get_provider_info"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["datashell_airflow*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

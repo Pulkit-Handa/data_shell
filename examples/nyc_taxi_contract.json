@@ -1,0 +1,88 @@
+{
+  "apiVersion": "daas/v1",
+  "kind": "DataProduct",
+  "metadata": {
+    "name": "nyc-tlc-yellow-tripdata",
+    "owner": "mobility-data-team",
+    "version": "1.0.0",
+    "status": "ACTIVE",
+    "description": "Boundary contract for incoming NYC TLC Yellow Taxi trip data feeds"
+  },
+  "spec": {
+    "sources": [
+      {
+        "type": "LOCAL",
+        "connectionRef": "tlc-landing",
+        "path": "data/yellow_tripdata_sample.parquet",
+        "format": "parquet",
+        "schema": [
+          { "name": "VendorID", "polars_type": "Int32", "nullable": false },
+          { "name": "passenger_count", "polars_type": "Int64", "nullable": false },
+          { "name": "trip_distance", "polars_type": "Float64", "nullable": false },
+          { "name": "PULocationID", "polars_type": "Int32", "nullable": false },
+          { "name": "DOLocationID", "polars_type": "Int32", "nullable": false },
+          { "name": "payment_type", "polars_type": "Int64", "nullable": false },
+          { "name": "fare_amount", "polars_type": "Float64", "nullable": false },
+          { "name": "total_amount", "polars_type": "Float64", "nullable": false }
+        ]
+      }
+    ],
+    "quality": {
+      "behavior": "DROP_ROW",
+      "rules": [
+        {
+          "rule_id": "positive-fare",
+          "check": "GREATER_THAN",
+          "column": "fare_amount",
+          "value": 0.0,
+          "description": "Fare amount must be strictly greater than $0"
+        },
+        {
+          "rule_id": "positive-distance",
+          "check": "GREATER_THAN",
+          "column": "trip_distance",
+          "value": 0.0,
+          "description": "Trip distance must be greater than 0 miles"
+        },
+        {
+          "rule_id": "valid-passenger-count",
+          "check": "GREATER_THAN",
+          "column": "passenger_count",
+          "value": 0,
+          "description": "Trip must carry at least 1 passenger"
+        },
+        {
+          "rule_id": "known-payment-type",
+          "check": "ALLOWED_VALUES",
+          "column": "payment_type",
+          "value": [1, 2, 3, 4],
+          "description": "Payment type must be one of authorized payment methods"
+        }
+      ],
+      "batch_rules": [
+        {
+          "rule_id": "minimum-feed-volume",
+          "check": "MIN_ROW_COUNT",
+          "value": 50000,
+          "description": "Daily feed must deliver at least 50,000 valid trips"
+        }
+      ]
+    },
+    "transformation": {
+      "map": [],
+      "reduce": []
+    },
+    "delivery": {
+      "refreshSchedule": "0 2 * * *",
+      "targets": [
+        {
+          "type": "PARQUET",
+          "connectionRef": "lakehouse-curated",
+          "path": "./output/curated/nyc_taxi_clean.parquet",
+          "mode": "overwrite"
+        }
+      ],
+      "quarantinePath": "./output/quarantine"
+    }
+  }
+}

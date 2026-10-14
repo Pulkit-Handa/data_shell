@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Data Shell Playground — Build Rules</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <header class="nav">
+    <div class="container nav-inner">
+      <div class="brand"><span class="brand-mark">🧱</span><span class="brand-name">Data Shell</span></div>
+      <nav class="links">
+        <a href="/">Home</a>
+        <a href="/playground">Playground</a>
+        <a href="https://github.com/your-org/data-shell" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="section">
+      <div class="container">
+        <h1>Build Contract &amp; Run Enforcement</h1>
+        <p class="sub">Upload a small file, fill schema + row/batch rules. The engine runs with your contract and shows ledger summary, statuses, and verification.</p>
+
+        <form id="pgForm" class="card" enctype="multipart/form-data">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Data File (CSV or JSONL)</label>
+              <input type="file" name="source" accept=".csv,.jsonl,.json,.ndjson" required />
+            </div>
+            <div class="form-group">
+              <label>Tenant</label>
+              <input type="text" name="tenant" value="demo-tenant" />
+            </div>
+          </div>
+
+          <h3>Schema</h3>
+          <div id="schemaRows"></div>
+          <button type="button" class="btn ghost" id="addSchema">+ Add Column</button>
+
+          <h3 style="margin-top:14px">Row Rules</h3>
+          <div id="ruleRows"></div>
+          <button type="button" class="btn ghost" id="addRule">+ Add Row Rule</button>
+
+          <h3 style="margin-top:14px">Batch Rules (optional)</h3>
+          <div id="batchRows"></div>
+          <button type="button" class="btn ghost" id="addBatch">+ Add Batch Rule</button>
+
+          <div style="margin-top:14px">
+            <button class="btn primary" type="submit">Run with these rules</button>
+          </div>
+        </form>
+
+        <h2 style="margin-top:18px">Results</h2>
+        <pre class="terminal" id="pgOut">Results will appear here.</pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/js/playground-interactive.js"></script>
+</body>
+</html>

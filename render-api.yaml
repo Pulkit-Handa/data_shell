@@ -1,0 +1,63 @@
+# Render Blueprint for the hardened Data Shell API gateway.
+#
+# Render auto-detects only `render.yaml` at the repo root, so this file is not
+# part of the one-click demo flow. To run the gateway on Render, either deploy
+# with `docker compose` / `k8s-deployment.yaml`, or copy this file over
+# `render.yaml` in your fork before creating the Blueprint.
+#
+# It mounts a 120 GB persistent disk and therefore requires a paid instance type.
+services:
+  - type: web
+    name: data-shell
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: oregon
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: DATASHELL_STORAGE_ROOT
+        value: /app/storage
+      - key: DATASHELL_CONTRACTS_DIR
+        value: /app/storage/contracts_registry
+      - key: DATASHELL_DATA_DIR
+        value: /app/storage/data
+      - key: DATASHELL_OUTPUT_DIR
+        value: /app/storage/output
+      - key: DATASHELL_AUDIT_DIR
+        value: /app/storage/output/audits
+      - key: DATASHELL_QUARANTINE_DIR
+        value: /app/storage/output/quarantine
+      - key: TMPDIR
+        value: /app/storage/tmp
+      - key: MAX_UPLOAD_SIZE_BYTES
+        value: "21474836480"
+      - key: MAX_REQUEST_BODY_BYTES
+        value: "21475836416"
+      - key: MIN_FREE_DISK_BYTES
+        value: "21474836480"
+      - key: DATASHELL_DISK_HEADROOM_MULTIPLIER
+        value: "2.0"
+      - key: STREAM_AUTO_THRESHOLD_BYTES
+        value: "67108864"
+      - key: STREAM_CHUNK_ROWS
+        value: "100000"
+      - key: DATASHELL_API_KEY
+        generateValue: true
+      - key: DATASHELL_HMAC_SECRET
+        generateValue: true
+      - key: DATASHELL_KEY_ID
+        value: datashell-hmac-v1
+    disk:
+      name: datashell-storage
+      mountPath: /app/storage
+      # Holds the upload spool, staged target, lineage artifact, quarantine, and
+      # out-of-core database spill for multi-gigabyte runs.
+      sizeGB: 120

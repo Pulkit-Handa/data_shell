@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-shell"
+version = "1.0.2"
+description = "Contract-driven boundary enforcement engine: Bad data never lands, and never leaves."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "polars>=2.0.0,<3.0.0",
+    "duckdb>=1.0.0,<2.0.0",
+    "pyarrow>=14.0.0,<27.0.0",
+    "pydantic>=2.9.0,<3.0.0",
+    "fastapi>=0.110.0,<1.0.0",
+    "uvicorn>=0.28.0,<1.0.0",
+    "python-multipart>=0.0.9,<1.0.0",
+    "prometheus-client>=0.20.0,<1.0.0",
+    "cryptography>=42.0.0,<47.0.0",
+    "httpx>=0.27.0,<1.0.0",
+    "numpy>=1.26.0,<3.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<10.0.0",
+    "pytest-asyncio>=0.23.0,<2.0.0"
+]
+
+[project.scripts]
+datashell = "datashell.cli.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-ra"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["datashell*"]
+exclude = ["tests*", "benchmarks*", "examples*", "integrations*"]
+
+[tool.setuptools.package-data]
+datashell = ["py.typed"]

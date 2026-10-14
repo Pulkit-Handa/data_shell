@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package and test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e '.[dev]'
+      - name: Build distributable wheel
+        run: python -m pip wheel --no-deps --no-build-isolation . -w dist
+      - name: Generate CycloneDX software bill of materials
+        run: |
+          python -m pip install cyclonedx-bom
+          cyclonedx-py environment --output-file dist/sbom.cyclonedx.json --output-format JSON
+      - name: Compile source and tests
+        run: python -m compileall -q datashell tests benchmarks examples integrations
+      - name: Validate deployment YAML
+        run: |
+          python - <<'PY'
+          import yaml
+          for path in ("docker-compose.yml", "k8s-deployment.yaml", "deploy/prometheus-alerts.yaml"):
+              with open(path, encoding="utf-8") as stream:
+                  list(yaml.safe_load_all(stream))
+              print(f"validated {path}")
+          PY
+      - name: Verify installed dependency consistency
+        run: python -m pip check
+      - name: Run tests
+        env:
+          ENVIRONMENT: test
+        run: python -m pytest -q -ra --strict-config --strict-markers
+      - name: Run Airflow provider tests
+        env:
+          ENVIRONMENT: test
+        run: python -m pytest integrations/airflow/tests -q -ra
+      - name: Exercise the quickstart demo end to end
+        env:
+          ENVIRONMENT: test
+        run: |
+          python -m pytest tests/test_cli_demo.py -q
+          python -m datashell.cli.main verify --help >/dev/null
+      - name: Audit installed dependencies
+        run: python -m pip install pip-audit && pip-audit
+      - name: Archive release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-${{ matrix.python-version }}-release-evidence
+          path: |
+            dist/*.whl
+            dist/*.cyclonedx.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  container-build:
+    name: Build production container
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Build container image
+        run: docker build --pull --tag data-shell:ci .
+      - name: Check image configuration
+        run: |
+          test "$(docker image inspect data-shell:ci --format '{{.Config.User}}')" = "10001:10001"
+          test "$(docker image inspect data-shell:ci --format '{{.Config.WorkingDir}}')" = "/app"
+      - name: Exercise production container with read-only root filesystem
+        shell: bash
+        run: |
+          set -euo pipefail
+          MASTER_KEY="$(openssl rand -hex 32)"
+          HMAC_KEY="$(openssl rand -hex 32)"
+          docker volume create datashell-ci-storage >/dev/null
+          docker run -d --rm --name datashell-ci \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=1100m \
+            --mount type=volume,src=datashell-ci-storage,dst=/app/storage \
+            --cap-drop ALL --security-opt no-new-privileges:true \
+            -p 127.0.0.1:18000:8000 \
+            -e ENVIRONMENT=production \
+            -e DATASHELL_API_KEY="$MASTER_KEY" \
+            -e DATASHELL_HMAC_SECRET="$HMAC_KEY" \
+            -e DATASHELL_KEY_ID=ci-signing-key \
+            -e ALLOWED_ORIGINS=https://console.ci.example \
+            -e FORWARDED_ALLOW_IPS=127.0.0.1 \
+            -e MIN_FREE_DISK_BYTES=0 \
+            data-shell:ci
+          cleanup() {
+            docker logs datashell-ci || true
+            docker stop datashell-ci >/dev/null 2>&1 || true
+            docker volume rm datashell-ci-storage >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:18000/ready >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              echo "Container did not become ready" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18000/docs)" = "404"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18000/metrics)" = "401"
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' -H "X-API-Key: $MASTER_KEY" http://127.0.0.1:18000/metrics)" = "200"

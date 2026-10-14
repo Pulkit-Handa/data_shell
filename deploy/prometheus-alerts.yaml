@@ -1,0 +1,58 @@
+# Import these rules into your Prometheus configuration and tune thresholds to SLOs.
+groups:
+  - name: data-shell-api
+    rules:
+      - alert: DataShellHighServerErrorRate
+        expr: |
+          sum(rate(datashell_http_requests_total{status_code=~"5.."}[5m]))
+          /
+          clamp_min(sum(rate(datashell_http_requests_total[5m])), 0.001) > 0.02
+        for: 10m
+        labels:
+          severity: page
+          service: data-shell
+        annotations:
+          summary: Data Shell server error rate is elevated
+          description: More than 2% of API requests returned 5xx responses for 10 minutes.
+      - alert: DataShellHighRequestLatency
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(datashell_http_request_duration_seconds_bucket[5m]))
+          ) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: data-shell
+        annotations:
+          summary: Data Shell API p95 latency is elevated
+          description: API p95 latency exceeded 2 seconds for 10 minutes.
+      - alert: DataShellPipelineFailures
+        expr: |
+          sum(rate(datashell_runs_total{status=~"FAILED|ERROR"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: data-shell
+        annotations:
+          summary: Data Shell pipeline failures detected
+          description: One or more failed pipeline runs were observed in the last five minutes.
+
+      - alert: DataShellRunCapacitySaturated
+        expr: datashell_active_runs >= 2
+        for: 10m
+        labels:
+          severity: warning
+          service: data-shell
+        annotations:
+          summary: Data Shell pipeline capacity is saturated
+          description: Active runs have remained at or above the default concurrency limit; tune the threshold if MAX_CONCURRENT_RUNS differs from 2.
+
+      - alert: DataShellLowStorageCapacity
+        expr: datashell_storage_free_bytes < 1073741824
+        for: 5m
+        labels:
+          severity: page
+          service: data-shell
+        annotations:
+          summary: Data Shell persistent storage is nearly full
+          description: Less than 1 GiB of free space remains on the persistent storage filesystem.

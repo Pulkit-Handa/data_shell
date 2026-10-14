@@ -1,0 +1,41 @@
+# Render Blueprint for the public Data Shell demo / interactive playground.
+#
+#   https://dashboard.render.com/new/blueprint  ->  pick this repository
+#
+# Render auto-detects this file (render.yaml) at the repo root, so the one-click
+# Blueprint deploys the demo: a landing page, an interactive playground (upload a
+# small file, define schema + rules, run enforcement), and a one-click 60-second
+# demo. It serves web/main.py via Dockerfile.web.
+#
+# The hardened API gateway blueprint lives in render-api.yaml; it needs a paid
+# instance and a 120 GB disk, so it is intentionally kept out of the one-click
+# flow.
+#
+# Note: the free plan cold-starts after ~15 minutes of inactivity.
+services:
+  - type: web
+    name: data-shell-demo
+    runtime: docker
+    dockerfilePath: ./Dockerfile.web
+    region: oregon
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      # Ephemeral in-container storage; each demo run uses its own temp dir.
+      - key: DATASHELL_STORAGE_ROOT
+        value: /app/storage
+      - key: TMPDIR
+        value: /app/storage/tmp
+      - key: DATASHELL_DISK_HEADROOM_MULTIPLIER
+        value: "2.0"
+      # Keep the playground to small files (50 MiB) so the free instance stays healthy.
+      - key: MAX_UPLOAD_SIZE_BYTES
+        value: "52428800"
+      - key: DATASHELL_API_KEY
+        generateValue: true
+      - key: DATASHELL_HMAC_SECRET
+        generateValue: true
+      - key: DATASHELL_KEY_ID
+        value: datashell-hmac-v1

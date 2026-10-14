@@ -1,0 +1,75 @@
+{
+  "apiVersion": "daas/v1",
+  "kind": "DataProduct",
+  "metadata": {
+    "name": "vendor-settlements",
+    "owner": "finance-data",
+    "version": "1.0.0",
+    "status": "ACTIVE",
+    "description": "Enforces settlements incoming from external vendor feeds"
+  },
+  "spec": {
+    "sources": [
+      {
+        "type": "LOCAL",
+        "connectionRef": "local-landing",
+        "path": "incoming/settlements/",
+        "format": "jsonl",
+        "schema": [
+          { "name": "settlement_id", "polars_type": "Utf8", "nullable": false },
+          { "name": "amount", "polars_type": "Float64", "nullable": false },
+          { "name": "currency", "polars_type": "Utf8", "nullable": false }
+        ]
+      }
+    ],
+    "quality": {
+      "behavior": "DROP_ROW",
+      "rules": [
+        {
+          "rule_id": "id-present",
+          "check": "NOT_NULL",
+          "column": "settlement_id",
+          "description": "Settlement ID must not be null"
+        },
+        {
+          "rule_id": "amount-positive",
+          "check": "GREATER_THAN",
+          "column": "amount",
+          "value": 0,
+          "description": "Settlement amount must be strictly greater than 0"
+        },
+        {
+          "rule_id": "currency-settled",
+          "check": "ALLOWED_VALUES",
+          "column": "currency",
+          "value": ["USD", "EUR", "GBP"],
+          "description": "Currency must be one of authorized settlement currencies"
+        }
+      ],
+      "batch_rules": [
+        {
+          "rule_id": "not-partial",
+          "check": "MIN_ROW_COUNT",
+          "value": 3,
+          "description": "Feed batch must contain at least 3 surviving records"
+        }
+      ]
+    },
+    "transformation": {
+      "map": [],
+      "reduce": []
+    },
+    "delivery": {
+      "refreshSchedule": "0 * * * *",
+      "targets": [
+        {
+          "type": "PARQUET",
+          "connectionRef": "curated-storage",
+          "path": "./output/curated/settlements.parquet",
+          "mode": "overwrite"
+        }
+      ],
+      "quarantinePath": "./output/quarantine"
+    }
+  }
+}
