@@ -28,3 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Quarantine manifest shape regression (custom quarantine paths) — verification now succeeds.
 - CLI exit code semantics preserved; cross-tenant certificate access explicitly returns 403.
+- CI: install `setuptools`/`wheel` before the `--no-build-isolation` wheel build, which failed on Python 3.12/3.13 where `setuptools` is not preinstalled.
+- CI: add `pyyaml` to the `dev` extra so the deployment-manifest YAML validation step can run.
+- Removed the unused `cryptography` runtime dependency (never imported; HMAC signing uses the standard library), clearing the dependency audit.
