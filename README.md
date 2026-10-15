@@ -1,8 +1,8 @@
 # Data Shell — Enterprise Perimeter Gateway
 
-[![Tests](https://img.shields.io/badge/tests-156%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)]()
 [![Security](https://img.shields.io/badge/security-hardened%20RBAC%20%2B%20sandboxed-blueviolet.svg)]()
-[![Cryptography](https://img.shields.io/badge/crypto-HMAC--SHA256%20%2B%20Merkle%20Roots-blue.svg)]()
+[![Cryptography](https://img.shields.io/badge/crypto-Ed25519%20%2B%20HMAC--SHA256-blue.svg)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-Prometheus%20metrics-orange.svg)]()
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Pulkit-Handa/data_shell)
@@ -114,13 +114,37 @@ Four sequential stages, each of which can stop a run before anything is publishe
 * **Tier 4 — atomic publish:** the active target, an immutable lineage artifact, and the signed certificate are committed through a write-ahead journal and recovered at startup. Quarantine artifacts survive rejection so evidence is never lost.
 
 ### 2. Cryptographically verifiable certificates
-Every run emits a certificate bound to the exact contract, source bytes, delivered bytes, and each quarantine artifact (by hash *and* path). Verification recomputes every hash and the Merkle root and confirms the HMAC-SHA256 envelope against trusted key IDs. Verify from the CLI or the API:
+Every run emits a certificate bound to the exact contract, source payload bytes, delivered
+bytes, and each quarantine artifact (by hash *and* path). The source digest is real in every
+mode: file-backed runs hash the source on disk, and in-memory runs hash the canonical record
+set. Verification recomputes every hash and the Merkle root and confirms the signature
+envelope against trusted key IDs. Certificates are signed with **Ed25519** when
+`DATASHELL_ED25519_PRIVATE_KEY` is provisioned — so a third party holding only the published
+public key can verify them without a shared secret — and fall back to HMAC-SHA256 otherwise.
+Certificates state which mode was used (`third_party_verifiable`, `requires_shared_secret`).
+Verify from the CLI or the API:
 
 ```bash
 datashell verify output/audit/<run_id>_audit_certificate.json
 # or
 curl -H "X-API-Key: $KEY" https://gateway/api/v1/runs/<run_id>/certificate
 ```
+
+### 2b. Feed controls and drift metrics
+Contracts express the checks real external feeds need, evaluated over the **delivered** rows
+only (held/quarantine rows never satisfy a control or mask a duplicate):
+
+* **Unique and composite keys:** `UNIQUE` (one column) and `COMPOSITE_UNIQUE` (`columns`).
+* **Batch control totals:** `SUM_EQUALS` (with optional `tolerance`) and `SUM_BETWEEN`.
+* **Parser options:** CSV delimiter, quote character, header presence, encoding, and null
+  tokens (`sources[].parser`).
+* **Schema compatibility:** `STRICT` refuses rows that omit a declared column; `EVOLVING`
+  (default) back-fills nullable columns.
+
+Every execution mode extracts per-feed metrics — null rate per column plus sum/mean for
+numerics — persists them in the boundary ledger, and compares them run-over-run so a feed
+that silently shifts is caught. Metric drift is gated by configurable thresholds and a
+minimum baseline history, so normal variation during initial learning never blocks a feed.
 
 ### 3. Durable boundary ledger
 The ledger is a tenant-isolated, append-only forensic record of **every** terminal run —
@@ -175,7 +199,7 @@ provider (`integrations/airflow`) with `DataShellEnforceOperator` (gateway API) 
 
 ## Local Quickstart
 
-### 1. Run the test suite (156 tests)
+### 1. Run the test suite (182 tests)
 ```bash
 pip install -e ".[dev]"
 pytest -q
@@ -229,7 +253,10 @@ limiter is process-local; **run one replica and one worker**, and move both to s
 infrastructure before scaling horizontally.
 
 Production startup requires explicit `DATASHELL_API_KEY`, `DATASHELL_HMAC_SECRET`, and an
-exact HTTPS `ALLOWED_ORIGINS` allowlist. Configure `FORWARDED_ALLOW_IPS` with explicit
+exact HTTPS `ALLOWED_ORIGINS` allowlist. To sign audit certificates asymmetrically (so
+third parties can verify with a public key only), set `DATASHELL_ED25519_PRIVATE_KEY` and
+publish the derived public key; retain previous key IDs in `DATASHELL_ED25519_KEYRING`
+during rotation. Configure `FORWARDED_ALLOW_IPS` with explicit
 trusted proxy IPs/CIDRs (never `*`), plus `MAX_UPLOAD_SIZE_BYTES`,
 `MAX_REQUEST_BODY_BYTES`, `MAX_CONTROL_BODY_BYTES`, `MAX_CONCURRENT_REQUESTS`,
 `MAX_CONCURRENT_RUNS`, `DUCKDB_MEMORY_LIMIT`, and `MIN_FREE_DISK_BYTES` for your

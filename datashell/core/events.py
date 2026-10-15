@@ -23,6 +23,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 from datashell.core.config import settings
 from datashell.core.telemetry import telemetry_logger
@@ -37,6 +38,15 @@ def _sign(body: bytes, timestamp: str) -> str:
 
 
 def _post(url: str, payload: Dict[str, Any], timeout: float) -> bool:
+    # Defense in depth: only ever open http(s) endpoints. Configuration already
+    # validates the scheme, but enforcing it here means a bad value can never
+    # cause urlopen to touch a file:/ or other local scheme.
+    parsed = urlsplit(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        telemetry_logger.warning(
+            "Run event webhook URL rejected", scheme=parsed.scheme
+        )
+        return False
     body = json.dumps(payload).encode("utf-8")
     timestamp = str(int(time.time()))
     signature = _sign(body, timestamp)
@@ -54,7 +64,8 @@ def _post(url: str, payload: Dict[str, Any], timeout: float) -> bool:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout):
+            # Scheme is validated to http(s) at the top of _post.
+            with urllib.request.urlopen(request, timeout=timeout):  # nosec B310
                 return True
         except Exception as exc:  # noqa: BLE001 - delivery is best-effort
             if attempt >= _post.attempts:

@@ -19,6 +19,7 @@ from datashell.core.events import emit_run_event
 from datashell.contract.models import DataContract, QualityBehavior
 from datashell.engines.ingestion import StructuralIngestionEngine, IngestionResult
 from datashell.engines.quality import SemanticQualityEngine, QualityResult
+from datashell.engines.metrics import compute_metrics, compute_metrics_from_parquet
 from datashell.engines.drift import HistoricalDriftEngine, ContractHistoryTracker, DriftCheckResult
 from datashell.engines.reconciler import Reconciler, ReconciliationLedger
 from datashell.engines.delivery import DeliveryEngine, DeliveryOutcome, TerminalStatus, safe_json_dumps
@@ -93,6 +94,7 @@ class DataShellPipeline:
         source_path: Optional[Union[str, Path]],
         duration_seconds: float,
         execution_mode: str,
+        metrics: Optional[Dict[str, float]] = None,
     ) -> None:
         """Persist the forensic ledger row, quarantine index, usage meter, and event.
 
@@ -120,7 +122,7 @@ class DataShellPipeline:
                 contract_name=contract_name,
                 rows_read=ledger.rows_read,
                 rows_delivered=outcome.rows_delivered,
-                metrics={},
+                metrics=metrics or {},
                 tenant_id=self.tenant_id,
                 contract_version=self.contract.metadata.version,
                 status=outcome.status.value,
@@ -269,12 +271,16 @@ class DataShellPipeline:
             )
 
             # Step 4: Cross-Period Historical Drift Evaluation
+            feed_metrics = compute_metrics(quality_res.admitted_df)
             drift_checks = self.drift_engine.evaluate_drift(
                 contract_name=contract_name,
                 current_rows=quality_res.admitted_count,
-                current_metrics={},
+                current_metrics=feed_metrics,
                 tenant_id=self.tenant_id,
-                baseline_window=settings.drift_baseline_window
+                max_volume_drop_pct=settings.drift_max_volume_drop_pct,
+                max_metric_drift_pct=settings.drift_max_metric_drift_pct,
+                baseline_window=settings.drift_baseline_window,
+                min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
             )
             all_drift_passed = all(d.passed for d in drift_checks)
 
@@ -351,6 +357,7 @@ class DataShellPipeline:
                 source_path=source_path,
                 duration_seconds=duration,
                 execution_mode="in_memory",
+                metrics=feed_metrics,
             )
 
             # Step 7: Telemetry & Prometheus Metric Recording
@@ -436,12 +443,16 @@ class DataShellPipeline:
             )
 
             # Historical drift evaluation (Multi-Tenant Isolated)
+            feed_metrics = compute_metrics(quality_res.admitted_df)
             drift_checks = self.drift_engine.evaluate_drift(
                 contract_name=contract_name,
                 current_rows=quality_res.admitted_count,
-                current_metrics={},
+                current_metrics=feed_metrics,
                 tenant_id=self.tenant_id,
-                baseline_window=settings.drift_baseline_window
+                max_volume_drop_pct=settings.drift_max_volume_drop_pct,
+                max_metric_drift_pct=settings.drift_max_metric_drift_pct,
+                baseline_window=settings.drift_baseline_window,
+                min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
             )
             all_drift_passed = all(d.passed for d in drift_checks)
 
@@ -474,6 +485,7 @@ class DataShellPipeline:
                 contract_version=self.contract.metadata.version,
                 contract_canonical_hash=self.contract.canonical_sha256(),
                 source_file_path=None,
+                source_payload_sha256=CryptoEngine.sha256_json(records),
                 delivered_file_path=delivered_file_path,
                 quarantine_files=[Path(p) for p in outcome.quarantine_files],
                 tenant_id=self.tenant_id,
@@ -514,6 +526,7 @@ class DataShellPipeline:
                 source_path=None,
                 duration_seconds=duration,
                 execution_mode="in_memory_records",
+                metrics=feed_metrics,
             )
 
             return PipelineResult(
@@ -708,12 +721,16 @@ class DataShellPipeline:
                 accumulated_should_reject = True
 
             # Cross-Period Historical Drift Evaluation (Multi-Tenant Isolated)
+            feed_metrics = compute_metrics_from_parquet(staged_target)
             drift_checks = self.drift_engine.evaluate_drift(
                 contract_name=contract_name,
                 current_rows=total_admitted,
-                current_metrics={},
+                current_metrics=feed_metrics,
                 tenant_id=self.tenant_id,
-                baseline_window=settings.drift_baseline_window
+                max_volume_drop_pct=settings.drift_max_volume_drop_pct,
+                max_metric_drift_pct=settings.drift_max_metric_drift_pct,
+                baseline_window=settings.drift_baseline_window,
+                min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
             )
             all_drift_passed = all(d.passed for d in drift_checks)
             if not all_drift_passed and self.contract.spec.quality.behavior != QualityBehavior.WARN:
@@ -817,6 +834,7 @@ class DataShellPipeline:
                 source_path=source_path,
                 duration_seconds=duration,
                 execution_mode="out_of_core_streaming",
+                metrics=feed_metrics,
             )
 
             # Telemetry & Prometheus Metric Recording

@@ -47,12 +47,18 @@ class HistoricalDriftEngine:
         tenant_id: str = "default-tenant",
         max_volume_drop_pct: float = 30.0,
         max_metric_drift_pct: float = 50.0,
-        baseline_window: int = 1
+        baseline_window: int = 1,
+        min_metric_baseline_samples: int = 1
     ) -> List[DriftCheckResult]:
         """Compares current run metrics against a rolling baseline for the tenant.
 
         ``baseline_window=1`` compares against the previous delivered run (the
         original behaviour); larger windows average the last N runs.
+
+        ``min_metric_baseline_samples`` keeps metric-drift dormant until enough
+        delivered history exists. While a feed is still learning, the first run
+        establishes the baseline and early runs do not raise metric alarms on
+        ordinary variation; volume drift keeps its original semantics.
         """
         baseline = self.tracker.get_baseline(
             contract_name=contract_name, tenant_id=tenant_id, window=baseline_window
@@ -89,23 +95,25 @@ class HistoricalDriftEngine:
                 details=f"Volume changed by {vol_change:.1f}% compared to previous run ({int(baseline_rows):,} rows)."
             ))
 
-        # 2. Metric Drift Checks (Means, sums, rates)
+        # 2. Metric Drift Checks (Means, sums, rates) — only once enough
+        #    delivered history exists to make the comparison meaningful.
         baseline_metrics = baseline.get("metrics", {})
-        for metric_name, curr_val in current_metrics.items():
-            if metric_name in baseline_metrics:
-                base_val = float(baseline_metrics[metric_name])
-                if abs(base_val) > 1e-6:
-                    pct_diff = abs((curr_val - base_val) / base_val) * 100.0
-                    passed = pct_diff <= max_metric_drift_pct
-                    results.append(DriftCheckResult(
-                        rule_id=f"drift-metric-{metric_name}",
-                        metric=metric_name,
-                        current_value=curr_val,
-                        baseline_value=base_val,
-                        pct_change=round(pct_diff, 2),
-                        threshold_pct=max_metric_drift_pct,
-                        passed=passed,
-                        details=f"Metric '{metric_name}' drifted by {pct_diff:.1f}% (baseline: {base_val:.2f}, current: {curr_val:.2f})."
-                    ))
+        if int(baseline.get("sample_count", 0)) >= max(1, int(min_metric_baseline_samples)):
+            for metric_name, curr_val in current_metrics.items():
+                if metric_name in baseline_metrics:
+                    base_val = float(baseline_metrics[metric_name])
+                    if abs(base_val) > 1e-6:
+                        pct_diff = abs((curr_val - base_val) / base_val) * 100.0
+                        passed = pct_diff <= max_metric_drift_pct
+                        results.append(DriftCheckResult(
+                            rule_id=f"drift-metric-{metric_name}",
+                            metric=metric_name,
+                            current_value=curr_val,
+                            baseline_value=base_val,
+                            pct_change=round(pct_diff, 2),
+                            threshold_pct=max_metric_drift_pct,
+                            passed=passed,
+                            details=f"Metric '{metric_name}' drifted by {pct_diff:.1f}% (baseline: {base_val:.2f}, current: {curr_val:.2f})."
+                        ))
 
         return results

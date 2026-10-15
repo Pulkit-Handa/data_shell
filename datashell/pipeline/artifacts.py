@@ -21,6 +21,7 @@ class ArtifactGenerator:
         contract_version: str,
         contract_canonical_hash: Optional[str] = None,
         source_file_path: Optional[Path] = None,
+        source_payload_sha256: Optional[str] = None,
         delivered_file_path: Optional[Path] = None,
         delivered_sha256_override: Optional[str] = None,
         run_artifact_path: Optional[Path] = None,
@@ -32,7 +33,19 @@ class ArtifactGenerator:
         """Produce tamper-evident cryptographic audit certificate."""
         
         # 1. Compute Cryptographic File Checksums
-        source_hash = CryptoEngine.sha256_file(source_file_path) if (source_file_path and Path(source_file_path).exists()) else "IN_MEMORY_PAYLOAD"
+        # The source digest must bind to the real payload in every execution
+        # mode. In-memory callers supply ``source_payload_sha256`` directly;
+        # file-backed callers are hashed from disk. A placeholder is never
+        # written in place of a content hash.
+        if source_payload_sha256:
+            source_hash = source_payload_sha256
+        elif source_file_path and Path(source_file_path).exists():
+            source_hash = CryptoEngine.sha256_file(source_file_path)
+        else:
+            raise ValueError(
+                "Audit certificate requires a source payload digest: pass "
+                "source_payload_sha256 for in-memory execution or source_file_path for file execution."
+            )
         
         # Delivered hash: must distinguish actual delivered file vs rejected run
         if delivered_sha256_override:
@@ -144,22 +157,41 @@ class ArtifactGenerator:
             ]
         }
 
-        # 4. Digitally sign the certificate with HMAC-SHA256
-        active_key_id = getattr(settings, "active_key_id", "datashell-hmac-v1")
-        sig_envelope = {
-            "algorithm": "HMAC-SHA256",
-            "key_id": active_key_id,
-            "integrity_type": "SYMMETRIC_HMAC_AUTHENTICATION",
-            "tamper_evident": True
-        }
-        certificate["signature_header"] = sig_envelope
+        # 4. Digitally sign the certificate. Prefer asymmetric Ed25519 when a
+        #    private key is provisioned, so any holder of the published public key
+        #    can verify without a shared secret. Otherwise fall back to HMAC with
+        #    honest, explicit trust semantics (symmetric: verifier needs the key).
+        ed25519_private_key = getattr(settings, "ed25519_private_key", None)
+        if ed25519_private_key:
+            sig_envelope = {
+                "algorithm": "Ed25519",
+                "key_id": getattr(settings, "ed25519_active_key_id", "datashell-ed25519-v1"),
+                "integrity_type": "ASYMMETRIC_ED25519_SIGNATURE",
+                "third_party_verifiable": True,
+                "requires_shared_secret": False,
+                "tamper_evident": True,
+            }
+            certificate["signature_header"] = sig_envelope
+            signature = CryptoEngine.sign_manifest_ed25519(certificate, ed25519_private_key)
+        else:
+            sig_envelope = {
+                "algorithm": "HMAC-SHA256",
+                "key_id": getattr(settings, "active_key_id", "datashell-hmac-v1"),
+                "integrity_type": "SYMMETRIC_HMAC_AUTHENTICATION",
+                "third_party_verifiable": False,
+                "requires_shared_secret": True,
+                "tamper_evident": True,
+            }
+            certificate["signature_header"] = sig_envelope
+            signature = CryptoEngine.sign_manifest(certificate)
 
         # Digitally sign the complete payload including signature_header
-        signature = CryptoEngine.sign_manifest(certificate)
         certificate["digital_signature"] = {
             "algorithm": sig_envelope["algorithm"],
             "key_id": sig_envelope["key_id"],
             "integrity_type": sig_envelope["integrity_type"],
+            "third_party_verifiable": sig_envelope["third_party_verifiable"],
+            "requires_shared_secret": sig_envelope["requires_shared_secret"],
             "signature": signature,
             "tamper_evident": True
         }
@@ -191,10 +223,21 @@ class ArtifactGenerator:
         signature = sig_info.get("signature", "")
 
         # The keyring is the source of truth. A key ID on an allowlist without
-        # its actual secret is not a trusted signing key.
-        trusted_keyring = getattr(settings, "trusted_hmac_keys", {})
-        verification_secret = CryptoEngine.resolve_verification_secret(key_id, trusted_keyring)
-        key_trusted = verification_secret is not None
+        # its actual key material is not a trusted signing key.
+        payload = {k: v for k, v in cert_data.items() if k != "digital_signature"}
+        verification_secret: Optional[str] = None
+        verification_public_key: Optional[str] = None
+        if algorithm == "HMAC-SHA256":
+            trusted_keyring = getattr(settings, "trusted_hmac_keys", {})
+            verification_secret = CryptoEngine.resolve_verification_secret(key_id, trusted_keyring)
+            key_trusted = verification_secret is not None
+        elif algorithm == "Ed25519":
+            trusted_public_keyring = getattr(settings, "ed25519_trusted_keys", {})
+            verification_public_key = CryptoEngine.resolve_verification_public_key(key_id, trusted_public_keyring)
+            key_trusted = verification_public_key is not None
+        else:
+            # Unsupported/unknown algorithm fails closed.
+            key_trusted = False
 
         # Check signature header integrity if present
         header_intact = True
@@ -203,16 +246,19 @@ class ArtifactGenerator:
             if not isinstance(sig_hdr, dict) or sig_hdr.get("key_id") != key_id or sig_hdr.get("algorithm") != algorithm:
                 header_intact = False
 
-        if algorithm != "HMAC-SHA256" or not key_trusted or not header_intact:
+        if not key_trusted or not header_intact:
             sig_valid = False
-        else:
-            payload = {k: v for k, v in cert_data.items() if k != "digital_signature"}
+        elif algorithm == "HMAC-SHA256":
             try:
                 sig_valid = isinstance(signature, str) and CryptoEngine.verify_signature(
                     payload, signature, secret_key=verification_secret
                 )
             except (TypeError, ValueError):
                 sig_valid = False
+        else:  # Ed25519
+            sig_valid = isinstance(signature, str) and CryptoEngine.verify_signature_ed25519(
+                payload, signature, verification_public_key
+            )
 
         # Never dereference artifact paths from an untrusted certificate. A
         # modified certificate could otherwise turn verification into an

@@ -17,7 +17,13 @@ import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 import polars as pl
 
-from datashell.contract.models import DataContract, SchemaColumn, ExtraColumnsPolicy
+from datashell.contract.models import (
+    DataContract,
+    SchemaColumn,
+    ExtraColumnsPolicy,
+    SchemaCompatibilityPolicy,
+    SourceParserOptions,
+)
 from datashell.contract.compiler import parse_polars_type
 
 
@@ -63,6 +69,13 @@ class StructuralIngestionEngine:
         self.declared_schema = source_def.schema_ if source_def else []
         self.extra_policy = source_def.extra_columns_policy if source_def else ExtraColumnsPolicy.STRIP
         self.declared_col_names = {col.name for col in self.declared_schema}
+        self.schema_compatibility = (
+            source_def.schema_compatibility if source_def else SchemaCompatibilityPolicy.EVOLVING
+        )
+        self.parser = source_def.parser if source_def else SourceParserOptions()
+        # Extra tokens (beyond "" which is already treated as null) to coerce to
+        # null during strict Tier-1 ingestion, e.g. ["NA", "UNKNOWN"].
+        self._null_tokens = {t for t in (self.parser.null_values or [])}
 
         self._polars_schema = {
             col.name: parse_polars_type(col.polars_type)
@@ -122,11 +135,18 @@ class StructuralIngestionEngine:
         # rejection diagnostics) behaves identically to the non-streaming CSV
         # reader instead of letting pyarrow infer a type and then hard-fail on a
         # single malformed value partway through the file.
-        with open(path, "r", encoding="utf-8", newline="") as handle:
-            header = next(csv.reader(handle), [])
-        if not header:
-            raise ValueError(f"CSV source '{path}' has no header row")
-        string_types = {name: pa.string() for name in header}
+        p = self.parser
+        if p.has_header:
+            with open(path, "r", encoding=p.encoding, newline="") as handle:
+                header = next(csv.reader(handle, delimiter=p.delimiter, quotechar=p.quote_char), [])
+            if not header:
+                raise ValueError(f"CSV source '{path}' has no header row")
+            column_names = header
+        else:
+            column_names = [col.name for col in self.declared_schema]
+            if not column_names:
+                raise ValueError("Headerless CSV requires a declared schema to name columns")
+        string_types = {name: pa.string() for name in column_names}
 
         # PyArrow streams CSV in byte blocks, and its per-block resident memory
         # grows well faster than the block itself (string builders over-allocate),
@@ -134,9 +154,16 @@ class StructuralIngestionEngine:
         # the unit the pipeline validates, so bounding the block bounds memory
         # regardless of file size.
         block_size = min(max(batch_size * 32, 1 << 20), 4 << 20)
+        read_kwargs: Dict[str, Any] = {"block_size": block_size, "encoding": p.encoding}
+        if not p.has_header:
+            read_kwargs["column_names"] = column_names
+        # NOTE: configured null tokens are applied during strict Tier-1 casting in
+        # ``ingest_records``, not by pyarrow here, because ConvertOptions.null_values
+        # does not affect columns pinned to the ``string`` type.
         reader = pa_csv.open_csv(
             str(path),
-            read_options=pa_csv.ReadOptions(block_size=block_size),
+            read_options=pa_csv.ReadOptions(**read_kwargs),
+            parse_options=pa_csv.ParseOptions(delimiter=p.delimiter, quote_char=p.quote_char),
             convert_options=pa_csv.ConvertOptions(column_types=string_types),
         )
         try:
@@ -150,7 +177,7 @@ class StructuralIngestionEngine:
 
     def _iter_jsonl_batches(self, path: Path, batch_size: int):
         records: List[Dict[str, Any]] = []
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, "r", encoding=self.parser.encoding) as handle:
             for line in handle:
                 stripped = line.strip()
                 if not stripped:
@@ -245,12 +272,31 @@ class StructuralIngestionEngine:
                     ))
                     continue
 
+            # STRICT schema compatibility: a row that omits a declared column is a
+            # structural failure regardless of nullability, so schema drift is
+            # refused at the door instead of being silently back-filled with null.
+            if self.schema_compatibility == SchemaCompatibilityPolicy.STRICT:
+                missing_cols = sorted(self.declared_col_names - set(row.keys()))
+                if missing_cols:
+                    rejections.append(StructuralRejection(
+                        row_index=idx,
+                        raw_record=row,
+                        failed_column=missing_cols[0],
+                        expected_type="DECLARED_COLUMN_PRESENT",
+                        error_message=(
+                            f"Missing declared column(s) {missing_cols} under STRICT "
+                            f"schema_compatibility"
+                        )
+                    ))
+                    continue
+
             for col in self.declared_schema:
                 col_name = col.name
                 val = row.get(col_name)
 
-                # Nullability check
-                if val is None or val == "":
+                # Nullability check (empty string and configured parser null tokens
+                # both count as null).
+                if val is None or val == "" or (isinstance(val, str) and val in self._null_tokens):
                     if not col.nullable:
                         rejections.append(StructuralRejection(
                             row_index=idx,
@@ -441,7 +487,7 @@ class StructuralIngestionEngine:
 
     def _ingest_jsonl(self, path: Path) -> IngestionResult:
         records: List[Dict[str, Any]] = []
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding=self.parser.encoding) as f:
             for line in f:
                 stripped = line.strip()
                 if stripped:
@@ -449,9 +495,16 @@ class StructuralIngestionEngine:
         return self.ingest_records(records)
 
     def _ingest_csv(self, path: Path) -> IngestionResult:
+        p = self.parser
         records: List[Dict[str, Any]] = []
-        with open(path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
+        with open(path, "r", encoding=p.encoding, newline="") as f:
+            if p.has_header:
+                reader = csv.DictReader(f, delimiter=p.delimiter, quotechar=p.quote_char)
+            else:
+                fieldnames = [col.name for col in self.declared_schema]
+                if not fieldnames:
+                    raise ValueError("Headerless CSV requires a declared schema to name columns")
+                reader = csv.DictReader(f, fieldnames=fieldnames, delimiter=p.delimiter, quotechar=p.quote_char)
             for row in reader:
                 records.append(dict(row))
         return self.ingest_records(records)

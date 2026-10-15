@@ -42,6 +42,17 @@ class CryptoEngine:
         return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
 
     @staticmethod
+    def sha256_json(data: Any) -> str:
+        """Deterministic SHA-256 over a JSON-like object with non-JSON scalars stringified.
+
+        Used to bind in-memory execution modes to a real digest of the source
+        payload (dates/decimals/datetimes are coerced via ``str``), so the
+        certificate never carries a placeholder in place of a content hash.
+        """
+        canonical_str = json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
+
+    @staticmethod
     def compute_merkle_root(hashes: List[str]) -> str:
         """Computes a balanced Merkle Root over an ordered list of SHA-256 digests."""
         if not hashes:
@@ -82,3 +93,52 @@ class CryptoEngine:
             return None
         secret = keyring.get(key_id)
         return secret if isinstance(secret, str) and secret else None
+
+    # --------------------------------------------------------------- Ed25519
+    # Asymmetric signatures let any holder of the published public key verify a
+    # certificate without being able to forge one. HMAC (symmetric) remains in
+    # use for internal webhook signing.
+
+    @staticmethod
+    def generate_ed25519_keypair() -> tuple:
+        """Generate ``(private_pem, public_pem)`` for Ed25519 certificate signing."""
+        from datashell.core.keys import generate_keypair_pem
+        return generate_keypair_pem()
+
+    @staticmethod
+    def derive_ed25519_public_key(private_key_material: str) -> str:
+        """Return the PEM public key corresponding to an Ed25519 private key."""
+        from datashell.core.keys import derive_public_key_material
+        return derive_public_key_material(private_key_material)
+
+    @staticmethod
+    def sign_manifest_ed25519(manifest_payload: Dict[str, Any], private_key_material: str) -> str:
+        """Ed25519-sign a canonical JSON manifest, returning base64 signature bytes."""
+        import base64
+        from datashell.core.keys import load_ed25519_private_key
+        private_key = load_ed25519_private_key(private_key_material)
+        canonical = json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return base64.b64encode(private_key.sign(canonical)).decode("ascii")
+
+    @staticmethod
+    def verify_signature_ed25519(manifest_payload: Dict[str, Any], signature: str, public_key_material: str) -> bool:
+        """Verify an Ed25519 signature over a canonical JSON manifest."""
+        import base64
+        from datashell.core.keys import load_ed25519_public_key
+        if not isinstance(signature, str) or not signature:
+            return False
+        try:
+            public_key = load_ed25519_public_key(public_key_material)
+            canonical = json.dumps(manifest_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            public_key.verify(base64.b64decode(signature), canonical)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def resolve_verification_public_key(key_id: str, keyring: Optional[Dict[str, str]]) -> Optional[str]:
+        """Resolve a trusted Ed25519 public key only for the exact provisioned ID."""
+        if not isinstance(key_id, str) or not key_id or not isinstance(keyring, dict):
+            return None
+        public_key = keyring.get(key_id)
+        return public_key if isinstance(public_key, str) and public_key else None

@@ -58,6 +58,36 @@ review.
   and a single replica.
 - CI compiles and tests the package on Python 3.11–3.13, builds a wheel, audits
   dependencies, and builds the container image.
+- **Feed controls.** Contracts can express single-column and composite unique keys
+  (`UNIQUE`, `COMPOSITE_UNIQUE`), batch control totals (`SUM_EQUALS`, `SUM_BETWEEN`),
+  configurable parser options (delimiter, quote character, header presence, encoding,
+  null tokens), and an explicit schema-compatibility policy (`STRICT` refuses rows that
+  omit a declared column; `EVOLVING` back-fills nullable columns). Uniqueness and control
+  totals are evaluated over the **delivered** rows only, never the held/quarantine set.
+- **Real drift metrics.** Every execution mode (in-memory, in-memory records, and
+  out-of-core streaming) extracts per-feed metrics — null rate per column plus sum/mean
+  for numerics — persists them in the boundary ledger, and compares them run-over-run
+  under configurable thresholds (`DRIFT_MAX_VOLUME_DROP_PCT`,
+  `DRIFT_MAX_METRIC_DRIFT_PCT`, `DRIFT_METRIC_MIN_BASELINE_SAMPLES`). Metric drift stays
+  dormant until the configured minimum baseline history exists, so normal variation
+  during initial learning never blocks a feed.
+- **Source-payload binding in every mode.** Every audit certificate binds the SHA-256 of
+  the actual source payload. File-backed runs hash the source on disk; in-memory runs
+  hash the canonical record set. The prior `IN_MEMORY_PAYLOAD` placeholder is gone —
+  certificate generation now raises rather than emitting an unbound certificate.
+- **Asymmetric certificate signatures (Ed25519).** When `DATASHELL_ED25519_PRIVATE_KEY`
+  is provisioned, audit certificates are signed with Ed25519 so a third party holding
+  only the published public key can verify authenticity without sharing a secret.
+  Verification fails closed for unprovisioned key IDs, supports key rotation via
+  `DATASHELL_ED25519_KEYRING`, and the certificate's `integrity_type`,
+  `third_party_verifiable`, and `requires_shared_secret` claims state honestly whether
+  asymmetric or symmetric (HMAC fallback) signing was used. HMAC remains for internal
+  webhook signing.
+- **Dependency lockfiles and static scan.** `requirements.lock` and
+  `requirements-dev.lock` pin the full resolved dependency set with hashes
+  (`pip-compile --generate-hashes`). CI audits dependencies with `pip-audit` and runs
+  Bandit (medium severity and above) against `datashell/`, with reviewed, documented
+  waivers in `.bandit`.
 
 ## Required before a real production launch
 
@@ -65,8 +95,10 @@ review.
       the Airflow provider tests (`integrations/airflow/tests`), and the container smoke
       test under a read-only root filesystem (`/ready`, `/docs` disabled, `/metrics`
       authenticated).
-- [ ] Generate and commit a dependency lockfile with resolved versions and hashes; do not
-      treat the ranges in `pyproject.toml` as a lockfile.
+- [x] Generate and commit a dependency lockfile with resolved versions and hashes; do not
+      treat the ranges in `pyproject.toml` as a lockfile. (`requirements.lock`,
+      `requirements-dev.lock`; regenerate with
+      `pip-compile --generate-hashes --extra dev --output-file requirements-dev.lock pyproject.toml`.)
 - [ ] Review `docs/THREAT_MODEL.md` and complete an independent security review covering
       authentication, authorization, tenant boundaries, upload denial-of-service controls,
       the boundary ledger, and certificate/artifact verification.
@@ -91,8 +123,10 @@ review.
 ## Current validation evidence
 
 In the authoring environment (Python 3.14; Polars, PyArrow, and DuckDB installed), the main
-suite passes **156 tests**, the Airflow provider's dependency-free client tests pass (and
-operator tests skip when Airflow is absent), and `python -m compileall` succeeds. The
+suite passes **182 tests**, the Airflow provider's dependency-free client tests pass (and
+operator tests skip when Airflow is absent), and `python -m compileall` succeeds. `pip-audit`
+reports no known vulnerabilities against the committed lockfile, and Bandit reports no
+medium-or-higher findings. The
 out-of-core streaming path has been exercised on a 20-million-row CSV at a peak RSS of
 roughly 369 MB. The quickstart demo verifies cleanly, detects a one-byte tamper, and
 verifies again after restoration. The clean-room CI run, container build/runtime, and
