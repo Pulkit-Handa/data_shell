@@ -5,7 +5,7 @@
 [![Cryptography](https://img.shields.io/badge/crypto-HMAC--SHA256%20%2B%20Merkle%20Roots-blue.svg)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-Prometheus%20metrics-orange.svg)]()
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Pulkit-Handa/data_shell)
 
 > **"Bad data never lands, and never leaves."**
 
