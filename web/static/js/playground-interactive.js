@@ -46,55 +46,55 @@ function esc(v) {
 /* ------------------------------------------------------------- row builders */
 
 function schemaRow(data = {}) {
-  const typeSel = el('select', { name: 'col_type' },
+  const typeSel = el('select', { name: 'col_type', class: 'select' },
     ...['Utf8', 'Int64', 'Float64', 'Boolean', 'Date', 'Datetime'].map((t) => el('option', { value: t }, t)));
   if (data.type) typeSel.value = data.type;
-  const nameIn = el('input', { name: 'col_name', placeholder: 'column name (e.g. amount)' });
+  const nameIn = el('input', { name: 'col_name', class: 'input', placeholder: 'column name (e.g. amount)' });
   if (data.name) nameIn.value = data.name;
   const nullable = el('input', { type: 'checkbox', name: 'nullable' });
   nullable.checked = data.nullable !== false;
-  const row = el('div', { class: 'schema-row' },
+  const row = el('div', { class: 'row-schema' },
     nameIn, typeSel,
     el('label', { class: 'check-inline' }, nullable, ' nullable'),
-    el('button', { type: 'button', class: 'btn ghost small' }, 'Remove'));
+    el('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, 'Remove'));
   row.querySelector('button').onclick = () => row.remove();
   schemaRows.appendChild(row);
   return row;
 }
 
 function ruleRow(data = {}) {
-  const checkSel = el('select', { name: 'check' },
+  const checkSel = el('select', { name: 'check', class: 'select' },
     ...['NOT_NULL', 'GREATER_THAN', 'LESS_THAN', 'EQUAL', 'NOT_EQUAL', 'ALLOWED_VALUES', 'CONTAINS'].map((c) => el('option', { value: c }, c)));
   if (data.check) checkSel.value = data.check;
-  const idIn = el('input', { name: 'rule_id', placeholder: 'rule_id (e.g. amount-positive)' });
+  const idIn = el('input', { name: 'rule_id', class: 'input', placeholder: 'rule_id' });
   if (data.id) idIn.value = data.id;
-  const colIn = el('input', { name: 'column', placeholder: 'column' });
+  const colIn = el('input', { name: 'column', class: 'input', placeholder: 'column' });
   if (data.column) colIn.value = data.column;
-  const valIn = el('input', { name: 'value', placeholder: 'value (or ["USD","EUR"] for a list)' });
+  const valIn = el('input', { name: 'value', class: 'input', placeholder: 'value or ["USD","EUR"]' });
   if (data.value !== undefined) valIn.value = data.value;
-  const descIn = el('input', { name: 'description', placeholder: 'description' });
+  const descIn = el('input', { name: 'description', class: 'input', placeholder: 'description' });
   if (data.description) descIn.value = data.description;
-  const row = el('div', { class: 'rule-row' },
+  const row = el('div', { class: 'row-rule' },
     idIn, checkSel, colIn, valIn, descIn,
-    el('button', { type: 'button', class: 'btn ghost small' }, 'Remove'));
+    el('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, 'Remove'));
   row.querySelector('button').onclick = () => row.remove();
   ruleRows.appendChild(row);
   return row;
 }
 
 function batchRow(data = {}) {
-  const checkSel = el('select', { name: 'check' },
+  const checkSel = el('select', { name: 'check', class: 'select' },
     ...['MIN_ROW_COUNT', 'MAX_ROW_COUNT', 'SUM_GREATER_THAN', 'AVG_GREATER_THAN'].map((c) => el('option', { value: c }, c)));
   if (data.check) checkSel.value = data.check;
-  const idIn = el('input', { name: 'rule_id', placeholder: 'rule_id' });
+  const idIn = el('input', { name: 'rule_id', class: 'input', placeholder: 'rule_id' });
   if (data.id) idIn.value = data.id;
-  const valIn = el('input', { name: 'value', placeholder: 'value (number/json)' });
+  const valIn = el('input', { name: 'value', class: 'input', placeholder: 'value' });
   if (data.value !== undefined) valIn.value = data.value;
-  const descIn = el('input', { name: 'description', placeholder: 'description' });
+  const descIn = el('input', { name: 'description', class: 'input', placeholder: 'description' });
   if (data.description) descIn.value = data.description;
-  const row = el('div', { class: 'batch-row' },
+  const row = el('div', { class: 'row-batch' },
     idIn, checkSel, valIn, descIn,
-    el('button', { type: 'button', class: 'btn ghost small' }, 'Remove'));
+    el('button', { type: 'button', class: 'btn btn--ghost btn--sm' }, 'Remove'));
   row.querySelector('button').onclick = () => row.remove();
   batchRows.appendChild(row);
   return row;
@@ -126,7 +126,7 @@ if (loadSample) {
   loadSample.addEventListener('click', () => {
     const jsonl = sampleRecords().map((r) => JSON.stringify(r)).join('\n') + '\n';
     sampleFile = new File([jsonl], 'vendor_settlements_sample.jsonl', { type: 'application/x-ndjson' });
-    if (fileHint) fileHint.innerHTML = 'Using the generated <strong>vendor_settlements_sample.jsonl</strong> (1,000 rows, 100 seeded defects).';
+    if (fileHint) fileHint.innerHTML = 'Loaded <strong>vendor_settlements_sample.jsonl</strong> — 1,000 rows, 100 seeded defects.';
 
     schemaRows.innerHTML = '';
     ruleRows.innerHTML = '';
@@ -134,10 +134,10 @@ if (loadSample) {
     schemaRow({ name: 'settlement_id', type: 'Utf8', nullable: false });
     schemaRow({ name: 'amount', type: 'Float64', nullable: false });
     schemaRow({ name: 'currency', type: 'Utf8', nullable: false });
-    ruleRow({ id: 'amount-positive', check: 'GREATER_THAN', column: 'amount', value: '0', description: 'Amount must be strictly greater than 0' });
+    ruleRow({ id: 'amount-positive', check: 'GREATER_THAN', column: 'amount', value: '0', description: 'Settlement amount must be strictly greater than 0' });
     ruleRow({ id: 'currency-settled', check: 'ALLOWED_VALUES', column: 'currency', value: '["USD","EUR","GBP"]', description: 'Currency must be an authorized settlement currency' });
-    batchRow({ id: 'not-partial', check: 'MIN_ROW_COUNT', value: '3', description: 'Feed must contain at least 3 surviving records' });
-    pgResult.innerHTML = '<p class="muted small">Sample loaded. Click <strong>Enforce the boundary</strong> to run it.</p>';
+    batchRow({ id: 'not-partial', check: 'MIN_ROW_COUNT', value: '3', description: 'Feed batch must contain at least 3 surviving records' });
+    pgResult.innerHTML = '<p class="console-label" style="margin:0">sample loaded — click “Enforce the boundary” to run it</p>';
     pgRawWrap.hidden = true;
   });
 }
@@ -145,7 +145,7 @@ if (loadSample) {
 /* --------------------------------------------------------------- submission */
 
 function collectSchema() {
-  return Array.from(schemaRows.querySelectorAll('.schema-row'))
+  return Array.from(schemaRows.querySelectorAll('.row-schema'))
     .map((r) => ({
       name: r.querySelector('[name=col_name]').value.trim(),
       polars_type: r.querySelector('[name=col_type]').value,
@@ -155,7 +155,7 @@ function collectSchema() {
 }
 
 function collectRules() {
-  return Array.from(ruleRows.querySelectorAll('.rule-row'))
+  return Array.from(ruleRows.querySelectorAll('.row-rule'))
     .map((r) => ({
       rule_id: r.querySelector('[name=rule_id]').value.trim() || 'rule',
       check: r.querySelector('[name=check]').value,
@@ -167,7 +167,7 @@ function collectRules() {
 }
 
 function collectBatch() {
-  return Array.from(batchRows.querySelectorAll('.batch-row'))
+  return Array.from(batchRows.querySelectorAll('.row-batch'))
     .map((r) => ({
       rule_id: r.querySelector('[name=rule_id]').value.trim() || 'batch',
       check: r.querySelector('[name=check]').value,
@@ -179,99 +179,10 @@ function collectBatch() {
 
 /* --------------------------------------------------------- result rendering */
 
-const STATUS_BADGE = {
-  DELIVERED: 'badge--ok', LOADED: 'badge--ok',
-  REJECTED: 'badge--warn', FAILED: 'badge--bad',
-};
-
-function statusBadge(status) {
-  const s = String(status || 'UNKNOWN').toUpperCase();
-  const cls = STATUS_BADGE[s] || 'badge--neutral';
-  const glyph = cls === 'badge--ok' ? '●' : cls === 'badge--warn' ? '▲' : cls === 'badge--bad' ? '■' : '·';
-  return `<span class="badge ${cls}">${glyph} ${esc(s)}</span>`;
+function consoleNote(title, message) {
+  pgResult.innerHTML = `<div class="run__head"><span class="status status--hold">${esc(title)}</span></div>
+    <p class="run__meta" style="margin-top:14px;color:var(--c-text)">${message}</p>`;
 }
-
-function bars(obj) {
-  const entries = Object.entries(obj || {});
-  if (!entries.length) return '<p class="muted small">None.</p>';
-  const max = Math.max(...entries.map(([, v]) => Number(v) || 0), 1);
-  return `<div class="breakdown">${entries.map(([k, v]) => {
-    const n = Number(v) || 0;
-    const pct = Math.max(4, Math.round((n / max) * 100));
-    return `<div class="bar-row">
-      <span class="bar-label" title="${esc(k)}">${esc(k)}</span>
-      <span class="bar-track"><span class="bar-fill" style="width:${pct}%"></span></span>
-      <span class="bar-count">${n}</span>
-    </div>`;
-  }).join('')}</div>`;
-}
-
-function pathRow(label, value) {
-  if (!value) return '';
-  return `<div class="bar-row" style="grid-template-columns:190px 1fr"><span class="bar-label">${esc(label)}</span>
-    <span class="muted small" style="word-break:break-all;font-family:var(--mono)">${esc(value)}</span></div>`;
-}
-
-function renderResult(data) {
-  if (data && data.detail) {
-    pgResult.innerHTML = `<div class="callout"><h3>The engine refused the request</h3><p>${esc(data.detail)}</p></div>`;
-    pgOut.textContent = JSON.stringify(data, null, 2);
-    pgRawWrap.hidden = false;
-    return;
-  }
-  if (!data || typeof data !== 'object' || data.rows_read === undefined) {
-    pgResult.innerHTML = '<div class="callout"><h3>Unexpected output</h3><p>See the raw engine output below.</p></div>';
-    pgOut.textContent = JSON.stringify(data, null, 2);
-    pgRawWrap.hidden = false;
-    return;
-  }
-
-  const footingOk = data.footing_matched === true;
-  const mode = data.execution_mode === 'out_of_core_streaming' ? 'out-of-core streaming' : 'in-memory vectorized';
-  const dur = data.duration_seconds != null ? `${Number(data.duration_seconds).toFixed(2)}s` : '—';
-
-  pgResult.innerHTML = `
-    <div class="result-row">
-      ${statusBadge(data.status)}
-      <span class="badge badge--neutral">${esc(mode)}</span>
-      <span class="badge badge--neutral">${esc(dur)}</span>
-      ${footingOk ? '<span class="badge badge--ok">✓ footing matched</span>' : '<span class="badge badge--bad">✗ footing mismatch</span>'}
-    </div>
-
-    <div class="result-grid">
-      <div class="tile"><div class="tile-value">${Number(data.rows_read || 0).toLocaleString()}</div><div class="tile-label">rows read</div></div>
-      <div class="tile refused"><div class="tile-value">${Number(data.refused_structural || 0).toLocaleString()}</div><div class="tile-label">refused (structural)</div></div>
-      <div class="tile held"><div class="tile-value">${Number(data.held_quality || 0).toLocaleString()}</div><div class="tile-label">held (rules)</div></div>
-      <div class="tile delivered"><div class="tile-value">${Number(data.rows_delivered || 0).toLocaleString()}</div><div class="tile-label">delivered &amp; certified</div></div>
-    </div>
-
-    <div class="footing">
-      <span class="term">read&nbsp;${Number(data.rows_read || 0).toLocaleString()}</span>
-      <span class="op">=</span>
-      <span class="term">refused&nbsp;${Number(data.refused_structural || 0).toLocaleString()}</span>
-      <span class="op">+</span>
-      <span class="term">held&nbsp;${Number(data.held_quality || 0).toLocaleString()}</span>
-      <span class="op">+</span>
-      <span class="term">delivered&nbsp;${Number(data.rows_delivered || 0).toLocaleString()}</span>
-      <span class="eq">→ ${footingOk ? 'balances exactly' : 'does not balance'}</span>
-    </div>
-
-    <p class="subhead">Held by row rules</p>
-    ${bars(data.rule_breakdown)}
-    <p class="subhead" style="margin-top:14px">Refused at ingestion</p>
-    ${bars(data.structural_reasons)}
-
-    <p class="subhead" style="margin-top:20px">Artifacts</p>
-    ${pathRow('target', data.target_path)}
-    ${pathRow('quarantine', data.quarantine_path)}
-    ${pathRow('certificate', data.audit_path)}
-  `;
-
-  pgOut.textContent = JSON.stringify(data, null, 2);
-  pgRawWrap.hidden = false;
-}
-
-/* ------------------------------------------------------------------ submit */
 
 pgForm.onsubmit = async (e) => {
   e.preventDefault();
@@ -283,11 +194,11 @@ pgForm.onsubmit = async (e) => {
   let file = fd.get('source');
   if (!file || !file.size) file = sampleFile;
   if (!file || !file.size) {
-    pgResult.innerHTML = '<div class="callout"><h3>Add a data file</h3><p>Choose a CSV/JSONL file or click <strong>Load the 1,000-row sample</strong>.</p></div>';
+    consoleNote('ADD A DATA FILE', 'Choose a CSV/JSONL file, or click “Load the 1,000-row sample”.');
     return;
   }
   if (!schema.length) {
-    pgResult.innerHTML = '<div class="callout"><h3>Declare at least one schema column</h3><p>Tier-1 casting is the first gate.</p></div>';
+    consoleNote('DECLARE A SCHEMA', 'Tier-1 strict casting is the first gate. Add at least one column.');
     return;
   }
 
@@ -320,16 +231,18 @@ pgForm.onsubmit = async (e) => {
   const btn = pgForm.querySelector('button[type=submit]');
   btn.disabled = true;
   const original = btn.textContent;
-  btn.innerHTML = '<span class="spinner"></span> Running…';
-  pgResult.innerHTML = '<div class="loading"><span class="spinner"></span> Enforcing the boundary — casting, rules, reconciliation, publish…</div>';
+  btn.textContent = 'Running…';
+  pgResult.innerHTML = '<div class="loading"><span class="spinner"></span> casting → rules → reconciliation → atomic publish…</div>';
   pgRawWrap.hidden = true;
 
   try {
     const res = await fetch('/api/enforce', { method: 'POST', body: cfd });
     const data = await res.json();
-    renderResult(data);
+    window.DataShellUI.render(pgResult, data);
+    pgOut.textContent = JSON.stringify(data, null, 2);
+    pgRawWrap.hidden = false;
   } catch (err) {
-    pgResult.innerHTML = `<div class="callout"><h3>Request failed</h3><p>${esc(err.message)}</p></div>`;
+    consoleNote('REQUEST FAILED', esc(err.message));
   } finally {
     btn.disabled = false;
     btn.textContent = original;
@@ -338,7 +251,7 @@ pgForm.onsubmit = async (e) => {
 
 pgForm.addEventListener('reset', () => {
   sampleFile = null;
-  if (fileHint) fileHint.textContent = 'A small file (well under the 20 GiB ceiling). Uploaded to a temp dir per run.';
+  if (fileHint) fileHint.textContent = 'A small file (well under the 20 GiB ceiling). Copied to a temp dir per run.';
   pgRawWrap.hidden = true;
   setTimeout(() => {
     schemaRows.innerHTML = '';
