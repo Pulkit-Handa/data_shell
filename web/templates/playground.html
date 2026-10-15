@@ -3,88 +3,91 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Data Shell Playground — build a contract, enforce it</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%236366f1' d='M12 2 4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6z'/%3E%3C/svg%3E" />
-  <meta name="description" content="Upload a small file, declare a schema and rules, and watch the Data Shell engine enforce them at the boundary." />
+  <title>Playground — build a contract, enforce it · Data Shell</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230a0a0b'/%3E%3Cpath d='M7 12h10M12 7v10' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <meta name="description" content="Declare a schema and rules, upload a small file, and run Data Shell boundary enforcement in the browser." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body>
-  <header class="nav">
-    <div class="container nav-inner">
-      <a class="brand" href="/">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2 4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6z"/><path d="M8.5 12.5l2.2 2.2 4.8-4.8"/>
-          </svg>
-        </span>
-        <span class="brand-name">Data&nbsp;Shell</span>
+
+  <header class="site-nav">
+    <div class="shell site-nav__inner">
+      <a class="wordmark" href="/">
+        <svg class="wordmark__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="1" y="1" width="22" height="22" rx="6" fill="#0a0a0b"/>
+          <path d="M7 12h10M12 7v10" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        Data Shell
       </a>
-      <nav class="links">
-        <a href="/">Home</a>
-        <a href="#how">How it works</a>
-        <a class="links-cta" href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">GitHub ↗</a>
+      <nav class="nav-links">
+        <a class="nav-link" href="/">Home</a>
+        <a class="nav-link" href="/#how">How it works</a>
+        <a class="nav-link" href="/#engineers">For engineers</a>
+        <a class="nav-link" href="/#demo">Live demo</a>
       </nav>
+      <div class="nav-actions">
+        <a class="nav-gh" href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">GitHub ↗</a>
+      </div>
     </div>
   </header>
 
   <main>
-    <section class="section">
-      <div class="container">
-        <div class="section-head">
-          <span class="eyebrow">Interactive playground</span>
-          <h1 style="font-size:clamp(1.7rem,3.4vw,2.5rem);margin:16px 0 14px">Build a contract. Watch the boundary enforce it.</h1>
-          <p>
-            Declare a schema and rules, upload a small CSV or JSONL, and run the <strong>real engine</strong>.
-            You will get the same four-stage verdict, footing check, quarantining, and certificate the CLI produces —
-            nothing here is simulated.
-          </p>
-          <p class="muted small mt">
-            No file handy? Click <strong>Load the 1,000-row sample</strong> — it seeds 100 realistic defects
-            (non-numeric amounts, null IDs, negative amounts, an unauthorized currency) and fills in the contract for you.
+    <section class="section section--flush" style="padding-top:64px">
+      <div class="shell">
+        <div class="sec-head" style="max-width:640px">
+          <p class="sec-label">Playground</p>
+          <h1 class="sec-title" style="font-size:clamp(1.8rem,3.4vw,2.5rem)">Build a contract. Watch the boundary enforce it.</h1>
+          <p class="sec-desc">
+            Declare a schema and rules, point it at a small CSV or JSONL, and run the real engine.
+            You get the same four-stage verdict, footing check, quarantining, and certificate the CLI
+            produces — nothing here is simulated.
           </p>
         </div>
 
         <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">Contract builder</div>
-            <button type="button" class="btn ghost small" id="loadSample">Load the 1,000-row sample</button>
+          <div class="panel__head">
+            <span class="panel__title">Contract builder</span>
+            <span style="display:flex;gap:10px;align-items:center">
+              <span class="panel__title" style="font-weight:400;color:var(--muted)">No file handy?</span>
+              <button type="button" class="btn btn--sm" id="loadSample">Load the 1,000-row sample</button>
+            </span>
           </div>
-          <div class="panel-body">
+          <div class="panel__body">
             <form id="pgForm" enctype="multipart/form-data">
-              <div class="form-row">
-                <div class="form-group">
-                  <label>Data file (CSV or JSONL)</label>
-                  <input type="file" name="source" accept=".csv,.jsonl,.json,.ndjson" />
-                  <small class="muted" id="fileHint">A small file (well under the 20 GiB ceiling). Uploaded to a temp dir per run.</small>
+              <div class="form-grid">
+                <div class="field">
+                  <label class="field__label" for="srcFile">Data file — CSV or JSONL</label>
+                  <input class="input" id="srcFile" type="file" name="source" accept=".csv,.jsonl,.json,.ndjson" />
+                  <span class="field__hint" id="fileHint">A small file (well under the 20 GiB ceiling). Copied to a temp dir per run.</span>
                 </div>
-                <div class="form-group">
-                  <label>Tenant</label>
-                  <input type="text" name="tenant" value="demo-tenant" />
-                  <small class="muted">Delivery and quarantine are isolated per tenant.</small>
+                <div class="field">
+                  <label class="field__label" for="tenant">Tenant</label>
+                  <input class="input" id="tenant" type="text" name="tenant" value="demo-tenant" />
+                  <span class="field__hint">Delivery and quarantine are isolated per tenant.</span>
                 </div>
               </div>
 
-              <h3 style="margin-top:6px">Schema <span class="muted small" style="font-weight:400">— strict Tier-1 casting</span></h3>
-              <p class="muted small" style="margin:6px 0 12px">Columns are cast exactly. A value that cannot be realized is refused, never coerced.</p>
+              <p class="group-head">Schema</p>
+              <p class="group-desc">Strict Tier-1 casting. A value that cannot be realized is refused, never coerced.</p>
               <div id="schemaRows"></div>
-              <button type="button" class="btn ghost small" id="addSchema">+ Add column</button>
+              <button type="button" class="btn btn--sm" id="addSchema">+ Add column</button>
 
-              <h3 style="margin-top:22px">Row rules <span class="muted small" style="font-weight:400">— semantic, per record</span></h3>
-              <p class="muted small" style="margin:6px 0 12px">A failing record is held and quarantined. Lists are typed: <code>["USD","EUR"]</code>.</p>
+              <p class="group-head">Row rules</p>
+              <p class="group-desc">Semantic, per record. A failing record is held and quarantined. Lists are typed: <code>["USD","EUR"]</code>.</p>
               <div id="ruleRows"></div>
-              <button type="button" class="btn ghost small" id="addRule">+ Add row rule</button>
+              <button type="button" class="btn btn--sm" id="addRule">+ Add row rule</button>
 
-              <h3 style="margin-top:22px">Batch rules <span class="muted small" style="font-weight:400">— optional, whole feed</span></h3>
-              <p class="muted small" style="margin:6px 0 12px">Assertions about the surviving dataset, evaluated on the whole batch.</p>
+              <p class="group-head">Batch rules</p>
+              <p class="group-desc">Optional. Assertions about the surviving dataset, evaluated once per feed.</p>
               <div id="batchRows"></div>
-              <button type="button" class="btn ghost small" id="addBatch">+ Add batch rule</button>
+              <button type="button" class="btn btn--sm" id="addBatch">+ Add batch rule</button>
 
-              <div class="actions" style="margin-top:24px">
-                <button class="btn primary" type="submit">Enforce the boundary</button>
-                <button class="btn ghost" type="reset">Reset form</button>
+              <div style="display:flex;gap:10px;margin-top:26px">
+                <button class="btn btn--primary" type="submit">Enforce the boundary</button>
+                <button class="btn" type="reset">Reset</button>
               </div>
             </form>
           </div>
@@ -92,23 +95,22 @@
       </div>
     </section>
 
-    <section class="section tight">
-      <div class="container">
-        <div class="panel">
-          <div class="panel-head">
-            <div class="panel-title">
-              <span class="panel-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-              Enforcement result
-            </div>
+    <section class="section" style="padding-top:8px">
+      <div class="shell">
+        <div class="console">
+          <div class="console__bar">
+            <div class="console__lights"><i></i><i></i><i></i></div>
+            <span class="console__title">data-shell — boundary console</span>
+            <span class="spacer"></span>
+            <span class="console__title">run inspector</span>
           </div>
-          <div class="panel-body">
+          <div class="console__body">
             <div id="pgResult">
-              <p class="muted small">Results appear here after you run the boundary. You will see the four-stage verdict,
-              the footing arithmetic, held/refused breakdowns, and the certificate status.</p>
+              <p class="console-label" style="margin:0">results appear here — footing, held/refused breakdown, and certificate status</p>
             </div>
             <details class="raw" id="pgRawWrap" hidden>
-              <summary>View raw engine output</summary>
-              <pre class="terminal" id="pgOut"></pre>
+              <summary>raw engine output</summary>
+              <pre class="term term--raw" id="pgOut"></pre>
             </details>
           </div>
         </div>
@@ -116,24 +118,25 @@
     </section>
   </main>
 
-  <footer class="footer">
-    <div class="container footer-inner">
-      <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 2 4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6z"/><path d="M8.5 12.5l2.2 2.2 4.8-4.8"/>
-          </svg>
-        </span>
-        <span>Data&nbsp;Shell</span>
+  <footer class="site-footer">
+    <div class="shell site-footer__inner">
+      <div class="wordmark">
+        <svg class="wordmark__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="1" y="1" width="22" height="22" rx="6" fill="#0a0a0b"/>
+          <path d="M7 12h10M12 7v10" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        Data Shell
       </div>
-      <nav class="links">
+      <nav class="site-footer__links">
         <a href="/">Home</a>
         <a href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
       </nav>
+      <p class="site-footer__note">each and everywhere</p>
     </div>
   </footer>
 
+  <script src="/static/js/engine-console.js"></script>
   <script src="/static/js/playground-interactive.js"></script>
 </body>
 </html>
