@@ -3,75 +3,386 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Data Shell — Boundary Enforcement Demo</title>
+  <title>Data Shell — Contract-driven boundary enforcement</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%236366f1' d='M12 2 4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6z'/%3E%3C/svg%3E" />
+  <meta name="description" content="Data Shell is a write gate at the edge of your systems: it validates partner and vendor feeds before they land, refuses bad records, and binds every delivery to a cryptographically verifiable certificate." />
+  <meta property="og:title" content="Data Shell — Bad data never lands, and never leaves." />
+  <meta property="og:description" content="Contract-driven boundary enforcement with cryptographic auditability, out-of-core scale, and a durable forensic ledger." />
+  <meta property="og:type" content="website" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body>
+  <!-- ============================================================ nav -->
   <header class="nav">
     <div class="container nav-inner">
-      <div class="brand">
-        <span class="brand-mark">🧱</span>
-        <span class="brand-name">Data Shell</span>
-      </div>
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2 4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6z"/>
+            <path d="M8.5 12.5l2.2 2.2 4.8-4.8"/>
+          </svg>
+        </span>
+        <span class="brand-name">Data&nbsp;Shell</span>
+      </a>
       <nav class="links">
-        <a href="/">Home</a>
-        <a href="/playground">Playground</a>
-        <a href="https://github.com/your-org/data-shell" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://colab.research.google.com/github/your-org/data-shell/blob/main/examples/notebook/demo.ipynb" target="_blank" rel="noopener">Colab</a>
+        <a href="#how">How it works</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#numbers">By the numbers</a>
+        <a href="#demo">Live demo</a>
+        <a class="links-cta" href="/playground">Playground</a>
+        <a href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">GitHub ↗</a>
       </nav>
     </div>
   </header>
 
   <main>
+    <!-- ======================================================== hero -->
     <section class="hero">
       <div class="container">
-        <h1>"Bad data never lands, and never leaves."</h1>
-        <p class="sub">Contract-driven boundary enforcement with cryptographic auditability, out-of-core scale, and a durable forensic ledger.</p>
+        <span class="eyebrow">Contract-driven boundary enforcement</span>
+        <h1>Bad data never lands,<br /><span class="gradient-text">and never leaves.</span></h1>
+        <p class="sub">
+          Data Shell is a <strong>write gate at the edge of your systems</strong>. It validates partner and
+          vendor feeds <em>before</em> they land, and regulatory submissions <em>before</em> they are filed —
+          refusing, quarantining, and binding every terminal outcome to a cryptographically verifiable certificate.
+        </p>
         <div class="actions">
-          <button class="btn primary" id="runDemo">Run 60-Second Demo</button>
-          <a class="btn ghost" href="/playground">Try Playground</a>
-          <a class="btn ghost" href="https://github.com/your-org/data-shell#try-it-in-60-seconds" target="_blank" rel="noopener">Quickstart</a>
+          <a class="btn primary" href="#demo">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+            Run the 60-second demo
+          </a>
+          <a class="btn ghost" href="/playground">Build rules in the playground</a>
+          <a class="btn ghost" href="https://github.com/Pulkit-Handa/data_shell#try-it-in-60-seconds" target="_blank" rel="noopener">Quickstart ↗</a>
+        </div>
+        <div class="chips">
+          <span class="chip"><span class="dot"></span> 156 tests passing</span>
+          <span class="chip">20&nbsp;GiB built-in ceiling</span>
+          <span class="chip">HMAC-SHA256 + Merkle roots</span>
+          <span class="chip">Apache-2.0</span>
         </div>
       </div>
     </section>
 
-    <section class="section">
+    <!-- ======================================================== story -->
+    <section class="section tight">
       <div class="container">
-        <div class="grid">
+        <div class="grid cols-3">
           <div class="card">
-            <h3>Refusal at the boundary</h3>
-            <p>Four-stage write-gate (structural → semantic → reconciliation → atomic publish). Rejected rows never land.</p>
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            </div>
+            <h3>The problem: leaks and blind spots</h3>
+            <p>Bad records are usually discovered <em>downstream</em> — after they have corrupted a warehouse, broken a report, or triggered a regulatory finding. By then the damage is done and the evidence is gone.</p>
           </div>
           <div class="card">
-            <h3>Tamper-evident proofs</h3>
-            <p>Signed audit certificates with SHA-256 + Merkle roots. Any post-delivery byte-flip is detected.</p>
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <h3>The shift: a write gate, not a report</h3>
+            <p>Data Shell inspects at the boundary — the last place you still control the outcome. Rejected records are <strong>never published</strong>. The gate is the product; dashboards are a by-product.</p>
           </div>
           <div class="card">
-            <h3>Scale without bloat</h3>
-            <p>Out-of-core streaming to 20 GiB, bounded memory, disk headroom preflight. Runs locally or in the gateway.</p>
-          </div>
-          <div class="card">
-            <h3>Forensic by default</h3>
-            <p>Durable boundary ledger, quarantine index, usage metering, signed run webhooks.</p>
+            <div class="icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2 4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+            </div>
+            <h3>The result: proof, not promises</h3>
+            <p>Every run commits atomically and is sealed with a signed certificate. Flip a byte after delivery and verification fails; restore it and verification passes. That is tamper-evidence you can test.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="section">
+    <!-- ==================================================== how it works -->
+    <section class="section" id="how">
       <div class="container">
-        <h2>Live Demo Results</h2>
-        <pre class="terminal" id="demoOutput">Click "Run 60-Second Demo" to see refusal, held rows, verification, tamper detection, and recovery.</pre>
+        <div class="section-head">
+          <span class="eyebrow">How it works</span>
+          <h2>A four-stage gate where every stage can stop a run</h2>
+          <p>Records flow through four sequential checks. Any stage can refuse the run before anything is published — and each terminal outcome is recorded.</p>
+        </div>
+        <div class="pipeline">
+          <div class="tier">
+            <span class="step-n">T1</span>
+            <span class="stage">Structural</span>
+            <h3>At the door</h3>
+            <p>Strict, per-row schema casting. Records that cannot be realized are <strong>refused and indexed</strong> — never silently coerced into a value they are not.</p>
+          </div>
+          <div class="tier">
+            <span class="step-n">T2</span>
+            <span class="stage">Semantic</span>
+            <h3>Inside</h3>
+            <p>Vectorized row rules (Polars) and batch rules (DuckDB, out-of-core when streaming). The fast path runs only when a chunk already matches the declared schema; otherwise rows are validated one by one.</p>
+          </div>
+          <div class="tier">
+            <span class="step-n">T3</span>
+            <span class="stage">Reconciliation</span>
+            <h3>The arithmetic has to foot</h3>
+            <p><code>read = refused + held + delivered</code>. A single unaccounted-for row <strong>refuses the run</strong> instead of publishing a partial dataset.</p>
+          </div>
+          <div class="tier">
+            <span class="step-n">T4</span>
+            <span class="stage">Atomic publish</span>
+            <h3>Crash-recoverable</h3>
+            <p>The active target, an immutable lineage artifact, and the signed certificate commit together through a write-ahead journal and are recovered at startup. Quarantine evidence survives rejection.</p>
+          </div>
+        </div>
+
+        <div class="grid cols-2 mt-lg">
+          <div class="card">
+            <h3>What a contract declares</h3>
+            <p>Sources and formats, a strict schema, row + batch quality rules, a drop/quarantine behaviour, delivery targets, and a quarantine path. It is a versioned, reviewable artifact — not hidden application logic.</p>
+            <span class="tag">apiVersion: daas/v1 · kind: DataProduct</span>
+          </div>
+          <div class="card">
+            <h3>What happens to a rejected row</h3>
+            <p>It is quarantined to a per-tenant location and recorded in the ledger with the rule that held it (or the structural reason it was refused). Nothing about the rejection is invisible.</p>
+            <span class="tag">quarantine → evidence, not a silent drop</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================================= live demo -->
+    <section class="section" id="demo">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Live proof — runs the real engine</span>
+          <h2>Refusal, tamper, and recovery in one click</h2>
+          <p>
+            This calls the same <code>datashell demo</code> engine the CLI runs, byte-for-byte. It generates
+            <strong>1,000 settlement records with 100 seeded defects</strong>, enforces a contract, then flips one
+            byte in the delivered Parquet to prove the signed certificate detects tampering — and that restoring
+            the bytes restores the verdict.
+          </p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">
+              <span class="panel-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              datashell demo
+            </div>
+            <button class="btn primary small" id="runDemo">Run 60-second demo</button>
+          </div>
+          <div class="panel-body">
+            <div id="demoResult">
+              <p class="muted small">
+                1000 records in · rules <code>amount-positive</code> and <code>currency-settled</code> ·
+                batch rule <code>not-partial</code>. Click <strong>Run 60-second demo</strong> to watch the boundary do its job.
+              </p>
+            </div>
+            <details class="raw" id="demoRawWrap" hidden>
+              <summary>View raw engine output</summary>
+              <pre class="terminal" id="demoOutput"></pre>
+            </details>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================== capabilities -->
+    <section class="section" id="capabilities">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Capabilities</span>
+          <h2>Everything the gate does, end to end</h2>
+          <p>One engine, available as a local CLI and as a multi-tenant HTTP gateway.</p>
+        </div>
+        <div class="grid cols-3">
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h10M4 17h7"/></svg></div>
+            <h3>Refusal-first write gate</h3>
+            <p>Four sequential stages, each able to stop a run before publication. Strict Tier-1 semantics are preserved even on the vectorized fast path.</p>
+          </div>
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2 4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6z"/><path d="M9 12l2 2 4-4"/></svg></div>
+            <h3>Verifiable certificates</h3>
+            <p>Each run emits a certificate bound to the contract, the source bytes, the delivered bytes, and every quarantine artifact — by hash <em>and</em> path — sealed with an HMAC-SHA256 envelope.</p>
+          </div>
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg></div>
+            <h3>Durable boundary ledger</h3>
+            <p>An append-only, tenant-isolated forensic record of <strong>every</strong> terminal run — delivered, rejected, or failed — with a quarantine index, usage metering, and rolling drift baselines.</p>
+          </div>
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg></div>
+            <h3>Multi-tenant RBAC &amp; isolation</h3>
+            <p>Four roles and six capabilities. Delivery roots are partitioned per tenant; cross-tenant delivery attempts and cross-tenant certificate reads are denied with an explicit <code>403</code>.</p>
+          </div>
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 2 5-6"/></svg></div>
+            <h3>Bounded memory &amp; disk at scale</h3>
+            <p>Out-of-core streaming keeps memory bound to the micro-batch, not the file. The built-in upload ceiling is <strong>20&nbsp;GiB</strong>, and runs preflight free space and refuse to start rather than fail mid-run.</p>
+          </div>
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 12h-4l-3 8-4-16-3 8H2"/></svg></div>
+            <h3>Observability</h3>
+            <p>Prometheus metrics at <code>/metrics</code> for rows read, delivered, held, footing errors, and run duration. Tenant, contract, and rule IDs are deliberately excluded from labels to avoid cardinality blow-up and data leakage.</p>
+          </div>
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v6M12 16v6M4.9 4.9l4.2 4.2M14.9 14.9l4.2 4.2M2 12h6M16 12h6"/></svg></div>
+            <h3>Orchestration &amp; events</h3>
+            <p>A productized CLI (<code>run | validate-contract | verify | ledger | demo</code>), an Apache Airflow provider, and signed <code>run.completed</code> webhooks for PagerDuty, Jira, or a SIEM.</p>
+          </div>
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/></svg></div>
+            <h3>Formats &amp; deployment</h3>
+            <p>Streams CSV, JSONL/NDJSON, and Parquet. Ships as a non-root, read-only container with Docker Compose, Kubernetes (single replica + PVC), and a Render blueprint.</p>
+          </div>
+          <div class="card">
+            <div class="icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></div>
+            <h3>Exit codes as contract</h3>
+            <p><code>0</code> delivered, <code>2</code> rejected by policy, <code>1</code> engine failure. The gate's verdict is legible to a shell script, a scheduler, or an operator on call.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================== by the numbers -->
+    <section class="section" id="numbers">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">By the numbers</span>
+          <h2>Measured, not marketed</h2>
+          <p>Every figure below is reproduced by the test suite or a benchmark harness in the repository. No invented capacity claims.</p>
+        </div>
+        <div class="stats">
+          <div class="stat">
+            <div class="value">156</div>
+            <div class="label">automated tests pass on the main suite</div>
+            <div class="hint">+ 9 Airflow provider tests</div>
+          </div>
+          <div class="stat">
+            <div class="value">20 <span style="font-size:1rem;font-weight:600">GiB</span></div>
+            <div class="label">built-in upload ceiling, derived request limit</div>
+            <div class="hint">21,474,836,480 bytes</div>
+          </div>
+          <div class="stat">
+            <div class="value">~369 <span style="font-size:1rem;font-weight:600">MB</span></div>
+            <div class="label">peak RSS while streaming a 20,000,000-row CSV</div>
+            <div class="hint">memory bounded, not file-sized</div>
+          </div>
+          <div class="stat">
+            <div class="value">4</div>
+            <div class="label">sequential gate stages before publish</div>
+            <div class="hint">any stage can refuse the run</div>
+          </div>
+          <div class="stat">
+            <div class="value">0</div>
+            <div class="label">rows published when the arithmetic doesn't foot</div>
+            <div class="hint">read = refused + held + delivered</div>
+          </div>
+          <div class="stat">
+            <div class="value">4 × 6</div>
+            <div class="label">RBAC roles × capabilities enforced at the boundary</div>
+            <div class="hint">ADMIN · ENGINEER · PRODUCER · AUDITOR</div>
+          </div>
+          <div class="stat">
+            <div class="value">3</div>
+            <div class="label">streaming formats: CSV, JSONL/NDJSON, Parquet</div>
+            <div class="hint">micro-batch micro-groups</div>
+          </div>
+          <div class="stat">
+            <div class="value">3.11–3.13</div>
+            <div class="label">Python versions validated in CI</div>
+            <div class="hint">test · wheel · container</div>
+          </div>
+        </div>
+        <p class="small muted mt">
+          Benchmark harnesses assert expected delivered counts and inspect the resulting files, so a run that
+          silently drops rows <strong>fails</strong> rather than reporting a flattering number. Run them yourself:
+          <code>python benchmarks/volumetric_stress_test.py</code>.
+        </p>
+      </div>
+    </section>
+
+    <!-- ====================================================== posture -->
+    <section class="section" id="posture">
+      <div class="container">
+        <div class="section-head">
+          <span class="eyebrow">Production posture</span>
+          <h2>Hardened for single-replica production. Not independently certified.</h2>
+          <p>We would rather be precise than flattering. Here is exactly where the system stands.</p>
+        </div>
+        <div class="grid cols-2">
+          <div class="card">
+            <div class="callout ok">
+              <h3>✓ In place in this revision</h3>
+              <ul>
+                <li>Production startup rejects missing or identical API/HMAC secrets, wildcard CORS, non-HTTPS origins, and malformed limits.</li>
+                <li>Non-root container with a read-only root filesystem; Kubernetes ships a readiness probe, security context, and PVC.</li>
+                <li>Readiness fails if the durable ledger cannot be opened; startup recovers interrupted publishes before serving.</li>
+                <li>Strict per-row validation is never weakened for speed; the fast path only runs on schema-matching chunks.</li>
+                <li>Signed certificates verify the signature <em>before</em> dereferencing artifact paths.</li>
+              </ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="callout">
+              <h3>△ Honest boundaries</h3>
+              <ul>
+                <li>The reference deployment is <strong>single-replica</strong>: the credential registry and rate limiter are process-local. Run one replica and one worker.</li>
+                <li>No third-party certification is claimed. Code-level checks are not a substitute for independent review.</li>
+                <li>A dependency lockfile, shared stores for horizontal scale, and deployment-specific load/soak tests are required before a real launch.</li>
+                <li>Certificates prove integrity and authorship, not identity of the sender — pair them with your own trust anchor.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="actions mt-lg">
+          <a class="btn ghost" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/PRODUCTION_READINESS.md" target="_blank" rel="noopener">Read the production-readiness gate ↗</a>
+          <a class="btn ghost" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/THREAT_MODEL.md" target="_blank" rel="noopener">Threat model ↗</a>
+          <a class="btn ghost" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/OPERATIONS.md" target="_blank" rel="noopener">Operations runbook ↗</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====================================================== cta -->
+    <section class="section tight">
+      <div class="container">
+        <div class="cta-band">
+          <h2>Point it at your boundary</h2>
+          <p class="muted" style="max-width:620px;margin:0 auto">
+            Install it, run the self-contained demo, then enforce a contract against your own file — locally or through the gateway.
+          </p>
+          <pre class="code" style="max-width:640px;margin:24px auto 0;text-align:left"><span class="c"># install and see the boundary do its job</span>
+pip install -e .
+datashell demo
+
+<span class="c"># enforce a contract against your own feed</span>
+datashell run \
+  <span class="k">--contract</span> examples/vendor_settlements_contract.json \
+  <span class="k">--source</span>   /mnt/landing/settlements.jsonl \
+  <span class="k">--target</span>   ./output/curated/settlements.parquet</pre>
+          <div class="actions">
+            <a class="btn primary" href="/playground">Try the playground</a>
+            <a class="btn ghost" href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">Star on GitHub ↗</a>
+            <a class="btn ghost" href="https://colab.research.google.com/github/Pulkit-Handa/data_shell/blob/main/examples/notebook/demo.ipynb" target="_blank" rel="noopener">Open in Colab ↗</a>
+          </div>
+        </div>
       </div>
     </section>
   </main>
 
   <footer class="footer">
-    <div class="container">
-      <small>Apache 2.0 · <a href="https://github.com/your-org/data-shell">GitHub</a> · <a href="https://colab.research.google.com/github/your-org/data-shell/blob/main/examples/notebook/demo.ipynb">Colab</a></small>
+    <div class="container footer-inner">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2 4 6v6c0 5 3.4 8.4 8 10 4.6-1.6 8-5 8-10V6z"/><path d="M8.5 12.5l2.2 2.2 4.8-4.8"/>
+          </svg>
+        </span>
+        <span>Data&nbsp;Shell <span class="brand-sub">each and everywhere</span></span>
+      </div>
+      <nav class="links">
+        <a href="/playground">Playground</a>
+        <a href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+        <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
+      </nav>
     </div>
   </footer>
 

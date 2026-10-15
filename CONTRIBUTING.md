@@ -36,7 +36,7 @@ By participating in this project, you agree to abide by our Code of Conduct.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/data-shell.git
+git clone https://github.com/Pulkit-Handa/data_shell.git
 cd data-shell
 
 # Install in development mode with dev dependencies
