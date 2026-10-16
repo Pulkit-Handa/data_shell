@@ -56,21 +56,62 @@ review.
 - Docker runs one worker with a read-only root filesystem, non-root user, and persistent
   storage; Kubernetes ships a readiness probe, non-root/read-only security context, PVC,
   and a single replica.
-- CI compiles and tests the package on Python 3.11–3.13, builds a wheel, audits
+- CI compiles and tests the package on Python 3.11–3.13, builds a wheel and an sdist from a
+  hash-pinned build backend, verifies the distribution contents, generates the SBOM, audits
   dependencies, and builds the container image.
+- **Public demo runs the production path.** The unauthenticated demo/playground
+  (`web/main.py`) stages uploads under `settings.temp_dir` in bounded chunks and delivers
+  inside an isolated, explicitly authorized tenant namespace
+  (`settings.get_tenant_delivery_dir("public-demo-<tenant>")`); `datashell demo` delivers to
+  the `datashell-demo` tenant directory with a durable audit certificate and tenant
+  quarantine directory in production mode. The sandbox is not weakened — the demo is
+  integrated with it. Uploads are bounded by the source limit, a smaller contract/control
+  limit and the total request-body limit; extensions are validated; user filenames are never
+  used as paths; a process-local token bucket bounds request rate; and concurrent CLI runs
+  are capped with a bounded wait. Outcomes map to explicit responses: `413` oversize, `415`
+  unsupported type, `422` policy rejection/invalid input, `429` rate limited, `503` at
+  capacity, `504` timeout, `507` staging/disk failure, `500` engine failure. Staging is
+  always deleted; delivered artifacts, quarantine and audit records persist.
+- **Reproducible installs.** `requirements.lock`, `requirements-dev.lock` and
+  `requirements-build.lock` are resolved on the lowest supported interpreter (3.11) and
+  installed with `--require-hashes` in CI, the release workflow and both images; PEP 517
+  builds run through `python -m build --no-isolation` against the pinned build backend. No
+  build step re-resolves dependencies from `pyproject.toml` ranges.
+- **SBOM from the resolved release set.** CI and the release workflow generate a CycloneDX
+  SBOM from `requirements.lock` with the application as root component
+  (`cyclonedx-py requirements requirements.lock --pyproject pyproject.toml`), so it covers
+  the application and its runtime dependencies and excludes dev/runner packages.
+- **Explicit packaging allowlist.** `MANIFEST.in` defines the sdist contents (code, legal
+  files, lockfiles, demo app `web/`, `tests/`, `examples/`, `scripts/`) and prunes runtime
+  state and caches; the wheel is limited to `datashell*` by
+  `[tool.setuptools.packages.find]`. `scripts/verify_distribution_contents.py` fails the
+  build on any violation.
+- **Release-identity consistency check.** `scripts/check_release_metadata.py` (also run as
+  `tests/test_release_metadata.py`) keeps the distribution (`data-shell`), import package
+  (`datashell`) and product name ("Data Shell") distinct while requiring the version in
+  `pyproject.toml`, `datashell/__init__.py`, `web/main.py` and `CHANGELOG.md` to agree, the
+  release tag to match the package version, and every declared runtime dependency to be
+  hash-pinned in both lockfiles. It also fails if the changelog claims a live dependency was
+  removed.
 - **Feed controls.** Contracts can express single-column and composite unique keys
   (`UNIQUE`, `COMPOSITE_UNIQUE`), batch control totals (`SUM_EQUALS`, `SUM_BETWEEN`),
   configurable parser options (delimiter, quote character, header presence, encoding,
   null tokens), and an explicit schema-compatibility policy (`STRICT` refuses rows that
   omit a declared column; `EVOLVING` back-fills nullable columns). Uniqueness and control
   totals are evaluated over the **delivered** rows only, never the held/quarantine set.
-- **Real drift metrics.** Every execution mode (in-memory, in-memory records, and
-  out-of-core streaming) extracts per-feed metrics — null rate per column plus sum/mean
-  for numerics — persists them in the boundary ledger, and compares them run-over-run
-  under configurable thresholds (`DRIFT_MAX_VOLUME_DROP_PCT`,
-  `DRIFT_MAX_METRIC_DRIFT_PCT`, `DRIFT_METRIC_MIN_BASELINE_SAMPLES`). Metric drift stays
-  dormant until the configured minimum baseline history exists, so normal variation
-  during initial learning never blocks a feed.
+- **Real drift metrics with metric-aware thresholds.** Every execution mode (in-memory,
+  in-memory records, and out-of-core streaming) extracts per-feed metrics — null rate per
+  column plus sum/mean for numerics — persists them in the boundary ledger, and compares
+  them run-over-run. Comparison is **per metric kind**, not one relative rule:
+  rates/proportions (`null_rate_*`) use an absolute delta in proportion points
+  (`DRIFT_MAX_RATE_ABS_DELTA`, default `0.10`); sums and means use a relative percentage
+  (`DRIFT_MAX_METRIC_DRIFT_PCT`); volume uses `DRIFT_MAX_VOLUME_DROP_PCT`. Zero-baseline
+  semantics are explicit: a metric whose baseline is zero/near-zero (ε = 1e-9) and stays
+  there reports no drift, while a metric that *emerges* from a zero baseline reports 100%
+  and fails; a vanished, missing, invalid or non-finite metric is reported explicitly and
+  fails rather than being silently skipped. Metric drift stays dormant until
+  `DRIFT_METRIC_MIN_BASELINE_SAMPLES` history exists. The `DriftCheckResult` certificate
+  schema is unchanged.
 - **Source-payload binding in every mode.** Every audit certificate binds the SHA-256 of
   the actual source payload. File-backed runs hash the source on disk; in-memory runs
   hash the canonical record set. The prior `IN_MEMORY_PAYLOAD` placeholder is gone —
@@ -84,11 +125,11 @@ review.
   `third_party_verifiable`, and `requires_shared_secret` claims state honestly whether
   asymmetric or symmetric (HMAC fallback) signing was used. HMAC remains for internal
   webhook signing.
-- **Dependency lockfiles and static scan.** `requirements.lock` and
-  `requirements-dev.lock` pin the full resolved dependency set with hashes
-  (`pip-compile --generate-hashes`). CI audits dependencies with `pip-audit` and runs
-  Bandit (medium severity and above) against `datashell/`, with reviewed, documented
-  waivers in `.bandit`.
+- **Dependency lockfiles and static scan.** `requirements.lock`, `requirements-dev.lock`
+  and `requirements-build.lock` pin the full resolved dependency set with hashes
+  (`pip-compile --generate-hashes`), and installations use `--require-hashes`. CI audits the
+  resolved dependency sets with `pip-audit` and runs Bandit (medium severity and above)
+  against `datashell/`, with reviewed, documented waivers in `.bandit`.
 
 ## Required before a real production launch
 
@@ -96,10 +137,12 @@ review.
       the Airflow provider tests (`integrations/airflow/tests`), and the container smoke
       test under a read-only root filesystem (`/ready`, `/docs` disabled, `/metrics`
       authenticated).
-- [x] Generate and commit a dependency lockfile with resolved versions and hashes; do not
+- [x] Generate and commit dependency lockfiles with resolved versions and hashes; do not
       treat the ranges in `pyproject.toml` as a lockfile. (`requirements.lock`,
-      `requirements-dev.lock`; regenerate with
-      `pip-compile --generate-hashes --extra dev --output-file requirements-dev.lock pyproject.toml`.)
+      `requirements-dev.lock`, `requirements-build.lock`; regenerate on the lowest supported
+      interpreter — see `docs/OPERATIONS.md` § "Regenerating the dependency lockfiles" —
+      and verify with `pip download --require-hashes --only-binary=:all: --python-version
+      <3.11|3.12|3.13> -r requirements.lock`.)
 - [ ] Review `docs/THREAT_MODEL.md` and complete an independent security review covering
       authentication, authorization, tenant boundaries, upload denial-of-service controls,
       the boundary ledger, and certificate/artifact verification.
@@ -123,16 +166,50 @@ review.
 
 ## Current validation evidence
 
-In the authoring environment (Python 3.14; Polars, PyArrow, and DuckDB installed), the main
-suite passes **182 tests**, the Airflow provider's dependency-free client tests pass (and
-operator tests skip when Airflow is absent), and `python -m compileall` succeeds. `pip-audit`
-reports no known vulnerabilities against the committed lockfile, and Bandit reports no
-medium-or-higher findings. The
-out-of-core streaming path has been exercised on a 20-million-row CSV at a peak RSS of
-roughly 369 MB. The quickstart demo verifies cleanly, detects a one-byte tamper, and
-verifies again after restoration. The clean-room CI run, container build/runtime, and
-dependency-locked build referenced above must still pass before release; the current
-results are from a single environment, not a release gate.
+This revision was verified in a single Linux environment. What was actually executed:
+
+- **Full suite: 247 passed** (Python 3.14 developer environment) and **247 passed** on a
+  clean Python 3.11 virtual environment installed from
+  `pip install --require-hashes -r requirements-dev.lock` plus the built wheel.
+- **Reinstalled from the built sdist: 247 passed**; the sdist's `datashell/` sources are
+  byte-identical to the wheel, confirming the sdist is self-contained and independently
+  testable.
+- **Deployment shape (wheel + `web/`, no engine source on `PYTHONPATH`): 247 passed**, with
+  `import datashell` resolving to `site-packages`.
+- **Lockfile/interpreter compatibility**: `pip download --require-hashes --only-binary=:all:
+  --python-version {311,312,313,314}` succeeds for all three lockfiles; the previously
+  pinned `numpy==2.5.4` (which requires Python ≥3.12) was replaced by `numpy==2.4.6`.
+- **Container images build and run**: both `Dockerfile` and `Dockerfile.web` build; the API
+  image passes the CI smoke test under a read-only root filesystem (`/ready` 200, `/docs`
+  404, `/metrics` 401 without a key and 200 with one) as uid `10001:10001`; the demo image
+  serves `/health`, `/`, `/playground` and, in production mode, returns HTTP 200 with a real
+  `LOADED` result from `/api/demo/run` and delivers a namespaced tenant artifact via
+  `/api/enforce`. In both images the engine is imported from the installed wheel, not a
+  checkout.
+- **Dependency audit**: `pip-audit -r requirements.lock -r requirements-dev.lock -r
+  requirements-build.lock` reports no known vulnerabilities. **Bandit** 1.9.4 reports no
+  medium-or-higher findings.
+- **Distribution inspection**: `scripts/verify_distribution_contents.py` passes for the
+  wheel (35 entries, `datashell/` + metadata only) and the sdist (code, legal files,
+  lockfiles, `web/`, `tests/`, `examples/`, `scripts/`; no VCS data, caches, databases,
+  delivered/quarantine/audit state, credentials or non-fixture Parquet).
+- The out-of-core streaming path was exercised on a 20-million-row CSV at a peak RSS of
+  roughly 369 MB. The quickstart demo verifies cleanly, detects a one-byte tamper, and
+  verifies again after restoration.
+
+## What remains externally gated
+
+These gate items require execution outside this repository and are **not** satisfied by the
+evidence above. Documentation is not evidence.
+
+| Gate | Status | Why it is still open |
+| --- | --- | --- |
+| Clean CI run on 3.11/3.12/3.13 | **Not run** | The workflow was updated to install from the hash-pinned lockfiles, build wheel+sdist with the pinned backend, verify distribution contents and generate the SBOM from the lock; it must execute on GitHub-hosted runners. |
+| Live Render deployment | **Not run** | `render.yaml` now sets `ALLOWED_ORIGINS`, `MAX_CONCURRENT_RUNS`, demo timeouts and the rate limit (production boot fails without `ALLOWED_ORIGINS`). See `docs/OPERATIONS.md` § "Deploying the public demo on Render" for the manual verification steps. |
+| Backup / restore / DR for the ledger | **Not run** | Requires a target environment, a backup medium and a timed restore test. |
+| Load / soak / disk-full / crash injection | **Not run** | Requires production-like hardware and a native RSS harness. |
+| Independent security review | **Not run** | Requires an external reviewer; `docs/THREAT_MODEL.md` is the input. |
+| Monitoring, alerting, rollback drill | **Not run** | Requires the live deployment and an operator runbook rehearsal. |
 
 ## Certification boundary
 

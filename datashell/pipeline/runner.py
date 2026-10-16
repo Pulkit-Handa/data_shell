@@ -281,6 +281,7 @@ class DataShellPipeline:
                 max_metric_drift_pct=settings.drift_max_metric_drift_pct,
                 baseline_window=settings.drift_baseline_window,
                 min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
+                max_rate_abs_delta=settings.drift_max_rate_abs_delta,
             )
             all_drift_passed = all(d.passed for d in drift_checks)
 
@@ -453,6 +454,7 @@ class DataShellPipeline:
                 max_metric_drift_pct=settings.drift_max_metric_drift_pct,
                 baseline_window=settings.drift_baseline_window,
                 min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
+                max_rate_abs_delta=settings.drift_max_rate_abs_delta,
             )
             all_drift_passed = all(d.passed for d in drift_checks)
 
@@ -731,6 +733,7 @@ class DataShellPipeline:
                 max_metric_drift_pct=settings.drift_max_metric_drift_pct,
                 baseline_window=settings.drift_baseline_window,
                 min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
+                max_rate_abs_delta=settings.drift_max_rate_abs_delta,
             )
             all_drift_passed = all(d.passed for d in drift_checks)
             if not all_drift_passed and self.contract.spec.quality.behavior != QualityBehavior.WARN:

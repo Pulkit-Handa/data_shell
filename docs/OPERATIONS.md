@@ -16,7 +16,7 @@ Provision the following through your deployment secret manager, not a committed 
 - `DATASHELL_DISK_HEADROOM_MULTIPLIER` (default `2.0`): the per-run free-space preflight requires at least `source_bytes * multiplier` on the target volume.
 - `STREAM_AUTO_THRESHOLD_BYTES` (default `67108864`, i.e. 64 MiB) and `STREAM_CHUNK_ROWS` (default `100000`) to tune when inputs switch to out-of-core processing and how large each micro-batch is.
 - `DATASHELL_HISTORY_RETENTION_DAYS` (default `0` = keep everything) and, optionally, `DATASHELL_RUN_WEBHOOK_URL` / `DATASHELL_WEBHOOK_TIMEOUT_SECONDS`.
-- Feed-drift tuning (warn-first defaults): `DRIFT_BASELINE_WINDOW` (default `1`), `DRIFT_MAX_VOLUME_DROP_PCT` (default `30.0`), `DRIFT_MAX_METRIC_DRIFT_PCT` (default `50.0`), and `DRIFT_METRIC_MIN_BASELINE_SAMPLES` (default `1`). Metric comparisons stay dormant until the minimum baseline history exists, so normal variation during initial learning never blocks a feed.
+- Feed-drift tuning (warn-first defaults): `DRIFT_BASELINE_WINDOW` (default `1`), `DRIFT_MAX_VOLUME_DROP_PCT` (default `30.0`), `DRIFT_MAX_METRIC_DRIFT_PCT` (default `50.0`), `DRIFT_MAX_RATE_ABS_DELTA` (default `0.10`, a delta in proportion points for null/rate metrics), and `DRIFT_METRIC_MIN_BASELINE_SAMPLES` (default `1`). Comparisons are per metric kind — rates use the absolute delta, sums/means use the relative percentage — so a single percentage rule never conflates a rate with a sum. Zero baselines are handled explicitly: zero→zero reports no drift, while a metric emerging from zero reports 100% and fails; missing, invalid or non-finite history is reported and fails rather than being skipped. Metric comparisons stay dormant until the minimum baseline history exists, so normal variation during initial learning never blocks a feed.
 
 Keep the API on a private network behind a TLS-terminating ingress or reverse proxy. Do not expose `/metrics` publicly. Keep the metrics route behind an authorized API key and restrict it at the network layer as well.
 
@@ -122,9 +122,104 @@ For a delivery or recovery incident:
 - **Kubernetes:** replace the example HTTPS origin in the ConfigMap and the placeholder image with your organization and immutable image tag before applying the manifest. The PVC uses `ReadWriteOnce`, and the deployment intentionally remains at one replica.
 - **Canary release:** begin with non-sensitive test data and a restricted tenant. Validate throughput, failure recovery, alert delivery, and restoration before onboarding critical workloads.
 
+## Building and shipping
+
+Both images are multi-stage. A throwaway `builder` stage installs the hash-pinned build
+backend (`requirements-build.lock`) and compiles the application into a wheel; the `runtime`
+stage installs the hash-pinned runtime set (`requirements.lock`) plus that wheel. No
+`datashell/` source is copied into the runtime stage, so the engine always comes from the
+installed distribution — never from a checkout on `PYTHONPATH` — and the build backend never
+reaches the shipped image.
+
+```bash
+# API image (datashell.server.app) and demo image (web/main.py)
+docker build --pull --tag data-shell:rc .
+docker build --pull --tag data-shell-demo:rc -f Dockerfile.web .
+```
+
+Reproduce a release build locally exactly as CI does:
+
+```bash
+python -m pip install --require-hashes -r requirements-build.lock
+python -m pip install --require-hashes -r requirements-dev.lock
+python -m pip install --no-deps --no-build-isolation --editable .
+python scripts/check_release_metadata.py           # version + lock consistency
+python -m build --no-isolation --outdir dist       # wheel + sdist, pinned backend
+python scripts/verify_distribution_contents.py --dist-dir dist
+cyclonedx-py requirements requirements.lock --pyproject pyproject.toml \
+  --mc-type application --output-reproducible \
+  --output-file dist/sbom.cyclonedx.json --output-format JSON
+```
+
+### Regenerating the dependency lockfiles
+
+Resolve on the **lowest supported interpreter (3.11)**, not the developer's interpreter:
+`pip-compile` pins what the running interpreter can use, and a lock built on 3.14 can pin a
+package (e.g. `numpy==2.5.4`, which requires Python ≥3.12) that `requires-python = ">=3.11"`
+cannot install.
+
+```bash
+python3.11 -m pip install --user pip-tools
+python3.11 -m piptools compile --generate-hashes --output-file=requirements.lock pyproject.toml
+python3.11 -m piptools compile --generate-hashes --extra=dev --output-file=requirements-dev.lock pyproject.toml
+python3.11 -m piptools compile --generate-hashes --allow-unsafe \
+  --output-file=requirements-build.lock requirements-build.in
+
+# Verify every pin has a wheel on every supported interpreter.
+for v in 311 312 313; do
+  python -m pip download --require-hashes --only-binary=:all: --no-deps \
+    --python-version "$v" -r requirements.lock -d "/tmp/lockcheck-$v"
+done
+```
+
+`pip-compile` reuses existing pins and only changes what is incompatible, so a routine
+regeneration is a small diff. Commit the regenerated lockfiles together with the
+`pyproject.toml` change that motivated them. Never reinstall with an unconstrained
+`pip install .`/`pip install -e '.[dev]'` in CI, the release job or an image; install from
+the lockfiles with `--require-hashes`.
+
+### SBOM and packaging
+
+The SBOM is generated from the resolved release dependency set
+(`cyclonedx-py requirements requirements.lock --pyproject pyproject.toml`), so it covers the
+application as the root component plus exactly the runtime dependencies and excludes
+dev/runner packages. `docs/` and `benchmarks/` are not shipped; the sdist contents are
+governed by the `MANIFEST.in` allowlist and both artifacts are checked by
+`scripts/verify_distribution_contents.py` before a release is published.
+
+## Deploying the public demo on Render
+
+`render.yaml` is a one-click blueprint for the demo image (`Dockerfile.web`). Production
+startup validates configuration at import time, so the service **will not boot** without an
+explicit `ALLOWED_ORIGINS`.
+
+1. Deploy the blueprint, then set `ALLOWED_ORIGINS` to the service's own HTTPS origin
+   (for example `https://data-shell-demo.onrender.com`). Use exact origins only; never `*`.
+   The playground is same-origin, so a hostname mismatch only affects cross-origin browser
+   calls, but never relax the value to `*`.
+2. Confirm the image runs as a non-root user and that the health check path (`/health`)
+   returns `200`.
+3. Exercise `GET /`, `GET /playground`, `POST /api/demo/run`, and a small upload through
+   `POST /api/enforce`. A successful production run delivers into the
+   `public-demo-<tenant>` namespace with a durable audit certificate.
+4. Confirm the bounded behaviours: an oversized upload returns `413`, a non-policy file
+   returns `422`, and requests beyond the rate limit return `429` with `Retry-After`.
+5. On the free plan the container filesystem is ephemeral: delivered artifacts, quarantine
+   records and audit certificates are lost on redeploy, and the service cold-starts after
+   roughly 15 minutes of inactivity.
+
+### Process-local limits (demo and API)
+
+Rate limiting, request staging limits, and the CLI-run slot are held **in process**. They
+bound a single worker; they are not a global quota. The demo image runs one worker with
+`MAX_CONCURRENT_RUNS=1`, a 5-second capacity wait, a 300-second CLI/walkthrough timeout and
+`RATE_LIMIT_REQUESTS_PER_MINUTE=60` by default. Requests that cannot be admitted are
+rejected with `503` (capacity) or `429` (rate) and a `Retry-After` header rather than being
+queued without bound. Before running multiple replicas or promising global quotas, replace
+the limiter and slot management with a shared backend.
 
 ## Release gate and certification evidence
 
-Do not promote an image because it builds successfully. A release candidate is eligible for controlled staging only after the CI workflow passes on every supported Python version, the full suite runs without dependency-related skips, the image smoke test succeeds with a read-only root filesystem, and dependency audit findings are reviewed. Record the source commit, image digest, SBOM, test report, vulnerability scan, deployment configuration, restore-drill evidence, and reviewer approvals for each release.
+Do not promote an image because it builds successfully. A release candidate is eligible for controlled staging only after the CI workflow passes on every supported Python version, the full suite runs without dependency-related skips, the release-metadata and distribution-content checks pass, the image smoke test succeeds with a read-only root filesystem, and dependency audit findings are reviewed. Record the source commit, image digest, SBOM, test report, vulnerability scan, deployment configuration, restore-drill evidence, and reviewer approvals for each release. Tag releases as `v<package version>`; the release workflow fails the build if the tag, `pyproject.toml`, `datashell.__version__`, `web/main.py` and the newest `CHANGELOG.md` entry disagree.
 
 A passing repository CI run does not certify the production environment. Before customer or regulated-data use, run the crash/load/tenant-isolation exercises on the intended storage and deployment platform, validate TLS and network controls, and complete the security/compliance review required by the actual customer contract and regulatory scope.

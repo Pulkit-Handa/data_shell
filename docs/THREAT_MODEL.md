@@ -25,6 +25,7 @@ Data Shell accepts tabular inputs, evaluates them against tenant-owned contracts
 6. Container filesystem to persistent storage and backup systems.
 7. Application logs/metrics to the monitoring platform.
 8. API container to external webhook receivers (egress).
+9. Unauthenticated internet clients to the public demo/playground container (no API key), which shells out to the enforcement CLI.
 
 ## Threats and controls
 
@@ -41,20 +42,24 @@ Data Shell accepts tabular inputs, evaluates them against tenant-owned contracts
 | Storage loss or corruption | Persistent storage, readiness checks, recoverable commit journals | Encrypted backups, restoration drills, defined RPO/RTO |
 | Ledger tampering or cross-tenant disclosure | Ledger reads are tenant-scoped by construction; admin-only cross-tenant reads; SQLite file lives under the protected storage root | Protect the volume/backups; move to a shared store before multi-replica scaling |
 | Webhook spoofing or replay | HMAC-SHA256 over `timestamp.body`, timestamp header, delivery ID, bounded retries | Receivers must verify the signature and reject stale timestamps |
+| Unauthenticated demo abuse (upload floods, CPU/temp exhaustion) | Demo uploads are staged in bounded chunks and deleted per request; source, contract/control and total request-body limits are enforced before parsing; filenames are never used as paths and only allowlisted extensions are accepted; a process-local token bucket limits request rate; concurrent CLI runs are capped with a bounded wait and excess load gets `503`/`429` with `Retry-After` | Process-local limits bound one worker only; add a shared rate limiter and admission control before exposing the demo at scale |
+| Demo masking a failed or rejected enforcement | The demo always checks the engine exit status and verifies the reported artifact exists inside the tenant delivery directory; engine failure (`1`) maps to `500`, policy rejection (`2`) to `422`, timeout to `504` — a non-zero run can never be reported as success | Covered by the demo API tests; re-verify per deployment |
+| Demo bypassing the sandbox to reach arbitrary paths | The demo uses the same storage-root sandbox as every other run and delivers only into an isolated `public-demo-<tenant>` namespace under the tenant delivery root; no sandbox exemption or broad temp authorization is added | Deployment-specific review of storage roots |
+| Silent drift suppression (undetected data-quality regression) | Metric drift is evaluated per metric kind with explicit zero-baseline handling; missing/invalid/non-finite history and vanished metrics are reported and fail rather than being skipped | Tune thresholds per feed; independent review of drift policy |
 
 ## Deployment constraints
 
 - One replica and one Uvicorn worker only. The SQLite credential registry and in-memory token-bucket limiter are not distributed coordination services.
 - Use a tested local/block-backed filesystem. Do not assume SQLite WAL and rename/fsync semantics on arbitrary network filesystems.
 - Terminate TLS at a trusted ingress or reverse proxy; keep the service and metrics endpoint off the public internet.
-- Configure upload/concurrency/memory limits based on the deployment's actual memory and temporary-storage budgets.
+- Configure upload/concurrency/memory limits based on the deployment's actual memory and temporary-storage budget. The public demo runs the same code path under fixed, conservative limits and must not be given a sandbox exemption.
 - Keep signing keys outside the container image and persistent artifacts. Back up certificates and data separately from secrets where policy requires it.
 
 ## Out of scope / not yet proven
 
 - A formal independent penetration test or third-party audit.
 - Multi-region or multi-replica consistency.
-- Guaranteed global rate limits or immediate revocation across replicas.
+- Guaranteed global rate limits or immediate revocation across replicas. The demo's rate limiting, staging concurrency and CLI-run slot are process-local bounds, not global quotas.
 - Formal verification of the transaction state machine.
-- A clean-room CI result and container build; the full suite, Airflow provider tests, and image build must pass on the target platform before release.
+- A clean-room CI result and container build; the full suite, Airflow provider tests, and image builds must pass on the target platform before release. The locks, distribution contents, container images and demo production path were exercised in a single authoring environment (see `PRODUCTION_READINESS.md` § "Current validation evidence"); the live Render deployment, load/soak tests and independent review remain open.
 - Webhook *delivery* guarantees; emission is best-effort and signed, not exactly-once.

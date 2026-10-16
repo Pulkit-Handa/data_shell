@@ -9,6 +9,12 @@ We intentionally keep the metric set small and stable — a null rate for every
 declared column, plus mean and sum for numeric columns. That is enough to catch
 the failure mode drift exists for (a feed whose values silently shift period over
 period) without generating spurious alerts from volatile cardinality statistics.
+
+The ``<kind>_<column>`` naming below is the *contract* that lets the drift
+engine determine a metric's semantics; ``metric_kind`` is the single source of
+truth for that mapping. New metric families must register here (and declare
+their comparison policy in the drift engine) rather than being guessed from
+column names.
 """
 
 from __future__ import annotations
@@ -17,6 +23,34 @@ from pathlib import Path
 from typing import Dict, List, Union
 
 import polars as pl
+
+
+# Metric-name prefixes produced by this module. The drift engine imports these
+# instead of re-declaring the convention.
+RATE_METRIC_PREFIX = "null_rate_"   # proportion in [0.0, 1.0]
+MEAN_METRIC_PREFIX = "avg_"         # arithmetic mean of a numeric column
+SUM_METRIC_PREFIX = "sum_"          # sum of a numeric column
+
+RATE = "rate"
+MEAN = "mean"
+SUM = "sum"
+UNKNOWN = "unknown"
+
+
+def metric_kind(name: str) -> str:
+    """Classify a feed metric by its declared naming contract.
+
+    Returns one of ``rate`` (proportion in [0, 1]), ``mean``, ``sum``, or
+    ``unknown`` for metric names outside this convention (for example metrics
+    persisted by future or extended configurations).
+    """
+    if name.startswith(RATE_METRIC_PREFIX):
+        return RATE
+    if name.startswith(MEAN_METRIC_PREFIX):
+        return MEAN
+    if name.startswith(SUM_METRIC_PREFIX):
+        return SUM
+    return UNKNOWN
 
 
 def _metric_expressions(schema: Dict[str, pl.DataType]) -> List[pl.Expr]:

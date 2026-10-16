@@ -1,9 +1,42 @@
 # syntax=docker/dockerfile:1
+#
+# Hardened production image for the Data Shell boundary-enforcement API
+# (datashell.server.app). The public demo/playground has its own image:
+# Dockerfile.web.
+#
+# Reproducibility: runtime dependencies come exclusively from the hash-pinned
+# requirements.lock, and the package itself is built into a wheel in a throwaway
+# builder stage with the hash-pinned build backend from requirements-build.lock.
+# No `datashell/` source is copied into the runtime stage, so the engine that
+# runs is always the installed wheel — never a checkout on PYTHONPATH.
+
+# ---------------------------------------------------------------------------
+# builder: build the wheel from the checkout with the pinned build backend
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /build
+
+COPY requirements.lock requirements-build.lock ./
+RUN python -m pip install --require-hashes -r requirements-build.lock
+
+COPY pyproject.toml README.md ./
+COPY datashell ./datashell
+RUN python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels .
+
+# ---------------------------------------------------------------------------
+# runtime
+# ---------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PORT=8000 \
     FORWARDED_ALLOW_IPS=127.0.0.1 \
     DATASHELL_KEY_ID=datashell-hmac-v1 \
@@ -22,12 +55,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
     && useradd --system --uid 10001 --gid datashell --home-dir /nonexistent --shell /usr/sbin/nologin datashell
 
 WORKDIR /app
-COPY pyproject.toml README.md ./
-COPY datashell ./datashell
+
+# Runtime dependencies: exactly the resolved, hash-verified release set.
+COPY requirements.lock ./
+RUN python -m pip install --require-hashes -r requirements.lock
+
+# The application wheel, installed without pulling a second, unpinned resolution.
+COPY --from=builder /wheels /tmp/wheels
+RUN python -m pip install --no-deps /tmp/wheels/*.whl \
+    && rm -rf /tmp/wheels
+
 COPY examples ./examples
-RUN python -m pip install --upgrade pip \
-    && python -m pip install --no-cache-dir . \
-    && mkdir -p /app/storage/data /app/storage/contracts_registry /app/storage/output/audits /app/storage/output/quarantine /app/storage/tmp \
+
+# The demo/playground UI ships next to the API. PYTHONPATH exposes only this
+# source tree: the engine is imported from the installed wheel.
+COPY web ./web
+ENV PYTHONPATH=/app
+
+RUN mkdir -p /app/storage/data /app/storage/contracts_registry /app/storage/output/audits /app/storage/output/quarantine /app/storage/tmp \
     && chown -R datashell:datashell /app/storage \
     && rm -rf /root/.cache /tmp/*
 
@@ -39,7 +84,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # One worker is intentional while rate limiting and credential management are
 # process-local. Scale only after deploying shared auth and rate-limit backends.
 ENTRYPOINT ["sh", "-c", "umask 077; exec uvicorn datashell.server.app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers --forwarded-allow-ips=\"${FORWARDED_ALLOW_IPS:-127.0.0.1}\""]
-
-# Add web UI to container
-COPY web /app/web
-ENV PYTHONPATH=/app

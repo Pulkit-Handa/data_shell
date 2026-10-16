@@ -7,6 +7,7 @@ Welcome to the Data Shell documentation.
 - [OPERATIONS.md](OPERATIONS.md) - Production operations runbook (secrets, sizing, retention, webhooks, backup)
 - [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) - Hardened features and pre-launch checklist
 - [THREAT_MODEL.md](THREAT_MODEL.md) - Assets, trust boundaries, threats, and mitigations
+- [DESIGN_RECORD.md](DESIGN_RECORD.md) - Why the P0 fixes and release-engineering changes were designed this way (and what was rejected)
 
 ## Guides
 
