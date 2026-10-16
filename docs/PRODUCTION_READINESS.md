@@ -76,7 +76,8 @@ review.
   hash the canonical record set. The prior `IN_MEMORY_PAYLOAD` placeholder is gone —
   certificate generation now raises rather than emitting an unbound certificate.
 - **Asymmetric certificate signatures (Ed25519).** When `DATASHELL_ED25519_PRIVATE_KEY`
-  is provisioned, audit certificates are signed with Ed25519 so a third party holding
+  is provisioned, audit certificates are signed with Ed25519 (through the declared
+  `cryptography` runtime dependency) so a third party holding
   only the published public key can verify authenticity without sharing a secret.
   Verification fails closed for unprovisioned key IDs, supports key rotation via
   `DATASHELL_ED25519_KEYRING`, and the certificate's `integrity_type`,
