@@ -38,6 +38,24 @@ Resource policy (all settings come from the core configuration)
 * ``MAX_CONCURRENT_RUNS``          — upper bound on simultaneous CLI
   executions (per worker process).
 * ``RATE_LIMIT_REQUESTS_PER_MINUTE`` — per-client token-bucket rate limit.
+* ``DATASHELL_DEMO_GLOBAL_RATE_LIMIT_REQUESTS_PER_MINUTE`` — a *global*,
+  identity-independent process ceiling. Client identity is only trustworthy
+  when the deployment can prove visitors cannot forge it (see below), so abuse
+  is bounded by this ceiling even when the per-client key is spoofed.
+
+Client identity and proxy trust
+-------------------------------
+``_client_identity`` returns the socket peer address by default. The
+``X-Forwarded-For`` value is consulted **only** when
+``DATASHELL_DEMO_TRUST_FORWARDED_HEADERS`` is explicitly enabled, and then the
+*rightmost* hop (the one appended by the nearest proxy) is used. Do **not**
+enable it — and do not treat the per-client limit as a security control — until
+you have verified, from the real deployment, that a visitor cannot inject a
+``X-Forwarded-For`` value that the proxy forwards unmodified. Behind an
+unverified proxy the per-client limit is a fairness hint only; the global
+ceiling and the request/concurrency limits are the actual protection. Both
+uvicorn (``--forwarded-allow-ips``) and this flag must agree with that
+verification.
 
 The concurrency and rate limits are *process-local*: each uvicorn worker and
 each replica enforces its own copy. Render is configured with one worker; the
@@ -45,10 +63,22 @@ blueprint's single instance therefore gives a single global limit. Scaling
 workers or replicas multiplies the effective limit unless a shared backend is
 introduced.
 
+Storage quota and retention
+---------------------------
+Durable demo artifacts (delivered parquet, its lineage copy, quarantine
+records, and audit certificates) are kept for a bounded window and under a
+total size cap, so repeated public use cannot fill the instance disk even
+though each individual request is bounded. ``_enforce_demo_storage_quota``
+sweeps only the demo namespaces (``public-demo-*`` and ``datashell-demo``) plus
+audit certificates whose recorded tenant is a demo tenant, oldest first; it
+never touches API or other tenants' artifacts.
+
 Demo-specific knobs: ``DATASHELL_DEMO_CLI_TIMEOUT_SECONDS`` (per enforcement
-run), ``DATASHELL_DEMO_WALKTHROUGH_TIMEOUT_SECONDS`` (one-click demo), and
+run), ``DATASHELL_DEMO_WALKTHROUGH_TIMEOUT_SECONDS`` (one-click demo),
 ``DATASHELL_DEMO_CAPACITY_WAIT_SECONDS`` (bounded wait for an execution slot
-before returning 503).
+before returning 503), ``DATASHELL_DEMO_ARTIFACT_RETENTION_MINUTES`` and
+``DATASHELL_DEMO_MAX_ARTIFACT_BYTES`` (artifact retention/cleanup policy), and
+``DATASHELL_DEMO_GLOBAL_RATE_LIMIT_REQUESTS_PER_MINUTE``.
 """
 
 from __future__ import annotations
@@ -63,6 +93,8 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -112,9 +144,38 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
+def _bool_env(name: str, default: bool) -> bool:
+    """Read a strict boolean knob; unrecognized values fail fast at boot."""
+    raw = os.getenv(name, "true" if default else "false").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    raise RuntimeError(f"{name} must be a boolean (got {raw!r})")
+
+
 DEMO_CLI_TIMEOUT_SECONDS = _positive_int_env("DATASHELL_DEMO_CLI_TIMEOUT_SECONDS", 300)
 DEMO_WALKTHROUGH_TIMEOUT_SECONDS = _positive_int_env("DATASHELL_DEMO_WALKTHROUGH_TIMEOUT_SECONDS", 300)
 DEMO_CAPACITY_WAIT_SECONDS = _positive_int_env("DATASHELL_DEMO_CAPACITY_WAIT_SECONDS", 5)
+
+# Durable-artifact retention/cleanup policy. A public demo accumulates delivered
+# parquet, quarantine records and audit certificates for the life of the
+# container; without a quota, repeated use fills the disk even though every
+# individual request is bounded. Oldest artifacts are evicted first.
+DEMO_ARTIFACT_RETENTION_MINUTES = _positive_int_env("DATASHELL_DEMO_ARTIFACT_RETENTION_MINUTES", 120)
+DEMO_MAX_ARTIFACT_BYTES = _positive_int_env("DATASHELL_DEMO_MAX_ARTIFACT_BYTES", 512 * 1024 * 1024)
+
+# Identity-independent process ceiling. Client identity may be unforgeable only
+# when the deployment has verified its proxy; this ceiling bounds abuse even
+# when the per-client key can be spoofed by rotating X-Forwarded-For.
+DEMO_GLOBAL_RATE_LIMIT_RPM = _positive_int_env(
+    "DATASHELL_DEMO_GLOBAL_RATE_LIMIT_REQUESTS_PER_MINUTE",
+    max(settings.rate_limit_requests_per_minute * 10, 600),
+)
+
+# Off by default: trust the client-supplied X-Forwarded-For value only after the
+# operator has verified the deployment's proxy cannot forward a forged value.
+DEMO_TRUST_FORWARDED_HEADERS = _bool_env("DATASHELL_DEMO_TRUST_FORWARDED_HEADERS", False)
 
 # The CLI's structured output is captured to disk and read back with a hard
 # cap, so a misbehaving run can never exhaust process memory through stdout.
@@ -139,25 +200,51 @@ DEMO_TENANT_NAMESPACE = "public-demo"
 
 # The token bucket is keyed by client address and bounded (idle entries are
 # evicted by TokenBucketRateLimiter). Process-local: per worker, per instance.
+# This per-client bucket is a *fairness* control, not a security boundary: the
+# client key is spoofable unless the deployment has verified its proxy.
 demo_rate_limiter = TokenBucketRateLimiter(settings.rate_limit_requests_per_minute)
+
+# Identity-independent process ceiling. Rotating a spoofed client key cannot
+# evade this bucket, so it bounds abuse of the unauthenticated demo regardless
+# of whether X-Forwarded-For is trustworthy. Process-local, like the above.
+demo_global_rate_limiter = TokenBucketRateLimiter(DEMO_GLOBAL_RATE_LIMIT_RPM)
 
 
 def _client_identity(request: Request) -> str:
-    """Best-effort caller identity for rate limiting.
+    """Best-effort caller identity for per-client rate limiting.
 
-    uvicorn's proxy-header support (enabled in Dockerfile.web behind Render's
-    router) populates ``request.client`` from X-Forwarded-For.
+    Returns the socket peer address by default. The client-supplied
+    ``X-Forwarded-For`` value is used only when
+    ``DATASHELL_DEMO_TRUST_FORWARDED_HEADERS`` is explicitly enabled, and then
+    only the *rightmost* hop — the value appended by the nearest proxy — is
+    taken, so a client that prepends forged hops cannot choose its own key.
+    Even the rightmost hop is trustworthy only if the proxy overwrites or
+    appends the header; that is a deployment fact this code cannot assume.
     """
+    if DEMO_TRUST_FORWARDED_HEADERS:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+        if hops:
+            return hops[-1]
     if request.client and request.client.host:
         return request.client.host
     return "unknown"
 
 
 def _rate_limit_or_raise(request: Request) -> None:
+    # Per-client fairness first, then the identity-independent ceiling. Both
+    # must pass; a spoofed per-client key still consumes the global budget.
     if not demo_rate_limiter.allow(_client_identity(request)):
         raise HTTPException(
             status_code=429,
             detail="Too many demo requests from your address. Wait a moment and try again.",
+            headers={"Retry-After": "5"},
+        )
+    if not demo_global_rate_limiter.allow("global"):
+        logger.warning("demo global rate ceiling reached; rejecting request")
+        raise HTTPException(
+            status_code=429,
+            detail="The demo is receiving too many requests right now. Wait a moment and try again.",
             headers={"Retry-After": "5"},
         )
 
@@ -315,6 +402,145 @@ def _demo_delivery_target(demo_tenant: str) -> Path:
     # Unique per run: concurrent or repeated runs from users sharing a tenant
     # value can never overwrite each other's delivered artifacts.
     return tenant_dir / f"demo_{uuid.uuid4().hex}.parquet"
+
+
+# ------------------------------------------------- demo storage quota
+#
+# The public demo durably preserves delivered parquet, quarantine records and
+# audit certificates. Each request is individually bounded, but without a
+# quota repeated use would slowly fill the instance disk. These helpers sweep
+# *only* the demo namespaces, oldest artifact first, so API and other-tenant
+# artifacts are never touched.
+
+_demo_quota_lock = threading.Lock()
+
+
+def _is_demo_tenant_key(key: str) -> bool:
+    """True for storage keys that belong to the public demo namespaces."""
+    return key == "datashell-demo" or key.startswith(f"{DEMO_TENANT_NAMESPACE}-")
+
+
+def _audit_certificate_is_demo(path: Path) -> bool:
+    """Identify a demo audit certificate by the tenant recorded inside it.
+
+    Audit certificates live in one flat directory shared with the API, so the
+    filename is not enough. The file is read under a hard size cap and any
+    unreadable/oversized/unparseable file is treated as *not* ours (never
+    deleted).
+    """
+    try:
+        if path.stat().st_size > 256 * 1024:
+            return False
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    tenant = data.get("tenant_id") if isinstance(data, dict) else None
+    if not isinstance(tenant, str) or not tenant:
+        return False
+    try:
+        key = settings.tenant_storage_key(tenant)
+    except ValueError:
+        return False
+    return _is_demo_tenant_key(key)
+
+
+def _iter_demo_artifact_files() -> List[Path]:
+    """Every durable artifact owned by the demo namespaces (files only)."""
+    files: List[Path] = []
+    for tenants_root in (
+        settings.output_dir / "tenants",
+        settings.quarantine_dir / "tenants",
+    ):
+        try:
+            if not tenants_root.is_dir():
+                continue
+            children = list(tenants_root.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if not child.is_dir() or not _is_demo_tenant_key(child.name):
+                continue
+            try:
+                files.extend(p for p in child.rglob("*") if p.is_file())
+            except OSError:
+                continue
+    try:
+        if settings.audit_dir.is_dir():
+            for cert in settings.audit_dir.glob("*_audit_certificate.json"):
+                if _audit_certificate_is_demo(cert):
+                    files.append(cert)
+    except OSError:
+        pass
+    return files
+
+
+def _safe_unlink(path: Path) -> int:
+    """Delete one artifact, returning its size on success and 0 otherwise."""
+    try:
+        size = path.stat().st_size
+        path.unlink()
+        return size
+    except OSError:
+        return 0
+
+
+def _enforce_demo_storage_quota() -> None:
+    """Evict oldest demo artifacts beyond the retention window or size cap.
+
+    Called at the start of every demo request, before that request has produced
+    any artifact, so a run's own fresh outputs are never candidates: they are the
+    newest by mtime and the age window keeps them well clear of the deadline.
+    The sweep is best-effort and never raises, so a cleanup problem cannot fail an
+    otherwise successful request. A non-blocking lock keeps concurrent requests
+    from sweeping at the same time.
+    """
+    if not _demo_quota_lock.acquire(blocking=False):
+        return
+    try:
+        now = time.time()
+        retention_seconds = DEMO_ARTIFACT_RETENTION_MINUTES * 60
+        entries: List[tuple] = []
+        for path in _iter_demo_artifact_files():
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            entries.append((stat.st_mtime, stat.st_size, path))
+        entries.sort(key=lambda entry: entry[0])  # oldest first
+
+        evicted_bytes = 0
+        evicted_files = 0
+        retained_bytes = 0
+
+        # 1) age-based retention
+        survivors: List[tuple] = []
+        for mtime, size, path in entries:
+            if now - mtime > retention_seconds:
+                evicted_bytes += _safe_unlink(path)
+                evicted_files += 1
+            else:
+                survivors.append((mtime, size, path))
+                retained_bytes += size
+
+        # 2) total-bytes cap, still oldest first
+        for mtime, size, path in survivors:
+            if retained_bytes <= DEMO_MAX_ARTIFACT_BYTES:
+                break
+            deleted = _safe_unlink(path)
+            if deleted:
+                retained_bytes -= deleted
+                evicted_bytes += deleted
+                evicted_files += 1
+
+        if evicted_files:
+            logger.info(
+                "demo storage quota: evicted %d artifact(s), %d bytes (retained %d bytes)",
+                evicted_files,
+                evicted_bytes,
+                retained_bytes,
+            )
+    finally:
+        _demo_quota_lock.release()
 
 
 def _create_staging_dir(prefix: str) -> Path:
@@ -563,6 +789,9 @@ async def _enforce_upload(
 
     staging: Optional[Path] = None
     try:
+        # Evict stale demo artifacts before allocating new ones, so the quota
+        # bounds long-run disk use and frees space for this request.
+        _enforce_demo_storage_quota()
         staging = _create_staging_dir("datashell_web_")
         contract_path = staging / "contract.json"
         source_path = staging / f"source{suffix}"
@@ -650,6 +879,7 @@ async def playground() -> FileResponse:
 async def run_demo(request: Request) -> JSONResponse:
     """Run the self-contained ``datashell demo --json`` walkthrough."""
     _rate_limit_or_raise(request)
+    _enforce_demo_storage_quota()
     await _acquire_cli_slot()
     try:
         staging = _create_staging_dir("datashell_webd_")

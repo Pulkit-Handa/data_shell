@@ -75,7 +75,7 @@ jobs:
       - name: Static security scan (Bandit)
         run: |
           python -m pip install "bandit==1.9.4"
-          bandit -q -r datashell -c .bandit -ll
+          bandit -q -r datashell web -c .bandit -ll
       - name: Archive release evidence
         if: always()
         uses: actions/upload-artifact@v4

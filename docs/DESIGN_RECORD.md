@@ -77,6 +77,44 @@ suppressed — a regression that read as a clean run.
 and comparison. `DriftCheckResult` and the certificate schema are unchanged; tenant isolation
 is unchanged.
 
+## Demo hardening follow-ups
+
+A later review raised two issues that the first pass left implicit.
+
+**Client-IP rate limiting was spoofable.** `Dockerfile.web` shipped
+`--forwarded-allow-ips="*"`, so uvicorn populated `request.client` from the **leftmost**
+`X-Forwarded-For` entry — the value a visitor controls — and `_client_identity()` keyed the
+token bucket on it. A visitor could rotate the header per request and bypass the limit
+entirely, so the demo's only admission control on the cheap path was void. Two layers were
+changed so protection does not depend on an unverified proxy:
+
+- The demo image now defaults `--forwarded-allow-ips` to `${FORWARDED_ALLOW_IPS:-127.0.0.1}`
+  (matching the API image) and the app consults `X-Forwarded-For` only when
+  `DATASHELL_DEMO_TRUST_FORWARDED_HEADERS=true`, taking the **rightmost** hop so a forged
+  prefix cannot choose the key. Both default safe.
+- An **identity-independent** process ceiling
+  (`DATASHELL_DEMO_GLOBAL_RATE_LIMIT_REQUESTS_PER_MINUTE`) is applied in addition to the
+  per-client bucket, so even a fully spoofed identity is bounded. The per-client bucket is
+  now documented as a fairness control, not a security boundary, and `docs/OPERATIONS.md`
+  gives the exact procedure an operator must run before enabling header trust.
+
+Rejected: keeping `*` and merely documenting it (the limit would still be bypassable);
+switching uvicorn to "trust nobody" and deleting the per-client bucket (loses fairness for
+the common single-proxy deployment); trusting the rightmost hop unconditionally (only safe
+if the proxy appends/overwrites — an assumption we cannot make from here).
+
+**Durable demo artifacts had no quota.** delivered parquet, lineage copies, quarantine
+records and audit certificates accumulated for the life of the container; individually
+bounded requests still filled the disk. `_enforce_demo_storage_quota` now evicts oldest
+first after `DATASHELL_DEMO_ARTIFACT_RETENTION_MINUTES` (default 120) or beyond
+`DATASHELL_DEMO_MAX_ARTIFACT_BYTES` (default 512 MiB), scoped strictly to the demo
+namespaces (`public-demo-*`, `datashell-demo`) plus audit certificates whose recorded
+`tenant_id` is a demo tenant. It never touches API/other tenants' artifacts, never deletes
+oversized or unparseable certificates, is serialized by a non-blocking lock, and never
+raises — a cleanup problem cannot fail a request. The sweep runs before each run, so freed
+space is available to the current request and the current run's fresh artifacts are never
+candidates.
+
 ## Release engineering
 
 - **Lockfiles resolve on Python 3.11 (lowest supported),** not on the developer's 3.14.
