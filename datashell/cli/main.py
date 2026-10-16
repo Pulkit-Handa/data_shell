@@ -17,6 +17,7 @@ import argparse
 import json
 import sys
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -456,10 +457,30 @@ def _demo_records() -> List[Dict[str, Any]]:
 def command_demo(args: argparse.Namespace) -> int:
     """Self-contained proof: refuse bad rows, publish good ones, detect tampering."""
     workspace = Path(tempfile.mkdtemp(prefix="datashell_demo_"))
-    target = workspace / "curated_settlements.parquet"
-    audit = workspace / "run_audit.json"
+    if settings.is_production_mode:
+        # The production sandbox authorizes delivery only inside a tenant
+        # delivery namespace — system temp directories are staging space, not
+        # delivery targets — and audit certificates plus their underlying
+        # artifacts (delivered rows, quarantine records) must remain under the
+        # output root to be verifiable. The walkthrough therefore delivers into
+        # a dedicated, explicitly authorized demo tenant directory, quarantines
+        # into that tenant's isolated quarantine directory, and writes a
+        # durable certificate. The run is scoped to the same tenant so the
+        # boundary checks agree.
+        demo_tenant = "datashell-demo"
+        target = (
+            settings.get_tenant_delivery_dir(demo_tenant)
+            / f"curated_settlements_{uuid.uuid4().hex[:12]}.parquet"
+        )
+        quarantine = settings.get_tenant_quarantine_dir(demo_tenant)
+        audit = settings.audit_dir / f"demo_walkthrough_{uuid.uuid4().hex[:12]}_audit_certificate.json"
+    else:
+        demo_tenant = "default-tenant"
+        target = workspace / "curated_settlements.parquet"
+        quarantine = workspace / "quarantine"
+        audit = workspace / "run_audit.json"
 
-    contract = DataContract(**_demo_contract_payload(workspace))
+    contract = DataContract(**_demo_contract_payload(workspace, target, quarantine))
     records = _demo_records()
 
     if not args.json:
@@ -472,7 +493,7 @@ def command_demo(args: argparse.Namespace) -> int:
         print(f"    Batch rules: {[b.rule_id for b in contract.spec.quality.batch_rules]}")
         print(f"\n[2] Generated {len(records):,} feed records (900 valid, 100 seeded defects)")
 
-    pipeline = DataShellPipeline(contract)
+    pipeline = DataShellPipeline(contract, tenant_id=demo_tenant)
     result = pipeline.run_records(
         records=records,
         target_path_override=str(target),
@@ -538,12 +559,12 @@ def command_demo(args: argparse.Namespace) -> int:
     return 0 if result.status.value != "FAILED" else 1
 
 
-def _demo_contract_payload(workspace: Path) -> Dict[str, Any]:
+def _demo_contract_payload(workspace: Path, target: Path, quarantine: Path) -> Dict[str, Any]:
     payload = json.loads(json.dumps(_DEMO_CONTRACT))
     payload["spec"]["sources"][0]["path"] = str(workspace / "incoming.jsonl")
     payload["spec"]["delivery"] = {
-        "targets": [{"type": "PARQUET", "connectionRef": "local", "path": str(workspace / "curated_settlements.parquet"), "mode": "overwrite"}],
-        "quarantinePath": str(workspace / "quarantine"),
+        "targets": [{"type": "PARQUET", "connectionRef": "local", "path": str(target), "mode": "overwrite"}],
+        "quarantinePath": str(quarantine),
     }
     return payload
 

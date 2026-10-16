@@ -1,0 +1,56 @@
+# Explicit allowlist for the source distribution (sdist).
+#
+# Nothing is inherited from the working tree by default: only the paths matched
+# below are packed, and the "never ship" block prunes runtime state, caches and
+# build artifacts even if a future rule would otherwise pull them in.
+# CI runs scripts/verify_distribution_contents.py against the built wheel and
+# sdist, so a violation here fails the build rather than shipping silently.
+#
+# The wheel is governed separately by [tool.setuptools.packages.find] in
+# pyproject.toml (an include allowlist: datashell* only).
+
+# --- project identity, license, contributor docs ---------------------------
+include pyproject.toml
+include README.md
+include CHANGELOG.md
+include LICENSE
+include SECURITY.md
+include CODE_OF_CONDUCT.md
+include CONTRIBUTING.md
+include TUTORIAL.md
+include .bandit
+
+# --- reproducible dependency sets (an sdist can install pinned + hashed) ---
+include requirements.lock
+include requirements-dev.lock
+include requirements-build.lock
+include requirements-build.in
+
+# --- fixtures and tests (the sdist must be independently testable) ---------
+graft examples
+graft tests
+
+# --- demo/playground application source: engine + templates + static assets -
+graft web
+
+# --- release-engineering scripts used by the suite and by CI ---------------
+graft scripts
+
+# --- never ship working-tree state, caches, or unrelated trees -------------
+prune output
+prune data
+prune contracts_registry
+prune build
+prune dist
+prune .git
+prune .github
+prune .pytest_cache
+prune docs
+prune benchmarks
+prune deploy
+prune integrations
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude *.db
+global-exclude *.parquet
+global-exclude .DS_Store

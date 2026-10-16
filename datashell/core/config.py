@@ -303,6 +303,12 @@ class EnterpriseSettings(BaseModel):
     drift_max_metric_drift_pct: float = Field(
         default_factory=lambda: float(os.getenv("DRIFT_MAX_METRIC_DRIFT_PCT", "50.0"))
     )
+    # Rate/proportion metrics (for example null rates) are compared by absolute
+    # delta in proportion points rather than a relative percentage, which is
+    # undefined for zero and near-zero baselines. 0.10 allows a 10-point move.
+    drift_max_rate_abs_delta: float = Field(
+        default_factory=lambda: float(os.getenv("DRIFT_MAX_RATE_ABS_DELTA", "0.10"))
+    )
     drift_metric_min_baseline_samples: int = Field(
         default_factory=lambda: int(os.getenv("DRIFT_METRIC_MIN_BASELINE_SAMPLES", "1"))
     )
@@ -474,6 +480,8 @@ class EnterpriseSettings(BaseModel):
             raise RuntimeError("DRIFT_MAX_VOLUME_DROP_PCT cannot be negative")
         if self.drift_max_metric_drift_pct < 0:
             raise RuntimeError("DRIFT_MAX_METRIC_DRIFT_PCT cannot be negative")
+        if not (0.0 < self.drift_max_rate_abs_delta <= 1.0):
+            raise RuntimeError("DRIFT_MAX_RATE_ABS_DELTA must be greater than 0 and at most 1")
         if self.drift_metric_min_baseline_samples < 1:
             raise RuntimeError("DRIFT_METRIC_MIN_BASELINE_SAMPLES must be a positive integer")
         if self.webhook_timeout_seconds <= 0:

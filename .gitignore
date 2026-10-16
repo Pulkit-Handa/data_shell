@@ -66,3 +66,4 @@ contracts_registry/
 !uv.lock
 !requirements.lock
 !requirements-dev.lock
+!requirements-build.lock

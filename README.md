@@ -1,6 +1,6 @@
 # Data Shell — Enterprise Perimeter Gateway
 
-[![Tests](https://img.shields.io/badge/tests-182%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-247%20passing-brightgreen.svg)]()
 [![Security](https://img.shields.io/badge/security-hardened%20RBAC%20%2B%20sandboxed-blueviolet.svg)]()
 [![Cryptography](https://img.shields.io/badge/crypto-Ed25519%20%2B%20HMAC--SHA256-blue.svg)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-Prometheus%20metrics-orange.svg)]()
@@ -199,11 +199,15 @@ provider (`integrations/airflow`) with `DataShellEnforceOperator` (gateway API) 
 
 ## Local Quickstart
 
-### 1. Run the test suite (182 tests)
+### 1. Run the test suite (247 tests)
 ```bash
-pip install -e ".[dev]"
+pip install --require-hashes -r requirements-dev.lock   # hash-pinned dependency set
+pip install -e .                                        # the package itself
 pytest -q
 ```
+The lockfiles are the reproducible dependency sets used by CI and the container images.
+Regenerate them on the lowest supported interpreter (3.11), not the developer's — see
+[docs/OPERATIONS.md](docs/OPERATIONS.md) § "Regenerating the dependency lockfiles".
 
 ### 2. See the boundary do its job
 ```bash

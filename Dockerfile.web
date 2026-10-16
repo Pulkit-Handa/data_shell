@@ -2,29 +2,77 @@
 #
 # Image for the public Data Shell demo/playground (web/main.py).
 #
-# This is intentionally separate from the hardened API image (./Dockerfile):
-# the demo serves static HTML plus two endpoints that shell out to the CLI, and
-# does not need the server entrypoint or its security posture.
+# Intentionally separate from the hardened API image (./Dockerfile): the demo
+# serves static HTML plus a few endpoints that shell out to the CLI, does not
+# need the server entrypoint, and relies on process-local concurrency, capacity
+# and rate-limit bounds documented in docs/OPERATIONS.md.
+#
+# Reproducibility mirrors the API image: runtime dependencies come exclusively
+# from the hash-pinned requirements.lock, and the engine is built into a wheel
+# in a throwaway builder stage using the hash-pinned build backend. Only `web/`
+# is copied into the runtime stage, so `datashell` always resolves to the
+# installed wheel rather than a checkout on PYTHONPATH. Runs as non-root.
+
+# ---------------------------------------------------------------------------
+# builder: build the wheel from the checkout with the pinned build backend
+# ---------------------------------------------------------------------------
+FROM python:3.12-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /build
+
+COPY requirements.lock requirements-build.lock ./
+RUN python -m pip install --require-hashes -r requirements-build.lock
+
+COPY pyproject.toml README.md ./
+COPY datashell ./datashell
+RUN python -m pip wheel --no-deps --no-build-isolation --wheel-dir /wheels .
+
+# ---------------------------------------------------------------------------
+# runtime
+# ---------------------------------------------------------------------------
 FROM python:3.12-slim AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PORT=8000 \
     PYTHONPATH=/app \
     DATASHELL_STORAGE_ROOT=/app/storage \
     TMPDIR=/app/storage/tmp
 
+RUN groupadd --system --gid 10001 datashell \
+    && useradd --system --uid 10001 --gid datashell --home-dir /nonexistent --shell /usr/sbin/nologin datashell
+
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
-COPY datashell ./datashell
+# Runtime dependencies: exactly the resolved, hash-verified release set.
+COPY requirements.lock ./
+RUN python -m pip install --require-hashes -r requirements.lock
+
+# The engine wheel, installed without a second, unpinned resolution.
+COPY --from=builder /wheels /tmp/wheels
+RUN python -m pip install --no-deps /tmp/wheels/*.whl \
+    && rm -rf /tmp/wheels
+
+# Demo application source: templates, static assets and the FastAPI app. The
+# engine itself is never copied — it comes from the installed wheel.
 COPY web ./web
 
-RUN python -m pip install --upgrade pip \
-    && python -m pip install --no-cache-dir . \
-    && mkdir -p /app/storage/tmp /app/storage/output \
-    && rm -rf /root/.cache /tmp/*
+# Ephemeral in-container storage. Uploads are staged under TMPDIR and removed
+# per request; delivered artifacts, quarantine records and audit certificates
+# persist for the life of the container and are lost on redeploy.
+RUN mkdir -p /app/storage/tmp /app/storage/output \
+    && chown -R datashell:datashell /app/storage \
+    && rm -rf /tmp/*
 
+USER 10001:10001
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)" || exit 1
 
 CMD ["sh", "-c", "exec uvicorn web.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips=\"*\" --workers 1"]

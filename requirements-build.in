@@ -1,0 +1,14 @@
+# Build-time tooling only — never installed into a runtime image.
+#
+# These pins make wheel/sdist builds reproducible: PEP 517 builds run with
+# `--no-build-isolation` against exactly these versions instead of resolving
+# an unconstrained build backend from the network on every build.
+#
+# Regenerate requirements-build.lock with:
+#
+#    pip-compile --generate-hashes --allow-unsafe \
+#        --output-file=requirements-build.lock requirements-build.in
+#
+setuptools
+wheel
+build

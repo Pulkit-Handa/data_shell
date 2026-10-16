@@ -11,6 +11,16 @@
 # instance and a 120 GB disk, so it is intentionally kept out of the one-click
 # flow.
 #
+# Production boot requires ALLOWED_ORIGINS: DATASHELL refuses to start with an
+# empty or wildcard CORS allowlist. Set it to this service's own HTTPS origin.
+# The playground is same-origin, so if Render assigns a different hostname the
+# demo still works — only cross-origin browser calls would lack CORS headers.
+# Keep it in sync with the deployed URL, and never use "*".
+#
+# Process-local limits (no shared backend on the free plan): uploads/rejections
+# are bounded, concurrent CLI runs and request staging are capped, and the rate
+# limiter counts per client IP in-process. See docs/OPERATIONS.md.
+#
 # Note: the free plan cold-starts after ~15 minutes of inactivity.
 services:
   - type: web
@@ -33,6 +43,22 @@ services:
       # Keep the playground to small files (50 MiB) so the free instance stays healthy.
       - key: MAX_UPLOAD_SIZE_BYTES
         value: "52428800"
+      # Required in production: explicit HTTPS origins only (never "*").
+      - key: ALLOWED_ORIGINS
+        value: https://data-shell-demo.onrender.com
+      # One CLI run at a time: each run is a subprocess on a 512 MB instance.
+      # Excess requests queue briefly, then receive 503 with Retry-After.
+      - key: MAX_CONCURRENT_RUNS
+        value: "1"
+      - key: DATASHELL_DEMO_CLI_TIMEOUT_SECONDS
+        value: "300"
+      - key: DATASHELL_DEMO_WALKTHROUGH_TIMEOUT_SECONDS
+        value: "300"
+      - key: DATASHELL_DEMO_CAPACITY_WAIT_SECONDS
+        value: "5"
+      # Per-client-IP token bucket for the unauthenticated public demo.
+      - key: RATE_LIMIT_REQUESTS_PER_MINUTE
+        value: "60"
       - key: DATASHELL_API_KEY
         generateValue: true
       - key: DATASHELL_HMAC_SECRET

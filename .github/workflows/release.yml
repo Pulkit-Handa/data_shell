@@ -23,16 +23,24 @@ jobs:
           python-version: '3.12'
           cache: pip
 
-      - name: Install build dependencies
+      - name: Install pinned build tooling (hash-verified)
+        run: python -m pip install --require-hashes -r requirements-build.lock
+
+      - name: Verify tag, package version, changelog and lockfiles agree
+        run: python scripts/check_release_metadata.py --tag "${GITHUB_REF_NAME}"
+
+      - name: Build package from the pinned build backend
+        run: python -m build --no-isolation
+
+      - name: Verify built distribution contents (wheel + sdist)
+        run: python scripts/verify_distribution_contents.py --dist-dir dist
+
+      - name: Generate SBOM from the locked release dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install build wheel cyclonedx-bom
-
-      - name: Build package
-        run: python -m build
-
-      - name: Generate SBOM
-        run: cyclonedx-py environment --output-file dist/sbom.cyclonedx.json --output-format JSON
+          python -m pip install "cyclonedx-bom==7.5.0"
+          cyclonedx-py requirements requirements.lock --pyproject pyproject.toml \
+            --mc-type application --output-reproducible \
+            --output-file dist/sbom.cyclonedx.json --output-format JSON
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
