@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import secrets
 import stat
 import threading
@@ -786,3 +787,211 @@ def test_health_endpoint(demo):
         response = client.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+# ------------------------------------------- client identity / proxy trust
+
+
+def _request(module, *, forwarded_for=None, peer="203.0.113.7"):
+    """A minimal ASGI request scope for exercising identity/rate-limit logic."""
+    from starlette.requests import Request
+
+    headers = []
+    if forwarded_for is not None:
+        headers.append((b"x-forwarded-for", forwarded_for.encode()))
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/enforce",
+        "query_string": b"",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "client": (peer, 40000),
+        "headers": headers,
+    }
+    return Request(scope)
+
+
+def test_client_identity_ignores_forwarded_header_by_default(demo):
+    """With trust disabled, a forged X-Forwarded-For never becomes the key."""
+    module = demo.module
+    assert module.DEMO_TRUST_FORWARDED_HEADERS is False
+    forged = _request(module, forwarded_for="198.51.100.9")
+    assert module._client_identity(forged) == "203.0.113.7"
+
+
+@pytest.mark.parametrize(
+    "demo",
+    [{"env": {"DATASHELL_DEMO_TRUST_FORWARDED_HEADERS": "true"}}],
+    indirect=True,
+)
+def test_client_identity_uses_rightmost_forwarded_hop(demo):
+    """Even when enabled, the nearest proxy hop is used, not a client prefix."""
+    module = demo.module
+    assert module.DEMO_TRUST_FORWARDED_HEADERS is True
+    request = _request(module, forwarded_for="1.2.3.4, 198.51.100.9")
+    # Rightmost hop wins, so prepending a forged value cannot choose the key.
+    assert module._client_identity(request) == "198.51.100.9"
+
+
+def test_bool_env_rejects_unrecognized_values(demo, monkeypatch):
+    monkeypatch.setenv("DATASHELL_TEST_BOOL", "maybe")
+    with pytest.raises(RuntimeError):
+        demo.module._bool_env("DATASHELL_TEST_BOOL", False)
+
+
+@pytest.mark.parametrize(
+    "demo",
+    [
+        {
+            "env": {
+                # Worst case: the client key is fully spoofable...
+                "DATASHELL_DEMO_TRUST_FORWARDED_HEADERS": "true",
+                "RATE_LIMIT_REQUESTS_PER_MINUTE": "100000",
+                # ...but a small identity-independent ceiling still applies.
+                "DATASHELL_DEMO_GLOBAL_RATE_LIMIT_REQUESTS_PER_MINUTE": "3",
+            }
+        }
+    ],
+    indirect=True,
+)
+def test_global_ceiling_bounds_spoofed_client_keys(demo):
+    """Rotating a forged client identity cannot bypass the global ceiling."""
+    module = demo.module
+    for index in range(3):
+        request = _request(module, forwarded_for=f"10.0.{index}.{index}")
+        module._rate_limit_or_raise(request)  # within the global budget
+    with pytest.raises(module.HTTPException) as excinfo:
+        module._rate_limit_or_raise(_request(module, forwarded_for="10.9.9.9"))
+    assert excinfo.value.status_code == 429
+    assert excinfo.value.headers["Retry-After"] == "5"
+
+
+@pytest.mark.parametrize(
+    "demo",
+    [{"env": {"DATASHELL_DEMO_GLOBAL_RATE_LIMIT_REQUESTS_PER_MINUTE": "100000"}}],
+    indirect=True,
+)
+def test_per_client_limit_still_applies_with_stable_identity(demo, monkeypatch):
+    """The per-client fairness bucket is evaluated before the global ceiling."""
+    module = demo.module
+    monkeypatch.setattr(module, "demo_rate_limiter", TokenBucketRateLimiter(2))
+    module._rate_limit_or_raise(_request(module))
+    module._rate_limit_or_raise(_request(module))
+    with pytest.raises(module.HTTPException) as excinfo:
+        module._rate_limit_or_raise(_request(module))
+    assert excinfo.value.status_code == 429
+
+
+# ------------------------------------------------- demo storage quota policy
+
+
+def _touch(path: Path, age_seconds: float, payload: bytes = b"x") -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(payload)
+    stamp = time.time() - age_seconds
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+def _audit_cert(path: Path, tenant: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"tenant_id": tenant, "run_id": path.stem}), encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    "demo",
+    [{"env": {"DATASHELL_DEMO_ARTIFACT_RETENTION_MINUTES": "30"}}],
+    indirect=True,
+)
+def test_storage_quota_evicts_only_stale_demo_artifacts(demo):
+    module, dirs = demo.module, demo.dirs
+    old_demo = _touch(dirs["output_dir"] / "tenants" / "public-demo-acme" / "old.parquet", 3600)
+    new_demo = _touch(dirs["output_dir"] / "tenants" / "public-demo-acme" / "new.parquet", 10)
+    old_quarantine = _touch(
+        dirs["quarantine_dir"] / "tenants" / "datashell-demo" / "old_held.parquet", 3600
+    )
+    # The CLI walkthrough namespace is a demo namespace too.
+    fresh_quarantine = _touch(
+        dirs["quarantine_dir"] / "tenants" / "datashell-demo" / "fresh_held.parquet", 5
+    )
+    # A non-demo tenant must never be touched, however old.
+    api_tenant = _touch(dirs["output_dir"] / "tenants" / "acme" / "keep.parquet", 100000)
+    demo_cert = _audit_cert(dirs["audit_dir"] / "dm_run_demo_audit_certificate.json", "public-demo-acme")
+    os.utime(demo_cert, (time.time() - 3600, time.time() - 3600))
+    api_cert = _audit_cert(dirs["audit_dir"] / "dm_run_api_audit_certificate.json", "acme")
+    os.utime(api_cert, (time.time() - 100000, time.time() - 100000))
+
+    module._enforce_demo_storage_quota()
+
+    assert not old_demo.exists()
+    assert not old_quarantine.exists()
+    assert not demo_cert.exists()
+    assert new_demo.exists()
+    assert fresh_quarantine.exists()
+    assert api_tenant.exists(), "non-demo tenant artifact was evicted"
+    assert api_cert.exists(), "non-demo audit certificate was evicted"
+
+
+@pytest.mark.parametrize(
+    "demo",
+    [
+        {
+            "env": {
+                "DATASHELL_DEMO_ARTIFACT_RETENTION_MINUTES": "100000",
+                "DATASHELL_DEMO_MAX_ARTIFACT_BYTES": "100",
+            }
+        }
+    ],
+    indirect=True,
+)
+def test_storage_quota_enforces_total_bytes_oldest_first(demo):
+    module, dirs = demo.module, demo.dirs
+    tenant_dir = dirs["output_dir"] / "tenants" / "public-demo-acme"
+    oldest = _touch(tenant_dir / "a.parquet", 3000, b"a" * 60)
+    middle = _touch(tenant_dir / "b.parquet", 2000, b"b" * 60)
+    newest = _touch(tenant_dir / "c.parquet", 1000, b"c" * 60)
+    outside = _touch(dirs["output_dir"] / "tenants" / "other" / "keep.parquet", 100000, b"k" * 60)
+
+    module._enforce_demo_storage_quota()
+
+    # 180 bytes > 100 cap -> the two oldest demo files go, newest survives.
+    assert not oldest.exists()
+    assert not middle.exists()
+    assert newest.exists()
+    assert outside.exists()
+
+
+@pytest.mark.parametrize(
+    "demo",
+    [{"env": {"DATASHELL_DEMO_ARTIFACT_RETENTION_MINUTES": "30"}}],
+    indirect=True,
+)
+def test_oversized_or_unreadable_audit_certificates_are_never_deleted(demo):
+    module, dirs = demo.module, demo.dirs
+    big = _touch(dirs["audit_dir"] / "dm_run_big_audit_certificate.json", 3600, b"{" + b"0" * 400000)
+    garbage = _touch(dirs["audit_dir"] / "dm_run_bad_audit_certificate.json", 3600, b"not json")
+
+    module._enforce_demo_storage_quota()
+
+    assert big.exists()
+    assert garbage.exists()
+
+
+@pytest.mark.parametrize(
+    "demo",
+    [{"env": {"DATASHELL_DEMO_ARTIFACT_RETENTION_MINUTES": "30"}}],
+    indirect=True,
+)
+def test_enforce_endpoint_sweeps_stale_demo_artifacts(demo):
+    """The quota sweep runs as part of a real enforcement request."""
+    dirs = demo.dirs
+    stale = _touch(dirs["output_dir"] / "tenants" / "public-demo-acme" / "stale.parquet", 3600)
+
+    with demo.client() as client:
+        response = _run_enforce(client, _contract(batch_min_rows=3), _source(5))
+
+    assert response.status_code == 200, response.text
+    assert not stale.exists()
+

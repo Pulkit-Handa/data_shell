@@ -206,9 +206,14 @@ explicit `ALLOWED_ORIGINS`.
    returns `422`, and requests beyond the rate limit return `429` with `Retry-After`.
 5. On the free plan the container filesystem is ephemeral: delivered artifacts, quarantine
    records and audit certificates are lost on redeploy, and the service cold-starts after
-   roughly 15 minutes of inactivity.
+   roughly 15 minutes of inactivity. Durable demo artifacts are retained under the age/size
+   quota described below, so they cannot outgrow the instance between redeploys.
+6. Before enabling per-client rate limiting, run the proxy-trust verification in
+   "Process-local limits and client-IP trust" below. Until then the demo relies on the
+   identity-independent global ceiling; do not set `FORWARDED_ALLOW_IPS` or
+   `DATASHELL_DEMO_TRUST_FORWARDED_HEADERS` without that evidence.
 
-### Process-local limits (demo and API)
+### Process-local limits and client-IP trust (demo and API)
 
 Rate limiting, request staging limits, and the CLI-run slot are held **in process**. They
 bound a single worker; they are not a global quota. The demo image runs one worker with
@@ -217,6 +222,49 @@ bound a single worker; they are not a global quota. The demo image runs one work
 rejected with `503` (capacity) or `429` (rate) and a `Retry-After` header rather than being
 queued without bound. Before running multiple replicas or promising global quotas, replace
 the limiter and slot management with a shared backend.
+
+The unauthenticated demo applies **two** token buckets, and only the second is a security
+control:
+
+- a **per-client** bucket (`RATE_LIMIT_REQUESTS_PER_MINUTE`) for fairness, and
+- an **identity-independent** process ceiling
+  (`DATASHELL_DEMO_GLOBAL_RATE_LIMIT_REQUESTS_PER_MINUTE`, default 10× the per-client
+  value, minimum 600). Rotating a forged client key cannot evade it.
+
+**Do not treat the per-client limit as a security boundary.** The client key comes from the
+socket peer unless `DATASHELL_DEMO_TRUST_FORWARDED_HEADERS=true`, in which case the
+rightmost `X-Forwarded-For` hop is used. A wildcard `--forwarded-allow-ips` (as the demo
+image previously shipped) makes uvicorn populate the client address from the **leftmost**,
+client-controlled `X-Forwarded-For` entry, so a visitor could rotate that header and bypass
+the per-client bucket entirely. The image now defaults `FORWARDED_ALLOW_IPS` to `127.0.0.1`
+(loopback only) and the app flag defaults to `false`, i.e. header values are ignored.
+
+Before relying on per-client identity — behind a new proxy, or after changing the ingress —
+verify from the real deployment that a visitor cannot forge it:
+
+1. Send a request with an explicit forged header and a distinct source IP, e.g.
+   `curl -H 'X-Forwarded-For: 203.0.113.1' https://<host>/health` (repeat with several
+   different forged values).
+2. If the proxy overwrites or appends `X-Forwarded-For`, the offending value never reaches
+   the app unmodified; confirm by instrumenting `_client_identity` or by observing that a
+   burst from one agent with rotating headers still hits the limit.
+3. Only then set `FORWARDED_ALLOW_IPS` to the proxy's address/CIDR **and**
+   `DATASHELL_DEMO_TRUST_FORWARDED_HEADERS=true`. If verification is inconclusive, leave
+   both at their safe defaults; the global ceiling and the request/concurrency limits remain
+   the protection.
+
+### Demo artifact quota and cleanup
+
+The demo durably preserves delivered parquet, its run-lineage copy, quarantine records and
+audit certificates. Individually bounded requests still accumulate, so the demo evicts
+**only its own namespaces** (`public-demo-*` and `datashell-demo` under the tenant delivery
+and quarantine roots, plus audit certificates whose recorded `tenant_id` is a demo tenant),
+oldest first, after `DATASHELL_DEMO_ARTIFACT_RETENTION_MINUTES` (default 120) or once the
+total exceeds `DATASHELL_DEMO_MAX_ARTIFACT_BYTES` (default 512 MiB). API and other tenants'
+artifacts are never touched, oversized or unparseable certificates are never deleted, and a
+cleanup problem never fails a request. Raise the cap and/or point
+`DATASHELL_STORAGE_ROOT` at a larger volume before increasing demo traffic.
+
 
 ## Release gate and certification evidence
 

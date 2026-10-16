@@ -18,8 +18,19 @@
 # Keep it in sync with the deployed URL, and never use "*".
 #
 # Process-local limits (no shared backend on the free plan): uploads/rejections
-# are bounded, concurrent CLI runs and request staging are capped, and the rate
-# limiter counts per client IP in-process. See docs/OPERATIONS.md.
+# are bounded, concurrent CLI runs and request staging are capped, and two
+# in-process token buckets apply (a per-client fairness bucket and an
+# identity-independent global ceiling). The per-client key is NOT a security
+# boundary: unless a deployment proves it cannot be spoofed, protection rests
+# on the global ceiling plus the request/concurrency limits. Durable artifacts
+# are kept under an age + total-size quota so the container disk cannot fill.
+# See docs/OPERATIONS.md.
+#
+# Proxy trust is left at the image default (FORWARDED_ALLOW_IPS unset ->
+# loopback only) and DATASHELL_DEMO_TRUST_FORWARDED_HEADERS stays false, so a
+# visitor cannot choose the rate-limit key by forging X-Forwarded-For. Before
+# setting either, verify against the live service that Render's proxy cannot
+# forward a client-supplied X-Forwarded-For value unmodified.
 #
 # Note: the free plan cold-starts after ~15 minutes of inactivity.
 services:
@@ -56,9 +67,22 @@ services:
         value: "300"
       - key: DATASHELL_DEMO_CAPACITY_WAIT_SECONDS
         value: "5"
-      # Per-client-IP token bucket for the unauthenticated public demo.
+      # Per-client fairness bucket (best-effort; not a trust boundary) plus an
+      # identity-independent global ceiling that bounds abuse even if the
+      # client key is spoofed.
       - key: RATE_LIMIT_REQUESTS_PER_MINUTE
         value: "60"
+      - key: DATASHELL_DEMO_GLOBAL_RATE_LIMIT_REQUESTS_PER_MINUTE
+        value: "600"
+      # Keep the client-supplied X-Forwarded-For value untrusted by default.
+      - key: DATASHELL_DEMO_TRUST_FORWARDED_HEADERS
+        value: "false"
+      # Artifact retention/cleanup: demo outputs are evicted oldest-first after
+      # 2 hours or once they exceed 512 MiB, bounding container disk use.
+      - key: DATASHELL_DEMO_ARTIFACT_RETENTION_MINUTES
+        value: "120"
+      - key: DATASHELL_DEMO_MAX_ARTIFACT_BYTES
+        value: "536870912"
       - key: DATASHELL_API_KEY
         generateValue: true
       - key: DATASHELL_HMAC_SECRET

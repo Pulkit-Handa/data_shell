@@ -72,6 +72,13 @@ review.
   unsupported type, `422` policy rejection/invalid input, `429` rate limited, `503` at
   capacity, `504` timeout, `507` staging/disk failure, `500` engine failure. Staging is
   always deleted; delivered artifacts, quarantine and audit records persist.
+- **Two-tier demo rate limiting and a bounded artifact quota.** The per-client token
+  bucket is a fairness control, not a trust boundary: `X-Forwarded-For` is ignored unless
+  `DATASHELL_DEMO_TRUST_FORWARDED_HEADERS` is explicitly enabled, and the demo image
+  defaults `--forwarded-allow-ips` to loopback instead of `*`. An identity-independent
+  process ceiling bounds requests even when the client key is forged, and durable demo
+  artifacts are evicted oldest-first after an age window and under a total-size cap scoped
+  to the demo namespaces only.
 - **Reproducible installs.** `requirements.lock`, `requirements-dev.lock` and
   `requirements-build.lock` are resolved on the lowest supported interpreter (3.11) and
   installed with `--require-hashes` in CI, the release workflow and both images; PEP 517
@@ -129,7 +136,8 @@ review.
   and `requirements-build.lock` pin the full resolved dependency set with hashes
   (`pip-compile --generate-hashes`), and installations use `--require-hashes`. CI audits the
   resolved dependency sets with `pip-audit` and runs Bandit (medium severity and above)
-  against `datashell/`, with reviewed, documented waivers in `.bandit`.
+  against `datashell/` and the shipped demo app `web/`, with reviewed, documented waivers
+  in `.bandit`.
 
 ## Required before a real production launch
 
@@ -188,7 +196,12 @@ This revision was verified in a single Linux environment. What was actually exec
   checkout.
 - **Dependency audit**: `pip-audit -r requirements.lock -r requirements-dev.lock -r
   requirements-build.lock` reports no known vulnerabilities. **Bandit** 1.9.4 reports no
-  medium-or-higher findings.
+  medium-or-higher findings against `datashell/` and `web/`.
+- **Rate-limit and quota behaviour**: unit/integration tests prove that rotating a forged
+  `X-Forwarded-For` value cannot bypass the identity-independent global ceiling, that the
+  per-client bucket is ignored unless header trust is explicitly enabled, and that the demo
+  artifact quota evicts only stale/oversized demo artifacts (never API or other tenants'
+  data, never oversized or unparseable audit certificates).
 - **Distribution inspection**: `scripts/verify_distribution_contents.py` passes for the
   wheel (35 entries, `datashell/` + metadata only) and the sdist (code, legal files,
   lockfiles, `web/`, `tests/`, `examples/`, `scripts/`; no VCS data, caches, databases,
@@ -206,6 +219,7 @@ evidence above. Documentation is not evidence.
 | --- | --- | --- |
 | Clean CI run on 3.11/3.12/3.13 | **Not run** | The workflow was updated to install from the hash-pinned lockfiles, build wheel+sdist with the pinned backend, verify distribution contents and generate the SBOM from the lock; it must execute on GitHub-hosted runners. |
 | Live Render deployment | **Not run** | `render.yaml` now sets `ALLOWED_ORIGINS`, `MAX_CONCURRENT_RUNS`, demo timeouts and the rate limit (production boot fails without `ALLOWED_ORIGINS`). See `docs/OPERATIONS.md` § "Deploying the public demo on Render" for the manual verification steps. |
+| Proxy client-identity verification | **Not run** | Per-client rate limiting must not be treated as a security control until it is shown from the live service that a visitor cannot forge the address used for the bucket. The image and app now fail safe (header trust off, loopback-only proxy trust) and an identity-independent ceiling bounds abuse meanwhile; see `docs/OPERATIONS.md` § "Process-local limits and client-IP trust". |
 | Backup / restore / DR for the ledger | **Not run** | Requires a target environment, a backup medium and a timed restore test. |
 | Load / soak / disk-full / crash injection | **Not run** | Requires production-like hardware and a native RSS harness. |
 | Independent security review | **Not run** | Requires an external reviewer; `docs/THREAT_MODEL.md` is the input. |

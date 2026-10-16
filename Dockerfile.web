@@ -75,4 +75,9 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status == 200 else 1)" || exit 1
 
-CMD ["sh", "-c", "exec uvicorn web.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips=\"*\" --workers 1"]
+# Proxy-header trust is explicit and fails safe: only loopback is trusted for
+# X-Forwarded-For unless FORWARDED_ALLOW_IPS names the real proxy. With the
+# wildcard default this value fed _client_identity() and a visitor could rotate
+# X-Forwarded-For to bypass the per-client rate limit. The app also applies an
+# identity-independent global ceiling (DATASHELL_DEMO_GLOBAL_RATE_LIMIT_*).
+CMD ["sh", "-c", "exec uvicorn web.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips=\"${FORWARDED_ALLOW_IPS:-127.0.0.1}\" --workers 1"]
