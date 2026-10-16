@@ -8,6 +8,7 @@ Provision the following through your deployment secret manager, not a committed 
 
 - `DATASHELL_API_KEY`: unique, high-entropy bootstrap administrator key (at least 32 characters).
 - `DATASHELL_HMAC_SECRET`: independent high-entropy signing secret (at least 32 characters).
+- `DATASHELL_ED25519_PRIVATE_KEY` (optional): Ed25519 private key (PEM, or base64/hex of the DER or raw 32-byte seed). When set, audit certificates are signed asymmetrically so third parties verify with the public key alone. Set `DATASHELL_ED25519_KEY_ID` (default `datashell-ed25519-v1`) and publish the derived public key; retain previous key IDs and public keys in `DATASHELL_ED25519_KEYRING`.
 - `ALLOWED_ORIGINS`: exact HTTPS origins, comma-separated; no wildcards, paths, query strings, or fragments.
 - `FORWARDED_ALLOW_IPS`: explicit ingress/reverse-proxy IP addresses or CIDRs; never use `*`. Trust only proxy sources that network policy prevents untrusted clients from impersonating.
 - `MAX_UPLOAD_SIZE_BYTES` (default 20 GiB), `MAX_REQUEST_BODY_BYTES` (derived from the upload limit plus multipart overhead), `MAX_CONTROL_BODY_BYTES`.
@@ -15,6 +16,7 @@ Provision the following through your deployment secret manager, not a committed 
 - `DATASHELL_DISK_HEADROOM_MULTIPLIER` (default `2.0`): the per-run free-space preflight requires at least `source_bytes * multiplier` on the target volume.
 - `STREAM_AUTO_THRESHOLD_BYTES` (default `67108864`, i.e. 64 MiB) and `STREAM_CHUNK_ROWS` (default `100000`) to tune when inputs switch to out-of-core processing and how large each micro-batch is.
 - `DATASHELL_HISTORY_RETENTION_DAYS` (default `0` = keep everything) and, optionally, `DATASHELL_RUN_WEBHOOK_URL` / `DATASHELL_WEBHOOK_TIMEOUT_SECONDS`.
+- Feed-drift tuning (warn-first defaults): `DRIFT_BASELINE_WINDOW` (default `1`), `DRIFT_MAX_VOLUME_DROP_PCT` (default `30.0`), `DRIFT_MAX_METRIC_DRIFT_PCT` (default `50.0`), and `DRIFT_METRIC_MIN_BASELINE_SAMPLES` (default `1`). Metric comparisons stay dormant until the minimum baseline history exists, so normal variation during initial learning never blocks a feed.
 
 Keep the API on a private network behind a TLS-terminating ingress or reverse proxy. Do not expose `/metrics` publicly. Keep the metrics route behind an authorized API key and restrict it at the network layer as well.
 
@@ -40,6 +42,8 @@ Create and revoke credentials using the administrator-only endpoints:
 The create response includes the raw key **once**. Transfer it directly to the secret manager; do not paste it into tickets, terminal transcripts, logs, or chat. The persistent SQLite registry stores only SHA-256 fingerprints and records create/revoke events without storing raw keys. The bootstrap key and keys injected through `DATASHELL_API_KEYS` remain deployment-managed and should be rotated through the secret manager and a controlled restart.
 
 For signing-key rotation, first confirm there are no pending commit journals. Set a new `DATASHELL_KEY_ID` and `DATASHELL_HMAC_SECRET`, and retain previous key IDs and secrets in `DATASHELL_HMAC_KEYRING` (a JSON object) for the certificate retention period. The verifier uses the matching key for old certificates. Do not remove a previous key until all certificates signed by it no longer need verification. Commit journals use the active HMAC secret, so recover pending journals before changing it.
+
+For Ed25519 certificate-signing rotation, provision a new `DATASHELL_ED25519_PRIVATE_KEY` with a **new** `DATASHELL_ED25519_KEY_ID`, and add the previous key ID and its public key to `DATASHELL_ED25519_KEYRING`. The engine refuses to reuse a key ID that is already registered with a different public key, which prevents silent key substitution. Retire an old public key only once every certificate it signed has passed its retention period. Publishing the current public key (PEM) lets external auditors verify certificates offline; the private key never leaves the signer.
 
 ## Boundary ledger and run history
 

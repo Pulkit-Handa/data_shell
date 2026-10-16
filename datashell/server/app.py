@@ -941,7 +941,7 @@ def serve_enterprise_ui():
         if (data.cryptographic_manifest && data.digital_signature) {
           cryptoBox.style.display = 'block';
           document.getElementById('merkleRoot').innerText = "Merkle Root: " + data.cryptographic_manifest.merkle_root;
-          document.getElementById('sigDigest').innerText = "Signature:   " + data.digital_signature.signature.substring(0, 32) + "... (HMAC-SHA256)";
+          document.getElementById('sigDigest').innerText = "Signature:   " + data.digital_signature.signature.substring(0, 32) + "... (" + (data.digital_signature.algorithm || "HMAC-SHA256") + ")";
         }
       } catch (err) {
         out.innerText = "Network or execution error: " + err.message;

@@ -96,6 +96,15 @@ class BatchRuleCompiler:
     """Compiles whole-run batch rules into DuckDB SQL check queries."""
 
     @staticmethod
+    def _quote_identifier(name: str) -> str:
+        """Safely quote a column identifier for DuckDB (defense in depth).
+
+        Column names are already validated against the declared schema, but
+        quoting prevents any identifier containing quotes from breaking out.
+        """
+        return '"' + str(name).replace('"', '""') + '"'
+
+    @staticmethod
     def compile_batch_sql(rule: BatchRule, table_name: str = "admitted_dataset") -> str:
         """
         Returns a SQL query returning 1 row with columns:
@@ -123,12 +132,49 @@ class BatchRuleCompiler:
 
         elif rule.check == BatchRuleCheckType.MAX_NULL_RATE:
             max_rate = float(rule.value)
-            col = rule.column
+            col = BatchRuleCompiler._quote_identifier(rule.column)
             return f"""
                 SELECT 
-                    (CAST(SUM(CASE WHEN "{col}" IS NULL THEN 1 ELSE 0 END) AS DOUBLE) / NULLIF(COUNT(*), 0)) <= {max_rate} AS passed,
-                    CAST(ROUND(CAST(SUM(CASE WHEN "{col}" IS NULL THEN 1 ELSE 0 END) AS DOUBLE) / NULLIF(COUNT(*), 0), 4) AS VARCHAR) AS actual_value,
+                    (CAST(SUM(CASE WHEN {col} IS NULL THEN 1 ELSE 0 END) AS DOUBLE) / NULLIF(COUNT(*), 0)) <= {max_rate} AS passed,
+                    CAST(ROUND(CAST(SUM(CASE WHEN {col} IS NULL THEN 1 ELSE 0 END) AS DOUBLE) / NULLIF(COUNT(*), 0), 4) AS VARCHAR) AS actual_value,
                     '<= {max_rate}' AS expected_value
+                FROM {table_name}
+            """
+
+        elif rule.check in (BatchRuleCheckType.UNIQUE, BatchRuleCheckType.COMPOSITE_UNIQUE):
+            if rule.check == BatchRuleCheckType.UNIQUE:
+                key_expr = f"({BatchRuleCompiler._quote_identifier(rule.column)})"
+            else:
+                cols = ", ".join(BatchRuleCompiler._quote_identifier(c) for c in rule.columns)
+                key_expr = f"({cols})"
+            return f"""
+                SELECT
+                    COUNT(*) = COUNT(DISTINCT {key_expr}) AS passed,
+                    CAST(COUNT(*) - COUNT(DISTINCT {key_expr}) AS VARCHAR) AS actual_value,
+                    '0 duplicate keys' AS expected_value
+                FROM {table_name}
+            """
+
+        elif rule.check == BatchRuleCheckType.SUM_EQUALS:
+            expected = float(rule.value)
+            tolerance = float(rule.tolerance) if rule.tolerance is not None else 0.0
+            col = BatchRuleCompiler._quote_identifier(rule.column)
+            return f"""
+                SELECT
+                    ABS(COALESCE(SUM({col}), 0) - ({expected})) <= {tolerance} AS passed,
+                    CAST(COALESCE(SUM({col}), 0) AS VARCHAR) AS actual_value,
+                    '= {expected} (tolerance {tolerance})' AS expected_value
+                FROM {table_name}
+            """
+
+        elif rule.check == BatchRuleCheckType.SUM_BETWEEN:
+            low, high = float(rule.value[0]), float(rule.value[1])
+            col = BatchRuleCompiler._quote_identifier(rule.column)
+            return f"""
+                SELECT
+                    (COALESCE(SUM({col}), 0) >= {low} AND COALESCE(SUM({col}), 0) <= {high}) AS passed,
+                    CAST(COALESCE(SUM({col}), 0) AS VARCHAR) AS actual_value,
+                    'between {low} and {high}' AS expected_value
                 FROM {table_name}
             """
 

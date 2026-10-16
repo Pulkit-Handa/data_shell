@@ -62,5 +62,7 @@ stress_quarantine/
 # Runtime contract registry
 contracts_registry/
 
-# Keep the reproducible dependency lockfile under version control
+# Keep the reproducible dependency lockfiles under version control
 !uv.lock
+!requirements.lock
+!requirements-dev.lock

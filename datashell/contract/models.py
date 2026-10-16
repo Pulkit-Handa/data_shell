@@ -37,7 +37,18 @@ class BatchRuleCheckType(str, Enum):
     MIN_ROW_COUNT = "MIN_ROW_COUNT"
     MAX_ROW_COUNT = "MAX_ROW_COUNT"
     MAX_NULL_RATE = "MAX_NULL_RATE"
+    UNIQUE = "UNIQUE"                          # single-column key must be unique
+    COMPOSITE_UNIQUE = "COMPOSITE_UNIQUE"      # multi-column key must be unique
+    SUM_EQUALS = "SUM_EQUALS"                  # control total: column sum equals expected
+    SUM_BETWEEN = "SUM_BETWEEN"                # control total: column sum within [min, max]
     SQL_ASSERTION = "SQL_ASSERTION"
+
+
+class SchemaCompatibilityPolicy(str, Enum):
+    """How the boundary reacts when the source does not present the declared schema."""
+
+    STRICT = "STRICT"        # Missing declared columns are structural failures
+    EVOLVING = "EVOLVING"    # Missing nullable columns are filled with null (default)
 
 
 class _RuleCheckTypeMeta(type):
@@ -62,6 +73,46 @@ class SchemaColumn(BaseModel):
     description: Optional[str] = None
 
 
+class SourceParserOptions(BaseModel):
+    """Configurable physical parsing options for delimited sources.
+
+    Applies to CSV/JSONL readers. Defaults preserve the historical behaviour
+    (comma-delimited, double-quote quoting, header row present, UTF-8).
+    """
+
+    delimiter: str = ","
+    quote_char: str = '"'
+    has_header: bool = True
+    encoding: str = "utf-8"
+    null_values: List[str] = Field(default_factory=list)
+
+    @field_validator("delimiter")
+    @classmethod
+    def validate_delimiter(cls, v: str) -> str:
+        if not isinstance(v, str) or len(v) != 1:
+            raise ValueError("parser.delimiter must be a single character")
+        return v
+
+    @field_validator("quote_char")
+    @classmethod
+    def validate_quote_char(cls, v: str) -> str:
+        if not isinstance(v, str) or len(v) != 1:
+            raise ValueError("parser.quote_char must be a single character")
+        return v
+
+    @field_validator("encoding")
+    @classmethod
+    def validate_encoding(cls, v: str) -> str:
+        import codecs
+        if not v:
+            raise ValueError("parser.encoding must be a non-empty codec name")
+        try:
+            codecs.lookup(v)
+        except LookupError as err:
+            raise ValueError(f"Unknown parser.encoding '{v}': {err}") from err
+        return v
+
+
 class SourceDefinition(BaseModel):
     type: str = "LOCAL"  # LOCAL
     connectionRef: Optional[str] = None
@@ -69,6 +120,8 @@ class SourceDefinition(BaseModel):
     format: str = "parquet"  # parquet, csv, jsonl
     schema_: List[SchemaColumn] = Field(alias="schema", default_factory=list)
     extra_columns_policy: ExtraColumnsPolicy = ExtraColumnsPolicy.STRIP
+    schema_compatibility: SchemaCompatibilityPolicy = SchemaCompatibilityPolicy.EVOLVING
+    parser: SourceParserOptions = Field(default_factory=SourceParserOptions)
 
     model_config = {"populate_by_name": True}
 
@@ -119,7 +172,9 @@ class BatchRule(BaseModel):
     rule_id: str = Field(description="Stable identifier kept across contract versions")
     check: BatchRuleCheckType
     column: Optional[str] = None
+    columns: Optional[List[str]] = None
     value: Optional[Any] = None
+    tolerance: Optional[float] = None
     sql: Optional[str] = None
     description: Optional[str] = None
 
@@ -136,6 +191,33 @@ class BatchRule(BaseModel):
                 raise ValueError(f"Batch rule '{self.rule_id}' with check MAX_NULL_RATE must supply 'column'")
             if self.value is None or not (0.0 <= float(self.value) <= 1.0):
                 raise ValueError(f"Batch rule '{self.rule_id}' with check MAX_NULL_RATE requires 'value' between 0.0 and 1.0")
+        elif self.check == BatchRuleCheckType.UNIQUE:
+            if not self.column:
+                raise ValueError(f"Batch rule '{self.rule_id}' with check UNIQUE must supply 'column'")
+        elif self.check == BatchRuleCheckType.COMPOSITE_UNIQUE:
+            if not self.columns or len(self.columns) < 2:
+                raise ValueError(
+                    f"Batch rule '{self.rule_id}' with check COMPOSITE_UNIQUE must supply 'columns' with at least 2 entries"
+                )
+            if len(set(self.columns)) != len(self.columns):
+                raise ValueError(f"Batch rule '{self.rule_id}' COMPOSITE_UNIQUE columns must be distinct")
+        elif self.check == BatchRuleCheckType.SUM_EQUALS:
+            if not self.column:
+                raise ValueError(f"Batch rule '{self.rule_id}' with check SUM_EQUALS must supply 'column'")
+            if self.value is None or not isinstance(self.value, (int, float)) or isinstance(self.value, bool):
+                raise ValueError(f"Batch rule '{self.rule_id}' with check SUM_EQUALS requires numeric 'value'")
+            if self.tolerance is not None and float(self.tolerance) < 0:
+                raise ValueError(f"Batch rule '{self.rule_id}' SUM_EQUALS 'tolerance' cannot be negative")
+        elif self.check == BatchRuleCheckType.SUM_BETWEEN:
+            if not self.column:
+                raise ValueError(f"Batch rule '{self.rule_id}' with check SUM_BETWEEN must supply 'column'")
+            if not isinstance(self.value, (list, tuple)) or len(self.value) != 2:
+                raise ValueError(f"Batch rule '{self.rule_id}' with check SUM_BETWEEN requires a [min, max] list value")
+            low, high = self.value
+            if float(low) > float(high):
+                raise ValueError(f"Batch rule '{self.rule_id}' SUM_BETWEEN requires min <= max")
+        if self.column and self.columns:
+            raise ValueError(f"Batch rule '{self.rule_id}' cannot set both 'column' and 'columns'")
         return self
 
 
@@ -257,6 +339,12 @@ class ContractSpec(BaseModel):
                 raise ValueError(
                     f"Batch rule '{b.rule_id}' references column '{b.column}' which is not in declared schema {sorted(declared_cols)}"
                 )
+
+            for col in (b.columns or []):
+                if col not in declared_cols:
+                    raise ValueError(
+                        f"Batch rule '{b.rule_id}' references column '{col}' which is not in declared schema {sorted(declared_cols)}"
+                    )
 
         return self
 

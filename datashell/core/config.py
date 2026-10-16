@@ -59,6 +59,17 @@ def _load_hmac_keyring() -> Dict[str, str]:
     return parsed
 
 
+def _load_ed25519_keyring() -> Dict[str, str]:
+    """Trusted Ed25519 public keys, mapped key_id -> public key material (PEM or base64)."""
+    raw = os.getenv("DATASHELL_ED25519_KEYRING", "{}").strip()
+    if not raw:
+        return {}
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise RuntimeError("DATASHELL_ED25519_KEYRING must be a JSON object mapping key IDs to public keys")
+    return parsed
+
+
 def _calculate_shannon_entropy(s: str) -> float:
     """Calculates Shannon entropy in bits per character."""
     import math
@@ -218,6 +229,17 @@ class EnterpriseSettings(BaseModel):
             k.strip() for k in os.getenv("DATASHELL_TRUSTED_KEYS", "datashell-hmac-v1,dm-hmac-v1,dm-hmac-master").split(",") if k.strip()
         ]
     )
+    # Optional asymmetric signing. When a private key is provisioned, audit
+    # certificates are signed with Ed25519 so any holder of the published public
+    # key can verify them without a shared secret. HMAC is retained for internal
+    # (symmetric) webhook signing.
+    ed25519_private_key: Optional[str] = Field(
+        default_factory=lambda: (os.getenv("DATASHELL_ED25519_PRIVATE_KEY") or "").strip() or None
+    )
+    ed25519_active_key_id: str = Field(
+        default_factory=lambda: os.getenv("DATASHELL_ED25519_KEY_ID", "datashell-ed25519-v1")
+    )
+    ed25519_trusted_keys: Dict[str, str] = Field(default_factory=_load_ed25519_keyring)
     # Wildcard is convenient for local development only. Production must name
     # browser origins explicitly; an empty value intentionally fails closed.
     allowed_origins: List[str] = Field(
@@ -270,6 +292,20 @@ class EnterpriseSettings(BaseModel):
     # use a rolling window of prior delivered runs (1 = previous-run behaviour).
     history_retention_days: int = Field(default_factory=lambda: int(os.getenv("DATASHELL_HISTORY_RETENTION_DAYS", "0")))
     drift_baseline_window: int = Field(default_factory=lambda: int(os.getenv("DRIFT_BASELINE_WINDOW", "1")))
+    # Drift thresholds. Volume drift compares delivered-row counts; metric drift
+    # compares the per-feed aggregates persisted in the ledger (see
+    # datashell.engines.metrics). Metric comparisons stay dormant until at least
+    # ``drift_metric_min_baseline_samples`` delivered baselines exist, so the
+    # first runs of a new feed establish history instead of blocking on noise.
+    drift_max_volume_drop_pct: float = Field(
+        default_factory=lambda: float(os.getenv("DRIFT_MAX_VOLUME_DROP_PCT", "30.0"))
+    )
+    drift_max_metric_drift_pct: float = Field(
+        default_factory=lambda: float(os.getenv("DRIFT_MAX_METRIC_DRIFT_PCT", "50.0"))
+    )
+    drift_metric_min_baseline_samples: int = Field(
+        default_factory=lambda: int(os.getenv("DRIFT_METRIC_MIN_BASELINE_SAMPLES", "1"))
+    )
     # Optional push integration: HMAC-signed run.completed events to an operator
     # endpoint so runbooks/SLAs can react without polling the ledger.
     run_webhook_url: Optional[str] = Field(
@@ -382,6 +418,31 @@ class EnterpriseSettings(BaseModel):
             )
         self.trusted_hmac_keys[self.active_key_id] = self.hmac_secret
         self.trusted_key_ids = list(dict.fromkeys([*self.trusted_key_ids, *self.trusted_hmac_keys.keys(), self.active_key_id]))
+
+        # Optional Ed25519 certificate signing: validate key material and bind the
+        # derived public key into the trusted keyring so the engine can verify the
+        # certificates it emits.
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", self.ed25519_active_key_id):
+            raise RuntimeError("DATASHELL_ED25519_KEY_ID must be 1-64 safe identifier characters")
+        if not isinstance(self.ed25519_trusted_keys, dict) or any(
+            not isinstance(key_id, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,64}", key_id)
+            or not isinstance(pub, str) for key_id, pub in self.ed25519_trusted_keys.items()
+        ):
+            raise RuntimeError("DATASHELL_ED25519_KEYRING must be a JSON object mapping safe key IDs to public keys")
+        self.ed25519_trusted_keys = dict(self.ed25519_trusted_keys)
+        if self.ed25519_private_key:
+            from datashell.core.keys import derive_public_key_material
+            try:
+                derived_public = derive_public_key_material(self.ed25519_private_key)
+            except Exception as err:
+                raise RuntimeError(f"DATASHELL_ED25519_PRIVATE_KEY is not a valid Ed25519 private key: {err}") from err
+            existing = self.ed25519_trusted_keys.get(self.ed25519_active_key_id)
+            if existing is not None and existing.strip() != derived_public.strip():
+                raise RuntimeError(
+                    "DATASHELL_ED25519_KEY_ID already exists in DATASHELL_ED25519_KEYRING with a different "
+                    "public key; use a new key ID when rotating signing keys"
+                )
+            self.ed25519_trusted_keys[self.ed25519_active_key_id] = derived_public
         if self.is_production_mode and not self.auth_enabled:
             raise RuntimeError(
                 f"FATAL: Production security violation. AUTH_ENABLED cannot be False when ENVIRONMENT='{self.environment}'. "
@@ -409,6 +470,12 @@ class EnterpriseSettings(BaseModel):
             raise RuntimeError("DATASHELL_HISTORY_RETENTION_DAYS cannot be negative")
         if self.drift_baseline_window < 1:
             raise RuntimeError("DRIFT_BASELINE_WINDOW must be a positive integer")
+        if self.drift_max_volume_drop_pct < 0:
+            raise RuntimeError("DRIFT_MAX_VOLUME_DROP_PCT cannot be negative")
+        if self.drift_max_metric_drift_pct < 0:
+            raise RuntimeError("DRIFT_MAX_METRIC_DRIFT_PCT cannot be negative")
+        if self.drift_metric_min_baseline_samples < 1:
+            raise RuntimeError("DRIFT_METRIC_MIN_BASELINE_SAMPLES must be a positive integer")
         if self.webhook_timeout_seconds <= 0:
             raise RuntimeError("DATASHELL_WEBHOOK_TIMEOUT_SECONDS must be positive")
         if self.run_webhook_url:

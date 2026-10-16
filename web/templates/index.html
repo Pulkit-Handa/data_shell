@@ -98,7 +98,7 @@
       <div class="shell specstrip__inner">
         <span>License <b>Apache-2.0</b></span>
         <span>Runtime <b>Python 3.11–3.13</b></span>
-        <span>Tests <b>156 passing</b></span>
+        <span>Tests <b>182 passing</b></span>
         <span>Formats <b>CSV · JSONL · Parquet</b></span>
         <span>Deploy <b>Docker · Kubernetes · Render</b></span>
         <span>Orchestrate <b>CLI · HTTP · Airflow</b></span>
@@ -336,7 +336,7 @@ datashell verify run_9f3c7a21_audit.json
             <tr><th>Metric</th><th>Value</th><th>How it is verified</th></tr>
           </thead>
           <tbody>
-            <tr><td class="metric">Automated tests</td><td class="num">156</td><td class="how"><code>pytest</code> on the main suite, plus 9 for the Airflow provider</td></tr>
+            <tr><td class="metric">Automated tests</td><td class="num">182</td><td class="how"><code>pytest</code> on the main suite, plus 9 for the Airflow provider</td></tr>
             <tr><td class="metric">Upload ceiling</td><td class="num">20 GiB</td><td class="how">Derived request-body limit — 21,474,836,480 bytes</td></tr>
             <tr><td class="metric">Peak RSS at 20M rows</td><td class="num">~369 MB</td><td class="how"><code>tests/test_large_file_streaming.py</code>, streamed CSV</td></tr>
             <tr><td class="metric">Rows published on a footing mismatch</td><td class="num">0</td><td class="how">Reconciliation is a hard gate, not a warning</td></tr>
