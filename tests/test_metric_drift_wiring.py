@@ -70,6 +70,9 @@ def _records(amount: float, rows: int = 50):
 
 def test_runner_persists_feed_metrics_and_fires_metric_drift(tmp_path, monkeypatch):
     _isolate(monkeypatch, tmp_path)
+    # Drift is opt-in (DRIFT_ENABLED default false); this test pins the
+    # evaluation path itself, so enable it explicitly.
+    monkeypatch.setattr(settings, "drift_enabled", True)
     source = tmp_path / "in.parquet"
     source.write_bytes(b"placeholder")
     target = tmp_path / "out.parquet"
@@ -100,6 +103,7 @@ def test_runner_persists_feed_metrics_and_fires_metric_drift(tmp_path, monkeypat
 
 def test_metric_drift_dormant_until_minimum_baseline_samples(tmp_path, monkeypatch):
     _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "drift_enabled", True)
     monkeypatch.setattr(settings, "drift_metric_min_baseline_samples", 2)
     source = tmp_path / "in.parquet"
     source.write_bytes(b"placeholder")
@@ -150,6 +154,7 @@ def test_file_execution_binds_file_digest(tmp_path, monkeypatch):
 def test_streaming_execution_persists_metrics_and_fires_metric_drift(tmp_path, monkeypatch):
     """The out-of-core path must persist and compare metrics too, not just in-memory."""
     _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "drift_enabled", True)
     import polars as pl
 
     baseline_src = tmp_path / "base.parquet"

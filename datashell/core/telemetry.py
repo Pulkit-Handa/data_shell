@@ -65,6 +65,53 @@ STORAGE_TOTAL_BYTES = Gauge(
     "Total bytes on the persistent storage filesystem",
 )
 
+# Settlement lifecycle metrics. Labels are deliberately low-cardinality:
+# no tenant, contract, settlement, or invoice identifiers ever appear here.
+SETTLEMENTS_CALCULATED_TOTAL = Counter(
+    "datashell_settlements_calculated_total",
+    "Total settlement statements calculated",
+    ["acceptance_status", "pricing_model"],
+)
+SETTLEMENTS_REJECTED_TOTAL = Counter(
+    "datashell_settlements_rejected_total",
+    "Total settlement calculations refused (integrity gate failure)",
+    ["reason_code"],
+)
+SETTLEMENTS_DISPUTED_TOTAL = Counter(
+    "datashell_settlements_disputed_total",
+    "Total settlements marked disputed",
+)
+CERTIFICATE_VERIFICATION_FAILURES_TOTAL = Counter(
+    "datashell_certificate_verification_failures_total",
+    "Certificate verification failures observed during settlement",
+    ["failure_kind"],
+)
+BILLING_INSTRUCTIONS_CREATED_TOTAL = Counter(
+    "datashell_billing_instructions_created_total",
+    "Billing instructions created",
+    ["provider", "status"],
+)
+BILLING_EXTERNAL_RETRIES_TOTAL = Counter(
+    "datashell_billing_external_retries_total",
+    "External billing operations retried",
+    ["provider"],
+)
+BILLING_UNRESOLVED_TOTAL = Counter(
+    "datashell_billing_unresolved_total",
+    "Billing operations with ambiguous external outcome awaiting reconciliation",
+    ["provider"],
+)
+SETTLEMENT_CALCULATION_DURATION_SECONDS = Histogram(
+    "datashell_settlement_calculation_duration_seconds",
+    "Latency distribution of settlement calculations in seconds",
+    buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
+)
+LEDGER_PERSISTENCE_FAILURES_TOTAL = Counter(
+    "datashell_ledger_persistence_failures_total",
+    "Settlement ledger persistence failures",
+    ["entity"],
+)
+
 
 # ----------------- Structured Logging -----------------
 

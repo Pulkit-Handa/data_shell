@@ -173,6 +173,19 @@ class BoundaryLedger:
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_run "
                 "ON usage_records(tenant_id, run_id)"
             )
+            # Baseline reset watermarks for drift evaluation. Recording a reset
+            # never deletes forensic history: comparisons simply ignore runs
+            # delivered before the watermark.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS baseline_resets (
+                    tenant_id TEXT NOT NULL,
+                    contract_name TEXT NOT NULL,
+                    reset_at TEXT NOT NULL,
+                    PRIMARY KEY (tenant_id, contract_name)
+                )
+                """
+            )
 
     # --------------------------------------------------------------- run writes
 
@@ -363,14 +376,23 @@ class BoundaryLedger:
 
         ``window=1`` reproduces the historical "compare against the previous run"
         behaviour; larger windows smooth out single-run noise.
+
+        Runs delivered before a :meth:`reset_baseline` watermark for this
+        contract/tenant are excluded, so an operator can intentionally restart
+        drift history without deleting forensic ledger rows.
         """
         window = max(1, int(window))
         with self._connect() as conn:
+            reset_row = conn.execute(
+                "SELECT reset_at FROM baseline_resets WHERE tenant_id = ? AND contract_name = ?",
+                (tenant_id, contract_name),
+            ).fetchone()
+            cutoff = reset_row["reset_at"] if reset_row else ""
             rows = conn.execute(
                 "SELECT rows_delivered, metrics_json FROM run_history "
                 f"WHERE tenant_id = ? AND contract_name = ? AND {_DELIVERED_FILTER} "
-                "ORDER BY timestamp DESC LIMIT ?",
-                (tenant_id, contract_name, window),
+                "AND timestamp > ? ORDER BY timestamp DESC LIMIT ?",
+                (tenant_id, contract_name, cutoff, window),
             ).fetchall()
         if not rows:
             return None
@@ -393,6 +415,20 @@ class BoundaryLedger:
             "metrics": metrics,
             "sample_count": len(rows),
         }
+
+    def reset_baseline(self, contract_name: str, tenant_id: str = "default-tenant") -> None:
+        """Clear the drift baseline for one contract/tenant combination.
+
+        Records a reset watermark instead of deleting run history: drift
+        comparisons only consider runs delivered after this point, while the
+        forensic run ledger and usage meter remain complete. The next delivered
+        run for the contract/tenant establishes the new baseline.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO baseline_resets (tenant_id, contract_name, reset_at) VALUES (?, ?, ?)",
+                (tenant_id, contract_name, _utcnow()),
+            )
 
     def get_run(self, run_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
         """Full ledger record for a run, scoped to its tenant."""

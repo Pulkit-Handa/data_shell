@@ -22,9 +22,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from pydantic import ValidationError
+
 from datashell import __version__
 from datashell.core.config import settings
 from datashell.core.ledger import BoundaryLedger
+from datashell.core.sandbox import FilesystemSandbox
 from datashell.contract.models import DataContract
 from datashell.pipeline.artifacts import ArtifactGenerator
 from datashell.pipeline.runner import DataShellPipeline
@@ -57,6 +60,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--chunk-size", type=int, default=None,
         help="Rows per micro-batch when streaming (default: STREAM_CHUNK_ROWS).",
+    )
+    run_parser.add_argument(
+        "--no-drift", action="store_true",
+        help="Disable historical drift evaluation for this run, regardless of DRIFT_ENABLED.",
     )
 
     # validate-contract command
@@ -115,6 +122,109 @@ def build_parser() -> argparse.ArgumentParser:
     demo_parser = subparsers.add_parser("demo", help="Run a self-contained refusal/tamper/verify walkthrough")
     demo_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    # contract command (commercial contract management)
+    contract_parser = subparsers.add_parser("contract", help="Manage commercial delivery contracts")
+    contract_sub = contract_parser.add_subparsers(dest="contract_command", required=True)
+
+    contract_validate_p = contract_sub.add_parser("validate", help="Validate a commercial contract JSON file")
+    contract_validate_p.add_argument("contract", help="Path to commercial contract JSON file")
+
+    contract_create_p = contract_sub.add_parser("create", help="Register an immutable commercial contract version")
+    contract_create_p.add_argument("contract", help="Path to commercial contract JSON file")
+    contract_create_p.add_argument("--tenant", default="default-tenant", help="Owning tenant identity")
+    contract_create_p.add_argument("--actor", default="cli", help="Actor identity recorded as registrar")
+    contract_create_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    contract_show_p = contract_sub.add_parser("show", help="Show a commercial contract (latest or exact version)")
+    contract_show_p.add_argument("contract_id", help="Contract identifier")
+    contract_show_p.add_argument("--version", type=int, default=None, help="Exact contract version (default: latest)")
+    contract_show_p.add_argument("--tenant", default="default-tenant", help="Owning tenant identity")
+    contract_show_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    contract_versions_p = contract_sub.add_parser("versions", help="List all versions of a commercial contract")
+    contract_versions_p.add_argument("contract_id", help="Contract identifier")
+    contract_versions_p.add_argument("--tenant", default="default-tenant", help="Owning tenant identity")
+    contract_versions_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    # settlement command
+    settlement_parser = subparsers.add_parser("settlement", help="Calculate and inspect delivery settlements")
+    settlement_sub = settlement_parser.add_subparsers(dest="settlement_command", required=True)
+
+    stl_calc_p = settlement_sub.add_parser("calculate", help="Calculate the settlement for a completed run")
+    stl_calc_p.add_argument("--run-id", required=True, help="Completed delivery run identifier")
+    stl_calc_p.add_argument("--contract-id", required=True, help="Commercial contract identifier")
+    stl_calc_p.add_argument("--contract-version", type=int, default=None,
+                            help="Exact contract version (default: latest)")
+    stl_calc_p.add_argument("--tenant", default="default-tenant", help="Tenant identity for all lookups")
+    stl_calc_p.add_argument("--actor", default="cli", help="Actor identity recorded on the statement")
+    stl_calc_p.add_argument("--idempotency-key", default=None,
+                            help="Key making repeated submissions replay the original statement")
+    stl_calc_p.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    stl_show_p = settlement_sub.add_parser("show", help="Show one settlement statement")
+    stl_show_p.add_argument("settlement_id", help="Settlement identifier")
+    stl_show_p.add_argument("--tenant", default="default-tenant")
+    stl_show_p.add_argument("--json", action="store_true")
+
+    stl_list_p = settlement_sub.add_parser("list", help="List settlements")
+    stl_list_p.add_argument("--status", default=None, help="Filter by settlement status")
+    stl_list_p.add_argument("--contract-id", default=None, help="Filter by contract id")
+    stl_list_p.add_argument("--tenant", default="default-tenant")
+    stl_list_p.add_argument("--json", action="store_true")
+
+    stl_explain_p = settlement_sub.add_parser("explain", help="Explain the full calculation behind a settlement")
+    stl_explain_p.add_argument("settlement_id", help="Settlement identifier")
+    stl_explain_p.add_argument("--tenant", default="default-tenant")
+    stl_explain_p.add_argument("--json", action="store_true")
+
+    stl_verify_p = settlement_sub.add_parser("verify", help="Verify a settlement's signed evidence")
+    stl_verify_p.add_argument("settlement_id", help="Settlement identifier")
+    stl_verify_p.add_argument("--tenant", default="default-tenant")
+    stl_verify_p.add_argument("--json", action="store_true")
+
+    stl_invoice_preview_p = settlement_sub.add_parser(
+        "invoice-preview", help="Preview a draft invoice (never a paid invoice)")
+    stl_invoice_preview_p.add_argument("settlement_id", help="Settlement identifier")
+    stl_invoice_preview_p.add_argument("--tenant", default="default-tenant")
+    stl_invoice_preview_p.add_argument("--actor", default="cli")
+    stl_invoice_preview_p.add_argument("--json", action="store_true")
+
+    stl_invoice_export_p = settlement_sub.add_parser(
+        "invoice-export", help="Export a draft invoice document as JSON")
+    stl_invoice_export_p.add_argument("settlement_id", help="Settlement identifier")
+    stl_invoice_export_p.add_argument("--format", default="json", choices=["json"])
+    stl_invoice_export_p.add_argument("--output", required=True, help="Output file path")
+    stl_invoice_export_p.add_argument("--tenant", default="default-tenant")
+    stl_invoice_export_p.add_argument("--actor", default="cli")
+
+    stl_dispute_p = settlement_sub.add_parser("dispute-open", help="Open a dispute against a settlement")
+    stl_dispute_p.add_argument("settlement_id", help="Settlement identifier")
+    stl_dispute_p.add_argument("--party", required=True, help="Disputing party identity")
+    stl_dispute_p.add_argument("--reason", required=True, help="Dispute reason")
+    stl_dispute_p.add_argument("--explanation", default="", help="Supporting explanation")
+    stl_dispute_p.add_argument("--evidence", nargs="*", default=None, help="Evidence references")
+    stl_dispute_p.add_argument("--tenant", default="default-tenant")
+    stl_dispute_p.add_argument("--actor", default="cli")
+    stl_dispute_p.add_argument("--json", action="store_true")
+
+    stl_dispute_resolve_p = settlement_sub.add_parser("dispute-resolve", help="Resolve an open dispute")
+    stl_dispute_resolve_p.add_argument("dispute_id", help="Dispute identifier")
+    stl_dispute_resolve_p.add_argument(
+        "--resolution", required=True,
+        choices=["ACCEPT_AS_IS", "REJECT_SETTLEMENT", "CORRECT_CALCULATION", "REPLACE_WITH_NEW_SETTLEMENT"])
+    stl_dispute_resolve_p.add_argument("--reason", required=True, help="Resolution reason")
+    stl_dispute_resolve_p.add_argument("--actor", required=True, help="Resolution actor")
+    stl_dispute_resolve_p.add_argument("--tenant", default="default-tenant")
+    stl_dispute_resolve_p.add_argument("--json", action="store_true")
+
+    stl_billing_p = settlement_sub.add_parser(
+        "billing-preview", help="Create or replay a draft billing instruction (no money movement)")
+    stl_billing_p.add_argument("settlement_id", help="Settlement identifier")
+    stl_billing_p.add_argument("--provider", default="dry-run", choices=["dry-run", "stripe"])
+    stl_billing_p.add_argument("--idempotency-key", default=None)
+    stl_billing_p.add_argument("--tenant", default="default-tenant")
+    stl_billing_p.add_argument("--json", action="store_true")
+
     return parser
 
 
@@ -152,14 +262,70 @@ def _print_table(headers: List[str], rows: List[List[Any]]) -> None:
 # ----------------------------------------------------------------- commands: run
 
 
+def _print_rejection_details(result) -> None:
+    """Explain exactly why a run was rejected: rule, count, expectation.
+
+    Printed to stderr so scripts that parse stdout continue to work, while a
+    human sees an actionable diagnosis instead of a single generic sentence.
+    """
+    reason = result.ledger.rejection_reason or "Violations exceeded declared contract gate."
+    print(f"\n[!] FEED REJECTED: {reason}", file=sys.stderr)
+
+    rule_breakdown = result.ledger.rule_breakdown or {}
+    held_rules = {rule: count for rule, count in rule_breakdown.items() if count > 0}
+    if held_rules:
+        print("\n  Rule breakdown:", file=sys.stderr)
+        for rule_id, count in sorted(held_rules.items()):
+            print(f"    - {rule_id}: {count} rows held", file=sys.stderr)
+
+    structural = result.ledger.structural_reasons or {}
+    if structural:
+        print("\n  Structural refusals:", file=sys.stderr)
+        for failed_column, count in sorted(structural.items()):
+            print(f"    - {failed_column}: {count} rows refused", file=sys.stderr)
+
+    certificate = result.audit_certificate or {}
+    batch_evaluations = certificate.get("batch_evaluations") or []
+    failed_batch = [b for b in batch_evaluations if not b.get("passed", True)]
+    display_batch = failed_batch or batch_evaluations
+    if display_batch:
+        print("\n  Batch rules:", file=sys.stderr)
+        for batch in display_batch:
+            status = "PASSED" if batch.get("passed", True) else "FAILED"
+            print(
+                f"    - {batch.get('rule_id')}: {status} "
+                f"(actual={batch.get('actual')}, expected={batch.get('expected')})",
+                file=sys.stderr,
+            )
+
+    failed_drift = [d for d in (certificate.get("drift_evaluations") or []) if not d.get("passed", True)]
+    if failed_drift:
+        print("\n  Drift checks:", file=sys.stderr)
+        for drift in failed_drift:
+            print(f"    - {drift.get('rule_id')}: FAILED — {drift.get('details')}", file=sys.stderr)
+
+    print("\n  Run with --json for full details.", file=sys.stderr)
+    print("  Or query the audit certificate for the per-rule breakdown.", file=sys.stderr)
+
+
 def command_run(args: argparse.Namespace) -> int:
     with open(args.contract, "r", encoding="utf-8") as f:
         data = json.load(f)
     contract = DataContract(**data)
-    pipeline = DataShellPipeline(contract, tenant_id=args.tenant)
+    pipeline = DataShellPipeline(
+        contract,
+        tenant_id=args.tenant,
+        drift_enabled=False if getattr(args, "no_drift", False) else None,
+    )
 
     if not args.json:
         print(f"▶ Enforcing boundary on '{args.source}' against contract '{contract.metadata.name}'...")
+        if args.no_drift:
+            print("  Drift: disabled by --no-drift for this run")
+        elif settings.drift_enabled:
+            print("  Drift: enabled (DRIFT_ENABLED=true)")
+        else:
+            print("  Drift: disabled (DRIFT_ENABLED default is false)")
     source_path = Path(args.source)
     source_size = source_path.stat().st_size if source_path.is_file() else 0
     use_streaming = (
@@ -185,6 +351,7 @@ def command_run(args: argparse.Namespace) -> int:
             audit_output_path=args.audit,
         )
 
+    certificate = result.audit_certificate or {}
     if args.json:
         print(json.dumps({
             "run_id": result.run_id,
@@ -198,8 +365,12 @@ def command_run(args: argparse.Namespace) -> int:
             "rows_delivered": result.outcome.rows_delivered,
             "unaccounted_for": result.ledger.unaccounted_for,
             "footing_matched": result.ledger.footing_matched,
+            "is_run_rejected": result.ledger.is_run_rejected,
+            "rejection_reason": result.ledger.rejection_reason,
             "rule_breakdown": result.ledger.rule_breakdown,
             "structural_reasons": result.ledger.structural_reasons,
+            "batch_evaluations": certificate.get("batch_evaluations", []),
+            "drift_evaluations": certificate.get("drift_evaluations", []),
             "target_path": result.outcome.target_path,
             "quarantine_path": result.outcome.quarantine_path,
             "audit_path": result.audit_artifact_path,
@@ -215,12 +386,124 @@ def command_run(args: argparse.Namespace) -> int:
         print(f"Audit Proof:     {result.audit_artifact_path}")
         print(f"Execution time:  {result.duration_seconds:.2f}s")
 
+        if result.status.value == "LOADED":
+            print(f"\nOK Data was published to: {result.outcome.target_path}")
+        elif result.status.value == "REJECTED":
+            print("\nX No data was published. All rows were either refused or held.")
+        elif result.status.value == "FAILED":
+            print("\nX Engine failure. No data was published.")
+
     if result.status.value == "FAILED":
         return 1
     if result.status.value == "REJECTED":
         if not args.json:
-            print("\n[!] FEED REJECTED: Violations exceeded declared contract gate.", file=sys.stderr)
+            _print_rejection_details(result)
         return 2
+    return 0
+
+
+# ---------------------------------------------------- commands: validate-contract
+
+
+def _plural(count: int, singular: str) -> str:
+    return f"{count} {singular if count == 1 else singular + 's'}"
+
+
+def command_validate_contract(args: argparse.Namespace) -> int:
+    """Authoring-time contract validation with clear errors, summary, and warnings.
+
+    Beyond model construction (which enforces schema presence, rule-column
+    membership, duplicate rule IDs, and target-path sandboxing), this surfaces
+    every problem in one place instead of stopping at the first exception, and
+    warns about gaps that would silently weaken enforcement at run time.
+    """
+    contract_path = Path(args.contract)
+    if not contract_path.is_file():
+        print(f"✗ Contract not found: {contract_path}", file=sys.stderr)
+        return 1
+    try:
+        with open(contract_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as exc:
+        print(f"✗ Contract file could not be parsed as JSON: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        contract = DataContract(**data)
+    except ValidationError as exc:
+        errors = exc.errors()
+        print(
+            f"✗ Contract '{contract_path}' is invalid "
+            f"({len(errors)} error{'s' if len(errors) != 1 else ''}):",
+            file=sys.stderr,
+        )
+        for err in errors:
+            location = ".".join(str(part) for part in err.get("loc", ())) or "(contract)"
+            message = str(err.get("msg", "invalid value")).replace("Value error, ", "")
+            print(f"  - {location}: {message}", file=sys.stderr)
+        return 1
+
+    issues: List[str] = []
+    warnings: List[str] = []
+
+    sources = contract.spec.sources
+    if not sources or not sources[0].schema_:
+        issues.append("At least one source with a non-empty schema is required")
+    declared_columns = {column.name for column in (sources[0].schema_ if sources else [])}
+
+    seen_rule_ids = set()
+    for rule in contract.spec.quality.rules:
+        if rule.rule_id in seen_rule_ids:
+            issues.append(f"Duplicate rule_id '{rule.rule_id}'")
+        seen_rule_ids.add(rule.rule_id)
+        if rule.column and rule.column not in declared_columns:
+            issues.append(
+                f"Row rule '{rule.rule_id}' references column '{rule.column}' which is not in the declared schema"
+            )
+    for batch_rule in contract.spec.quality.batch_rules:
+        if batch_rule.rule_id in seen_rule_ids:
+            issues.append(f"Duplicate rule_id '{batch_rule.rule_id}'")
+        seen_rule_ids.add(batch_rule.rule_id)
+        referenced_columns = ([batch_rule.column] if batch_rule.column else []) + list(batch_rule.columns or [])
+        for column in referenced_columns:
+            if column not in declared_columns:
+                issues.append(
+                    f"Batch rule '{batch_rule.rule_id}' references column '{column}' which is not in the declared schema"
+                )
+
+    for target in contract.spec.delivery.targets:
+        try:
+            FilesystemSandbox.sanitize_and_validate_path(target.path, create_parent=False)
+        except Exception as exc:
+            issues.append(f"Delivery target '{target.path}' is outside the allowed storage roots: {exc}")
+
+    if not contract.spec.quality.rules:
+        warnings.append("No row rules defined — Tier 2 semantic validation will admit all structurally valid rows")
+    if not contract.spec.quality.batch_rules:
+        warnings.append("No batch rules defined — consider adding MIN_ROW_COUNT for feed volume validation")
+    if not contract.spec.delivery.targets:
+        warnings.append("No delivery targets defined — runs will fall back to ./output/delivered.parquet")
+
+    if issues:
+        print(
+            f"✗ Contract '{contract.metadata.name}' v{contract.metadata.version} is invalid "
+            f"({len(issues)} issue{'s' if len(issues) != 1 else ''}):",
+            file=sys.stderr,
+        )
+        for issue in issues:
+            print(f"  - {issue}", file=sys.stderr)
+        for warning in warnings:
+            print(f"  WARNING: {warning}", file=sys.stderr)
+        return 1
+
+    print(
+        f"✓ Contract '{contract.metadata.name}' v{contract.metadata.version} is valid. "
+        f"{_plural(len(contract.spec.quality.rules), 'row rule')}, "
+        f"{_plural(len(contract.spec.quality.batch_rules), 'batch rule')}, "
+        f"{_plural(len(contract.spec.delivery.targets), 'delivery target')}."
+    )
+    for warning in warnings:
+        print(f"  WARNING: {warning}")
     return 0
 
 
@@ -584,12 +867,7 @@ def main(argv: Optional[List[str]] = None) -> None:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "validate-contract":
-            with open(args.contract, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            contract = DataContract(**data)
-            print(f"✓ Contract '{contract.metadata.name}' v{contract.metadata.version} is valid.")
-            print(f"  Rules: {len(contract.spec.quality.rules)} row checks, {len(contract.spec.quality.batch_rules)} batch checks.")
-            sys.exit(0)
+            sys.exit(command_validate_contract(args))
 
         if args.command == "run":
             sys.exit(command_run(args))
@@ -602,6 +880,41 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         if args.command == "demo":
             sys.exit(command_demo(args))
+
+        if args.command == "contract":
+            from datashell.cli.settlement_commands import (
+                command_contract_create, command_contract_show,
+                command_contract_validate, command_contract_versions,
+            )
+            handlers = {
+                "validate": command_contract_validate,
+                "create": command_contract_create,
+                "show": command_contract_show,
+                "versions": command_contract_versions,
+            }
+            sys.exit(handlers[args.contract_command](args))
+
+        if args.command == "settlement":
+            from datashell.cli.settlement_commands import (
+                command_settlement_calculate, command_settlement_explain,
+                command_settlement_list, command_settlement_show,
+                command_settlement_verify, command_invoice_export,
+                command_invoice_preview, command_billing_preview,
+                command_dispute_open, command_dispute_resolve,
+            )
+            handlers = {
+                "calculate": command_settlement_calculate,
+                "show": command_settlement_show,
+                "list": command_settlement_list,
+                "explain": command_settlement_explain,
+                "verify": command_settlement_verify,
+                "invoice-preview": command_invoice_preview,
+                "invoice-export": command_invoice_export,
+                "dispute-open": command_dispute_open,
+                "dispute-resolve": command_dispute_resolve,
+                "billing-preview": command_billing_preview,
+            }
+            sys.exit(handlers[args.settlement_command](args))
 
         sys.exit(0)
     except SystemExit:

@@ -291,6 +291,20 @@ class EnterpriseSettings(BaseModel):
     # and usage metering. Retention of 0 keeps history forever; drift baselines
     # use a rolling window of prior delivered runs (1 = previous-run behaviour).
     history_retention_days: int = Field(default_factory=lambda: int(os.getenv("DATASHELL_HISTORY_RETENTION_DAYS", "0")))
+    # Historical drift is opt-in. Cross-run comparisons are only meaningful once
+    # a feed has a stable production history: a small test run recorded first
+    # would otherwise become the baseline that a normal-sized delivery is
+    # rejected against. Set DRIFT_ENABLED=true to activate drift gating.
+    drift_enabled: bool = Field(
+        default_factory=lambda: os.getenv("DRIFT_ENABLED", "false").strip().lower() in ("true", "1", "yes", "on")
+    )
+    # When drift is enabled and this is set, the stored baseline for the current
+    # contract/tenant is cleared before evaluation, so this run establishes the
+    # new comparison point. Intended for one-shot use after an intentional
+    # volume/scope change; leave unset for normal operation.
+    drift_baseline_reset: bool = Field(
+        default_factory=lambda: os.getenv("DRIFT_BASELINE_RESET", "false").strip().lower() in ("true", "1", "yes", "on")
+    )
     drift_baseline_window: int = Field(default_factory=lambda: int(os.getenv("DRIFT_BASELINE_WINDOW", "1")))
     # Drift thresholds. Volume drift compares delivered-row counts; metric drift
     # compares the per-feed aggregates persisted in the ledger (see
@@ -318,6 +332,27 @@ class EnterpriseSettings(BaseModel):
         default_factory=lambda: (os.getenv("DATASHELL_RUN_WEBHOOK_URL", "") or "").strip() or None
     )
     webhook_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("DATASHELL_WEBHOOK_TIMEOUT_SECONDS", "5")))
+
+    # Settlement billing adapter. Dry-run (offline, deterministic) is the
+    # default so no deployment can move money by accident. Stripe is opt-in:
+    # it requires an explicit secret key, runs in test mode unless separately
+    # authorized, creates draft invoices only, and never finalizes or collects.
+    billing_provider: str = Field(
+        default_factory=lambda: os.getenv("DATASHELL_BILLING_PROVIDER", "dry-run").strip().lower()
+    )
+    billing_stripe_secret_key: str = Field(
+        default_factory=lambda: (os.getenv("DATASHELL_BILLING_STRIPE_SECRET_KEY", "") or "").strip()
+    )
+    billing_stripe_webhook_secret: str = Field(
+        default_factory=lambda: (os.getenv("DATASHELL_BILLING_STRIPE_WEBHOOK_SECRET", "") or "").strip()
+    )
+    billing_stripe_customer_id: str = Field(
+        default_factory=lambda: (os.getenv("DATASHELL_BILLING_STRIPE_CUSTOMER_ID", "") or "").strip()
+    )
+    billing_stripe_test_mode: bool = Field(
+        default_factory=lambda: os.getenv("DATASHELL_BILLING_STRIPE_TEST_MODE", "true").strip().lower()
+        in ("true", "1", "yes", "on")
+    )
 
     @property
     def is_production_mode(self) -> bool:
@@ -486,6 +521,16 @@ class EnterpriseSettings(BaseModel):
             raise RuntimeError("DRIFT_METRIC_MIN_BASELINE_SAMPLES must be a positive integer")
         if self.webhook_timeout_seconds <= 0:
             raise RuntimeError("DATASHELL_WEBHOOK_TIMEOUT_SECONDS must be positive")
+        if self.billing_provider not in ("dry-run", "stripe"):
+            raise RuntimeError("DATASHELL_BILLING_PROVIDER must be 'dry-run' or 'stripe'")
+        if self.billing_provider == "stripe":
+            if not self.billing_stripe_secret_key:
+                raise RuntimeError("DATASHELL_BILLING_STRIPE_SECRET_KEY is required for the stripe provider")
+            if self.is_production_mode and self.billing_stripe_test_mode:
+                raise RuntimeError(
+                    "DATASHELL_BILLING_STRIPE_TEST_MODE=true is forbidden in production; "
+                    "disable test mode only with an explicit production authorization"
+                )
         if self.run_webhook_url:
             from urllib.parse import urlsplit
             parsed_webhook = urlsplit(self.run_webhook_url)

@@ -1,6 +1,6 @@
 # Data Shell — Enterprise Perimeter Gateway
 
-[![Tests](https://img.shields.io/badge/tests-247%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-387%20passing-brightgreen.svg)]()
 [![Security](https://img.shields.io/badge/security-hardened%20RBAC%20%2B%20sandboxed-blueviolet.svg)]()
 [![Cryptography](https://img.shields.io/badge/crypto-Ed25519%20%2B%20HMAC--SHA256-blue.svg)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-Prometheus%20metrics-orange.svg)]()
@@ -142,9 +142,14 @@ only (held/quarantine rows never satisfy a control or mask a duplicate):
   (default) back-fills nullable columns.
 
 Every execution mode extracts per-feed metrics — null rate per column plus sum/mean for
-numerics — persists them in the boundary ledger, and compares them run-over-run so a feed
-that silently shifts is caught. Metric drift is gated by configurable thresholds and a
-minimum baseline history, so normal variation during initial learning never blocks a feed.
+numerics — persists them in the boundary ledger, and can compare them run-over-run so a
+feed that silently shifts is caught. Historical drift is **opt-in**
+(`DRIFT_ENABLED=false` by default) so a small test run can never become the baseline
+that rejects a production delivery; enable it once a feed has stable history. Metric
+drift is gated by configurable thresholds and a minimum baseline history, so normal
+variation during initial learning never blocks a feed. `--no-drift` bypasses drift for
+one run, and `DRIFT_BASELINE_RESET=true` re-baselines once without deleting ledger
+history.
 
 ### 3. Durable boundary ledger
 The ledger is a tenant-isolated, append-only forensic record of **every** terminal run —
@@ -191,15 +196,41 @@ Real-time telemetry at `/metrics`: `datashell_rows_read_total`,
 rule IDs are excluded from metric labels to avoid cardinality blow-up and data leakage.
 
 ### 7. Orchestration integrations
-A local CLI (`datashell run|validate-contract|verify|ledger|demo`) and an Apache Airflow
-provider (`integrations/airflow`) with `DataShellEnforceOperator` (gateway API) and
-`DataShellLocalEnforceOperator` (CLI, for multi-gigabyte inputs on the worker).
+A local CLI (`datashell run|validate-contract|verify|ledger|demo|contract|settlement`) and an
+Apache Airflow provider (`integrations/airflow`) with `DataShellEnforceOperator` (gateway API)
+and `DataShellLocalEnforceOperator` (CLI, for multi-gigabyte inputs on the worker).
+
+### 8. Verifiable commercial settlement
+Turn a verified delivery run into a contractual obligation without a spreadsheet and without
+moving money. A versioned **commercial contract** (pricing, qualification, acceptance,
+penalties) is bound by SHA-256 digest; the deterministic engine consumes verified run
+evidence and produces an exact minor-unit **settlement statement** with machine-readable
+reason codes. A **signed settlement receipt** binds the delivery certificate digest, the
+exact contract version, and every calculated field — tamper with any of them and
+verification fails. Failed reconciliation or an invalid certificate can never authorize a
+payable amount. Disputes block automatic billing and preserve the original evidence.
+
+```bash
+datashell contract create examples/commercial_delivery_contract.json --tenant acme
+datashell settlement calculate --run-id dm_run_… --contract-id ctr_vendor_settlements_usd \
+    --tenant acme --idempotency-key invoice-2026-10
+datashell settlement explain stl_…  --tenant acme   # the arithmetic, step by step
+datashell settlement verify  stl_…  --tenant acme   # signed evidence
+python examples/settlement_demo.py                   # 1M rows → USD 49,250.00 derived, scenarios A–H
+```
+
+Billing providers are an abstraction: the default **dry-run** adapter is offline and
+deterministic; an opt-in **Stripe** adapter creates *draft* invoices only
+(`auto_advance=false`), records a timeout as `UNRESOLVED` rather than "not created", and
+refuses blind retries. Read more in
+[docs/SETTLEMENT.md](docs/SETTLEMENT.md) and
+[docs/SETTLEMENT_OPERATIONS.md](docs/SETTLEMENT_OPERATIONS.md).
 
 ---
 
 ## Local Quickstart
 
-### 1. Run the test suite (247 tests)
+### 1. Run the test suite (387 tests)
 ```bash
 pip install --require-hashes -r requirements-dev.lock   # hash-pinned dependency set
 pip install -e .                                        # the package itself
@@ -291,9 +322,13 @@ memory stays bounded by the streaming batch size rather than the input size.
 
 ## Documentation
 
+* `docs/FIRST_RUN.md` — a five-minute guided first run using the sample dataset.
 * `docs/PRODUCTION_READINESS.md` — what is hardened and what is deliberately out of scope.
 * `docs/OPERATIONS.md` — runbook: secrets, sizing, retention, webhooks, backup.
 * `docs/THREAT_MODEL.md` — assets, trust boundaries, and mitigations.
+* `docs/SETTLEMENT.md` — settlement architecture, schemas, acceptance/pricing semantics, invariants, and limitations.
+* `docs/SETTLEMENT_OPERATIONS.md` — settlement CLI/API reference, billing configuration, disputes, threat model, and production checklist.
+* `docs/product-validation/` — product audit, usability findings, roadmap, and claim verification.
 
 ---
 

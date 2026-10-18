@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "contract_id": "ctr_vendor_settlements_usd",
+  "contract_version": 1,
+  "buyer_id": "buyer-acme-data",
+  "seller_id": "seller-vendor-feed",
+  "feed_id": "vendor-settlements",
+  "currency": "USD",
+  "pricing": {
+    "model": "PER_ACCEPTED_UNIT",
+    "unit_price_minor": 5,
+    "tiers": []
+  },
+  "qualification": {
+    "billable_unit": "DELIVERED_ROWS",
+    "unique_key_columns": [],
+    "include_refused_in_count": false
+  },
+  "acceptance": {
+    "policy": "PARTIAL_WITH_MINIMUM",
+    "minimum_accepted_units": 1,
+    "expected_units": 3,
+    "maximum_units": null,
+    "allowed_failure_tolerance_bps": 10000,
+    "required_validation_rules": [],
+    "block_billing_during_dispute": true
+  },
+  "penalty": {
+    "model": "NONE",
+    "flat_penalty_minor": 0,
+    "penalty_percent_bps": 0,
+    "applies_to": ["REJECTED", "SHORT_DELIVERY"]
+  },
+  "effective_at": "2026-01-01T00:00:00Z",
+  "expires_at": null,
+  "approved_by": ["buyer-acme-data", "seller-vendor-feed"],
+  "description": "Example commercial delivery contract: per-qualified-record pricing for the vendor settlements feed. Illustrative only — not a real agreement."
+}

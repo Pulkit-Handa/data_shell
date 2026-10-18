@@ -5,6 +5,25 @@ All notable changes to Data Shell are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Verifiable data delivery & settlement**: versioned commercial contracts (`datashell contract validate|create|show|versions`), a deterministic exact-arithmetic settlement engine (integer minor units, single `ROUND_HALF_UP` stage, tiers, caps, overflow refusal, no binary floats), contractual acceptance verdicts with machine-readable reason codes, and settlement statements bound to exactly one immutable contract version. New CLI surface `datashell settlement calculate|show|list|explain|verify|invoice-preview|invoice-export|dispute-open|dispute-resolve|billing-preview` with a dedicated refusal exit code `4`.
+- **Signed settlement receipts**: a versioned extension of the audit-certificate signature envelope binding the delivery-certificate digest, contract id/version/digest, and the full calculation. Ed25519 when provisioned (third-party verifiable); HMAC-SHA256 otherwise, never mislabelled as third-party verifiable. Tampering with any settlement-critical field fails verification.
+- **Durable settlement ledger**: `settlements`, `settlement_events` (append-only lifecycle transitions), `disputes`, `billing_instructions`, and `contract_versions` tables extending the boundary-ledger SQLite database, with tenant scoping, deterministic statement IDs, and uniqueness constraints backing idempotency and duplicate-prevention guarantees.
+- **Dispute workflow** (`OPEN`/`UNDER_REVIEW`/`RESOLVED`/`WITHDRAWN`): statements move to `DISPUTED`, automatic billing and approvals are blocked, the original calculation and evidence are preserved, and resolutions (`ACCEPT_AS_IS`, `REJECT_SETTLEMENT` → `CANCELLED`, correction/replacement with preserved history) are recorded with actor and reason.
+- **Billing provider abstraction**: default offline deterministic **dry-run** adapter, plus an opt-in **Stripe draft-invoice** adapter (disabled by default, test mode by default, `auto_advance=false`, per-call idempotency keys, timeout recorded as `UNRESOLVED` with retries refused pending reconciliation, never finalizes or collects). Stripe webhook signature verification with replay dedup is implemented. No live money movement exists in any code path.
+- **HTTP API**: tenant-scoped `/api/v1/commercial-contracts*` and `/api/v1/settlements*` endpoints (calculate, list, show, explanation, verify, disputes, approvals, billing-preview) with `SETTLEMENTS_READ`/`SETTLEMENTS_WRITE`/`BILLING_MANAGE` capabilities; billing preview requires an `Idempotency-Key` header.
+- **End-to-end demo and benchmark**: `examples/settlement_demo.py` (1,000,000 source rows, 10,000 refused, 5,000 held, 985,000 delivered at USD 0.05 → derived USD 49,250.00; scenarios A–H) and `examples/settlement_benchmark.py` (pipeline throughput vs. settlement latency/memory). No new runtime dependencies (httpx and cryptography were already locked).
+- **Documentation**: `docs/SETTLEMENT.md` (architecture, schemas, semantics, invariants, limitations) and `docs/SETTLEMENT_OPERATIONS.md` (CLI/API reference, billing configuration, idempotency, dispute runbook, threat model, production checklist, measured performance).
+- **Tests**: settlement primitives, integration (real pipeline + certificates + API), invariant/property, and CLI suites (387 total in the suite, all pre-existing tests preserved).
+
+### Fixed
+- **Production startup with bundled settlement example**: startup contract auto-seeding now only parses files carrying the data-contract envelope (`metadata` + `spec`) from `examples/*_contract.json`. Previously the settlement example `examples/commercial_delivery_contract.json` matched the glob, failed `DataContract` validation, and — in production mode — aborted application startup with a `RuntimeError`, preventing the container from ever becoming ready (caught by the CI production-container check).
+
+### Notes
+- The Stripe adapter is implemented and exercised against a faked HTTP transport (draft-only semantics, timeout/`UNRESOLVED`, retry refusal, webhook verification). It has **not** been exercised against live Stripe test-mode credentials, which are not provisioned in this environment; the provider remains disabled by default and live money movement is explicitly out of scope.
+
 ## [1.0.2] - 2026-10-15
 
 ### Added
