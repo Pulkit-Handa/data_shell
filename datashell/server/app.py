@@ -77,6 +77,17 @@ def seed_default_contracts(reg: ContractRegistry) -> None:
             try:
                 with open(contract_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                # The examples directory also ships settlement commercial
+                # contracts, which share the *_contract.json suffix but are a
+                # different schema registered through the settlement API/CLI.
+                # Only files carrying the data-contract envelope are seeded
+                # into the shared data-contract catalog.
+                if not (isinstance(data, dict) and {"metadata", "spec"} <= data.keys()):
+                    telemetry_logger.info(
+                        "Skipping non-data-contract example file",
+                        file=contract_file.name,
+                    )
+                    continue
                 c = DataContract(**data)
                 existing = reg.get_latest(c.metadata.name)
                 if not existing:

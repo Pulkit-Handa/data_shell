@@ -1,6 +1,6 @@
 # Data Shell — Enterprise Perimeter Gateway
 
-[![Tests](https://img.shields.io/badge/tests-383%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-387%20passing-brightgreen.svg)]()
 [![Security](https://img.shields.io/badge/security-hardened%20RBAC%20%2B%20sandboxed-blueviolet.svg)]()
 [![Cryptography](https://img.shields.io/badge/crypto-Ed25519%20%2B%20HMAC--SHA256-blue.svg)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-Prometheus%20metrics-orange.svg)]()
@@ -230,7 +230,7 @@ refuses blind retries. Read more in
 
 ## Local Quickstart
 
-### 1. Run the test suite (383 tests)
+### 1. Run the test suite (387 tests)
 ```bash
 pip install --require-hashes -r requirements-dev.lock   # hash-pinned dependency set
 pip install -e .                                        # the package itself
