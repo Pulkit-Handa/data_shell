@@ -5,6 +5,7 @@ This directory contains example contracts, sample data, scripts, and notebooks t
 ## Contracts
 
 - [vendor_settlements_contract.json](vendor_settlements_contract.json) - Vendor settlements contract demonstrating row rules, batch rules, and delivery configuration
+- [commercial_delivery_contract.json](commercial_delivery_contract.json) - Commercial delivery contract (pricing, qualification, acceptance) for the settlement workflow
 - [nyc_taxi_contract.json](nyc_taxi_contract.json) - NYC taxi data contract example
 
 ## Samples
@@ -18,6 +19,8 @@ This directory contains example contracts, sample data, scripts, and notebooks t
 - [render_demo_gif.sh](render_demo_gif.sh) - Generate the demo GIF from real CLI output using ImageMagick
 - [demo.tape](demo.tape) - VHS tape file to generate the demo GIF (alternative to render_demo_gif.sh)
 - [demo_run.py](demo_run.py) - Programmatic demo script
+- [settlement_demo.py](settlement_demo.py) - End-to-end settlement demo: 1,000,000 rows → USD 49,250.00 derived from evidence, plus failure scenarios A–H (offline, deterministic)
+- [settlement_benchmark.py](settlement_benchmark.py) - Measures pipeline throughput vs. settlement calculation/verification latency and memory
 
 ## Notebooks
 

@@ -28,6 +28,9 @@ class Capability(str, Enum):
     AUDIT_READ = "audit:read"
     METRICS_READ = "metrics:read"
     ADMIN_MANAGE = "admin:manage"
+    SETTLEMENTS_READ = "settlements:read"
+    SETTLEMENTS_WRITE = "settlements:write"
+    BILLING_MANAGE = "billing:manage"
 
 
 ROLE_CAPABILITIES: Dict[Role, Set[Capability]] = {
@@ -38,6 +41,9 @@ ROLE_CAPABILITIES: Dict[Role, Set[Capability]] = {
         Capability.AUDIT_READ,
         Capability.METRICS_READ,
         Capability.ADMIN_MANAGE,
+        Capability.SETTLEMENTS_READ,
+        Capability.SETTLEMENTS_WRITE,
+        Capability.BILLING_MANAGE,
     },
     Role.DATA_ENGINEER: {
         Capability.CONTRACTS_READ,
@@ -45,6 +51,9 @@ ROLE_CAPABILITIES: Dict[Role, Set[Capability]] = {
         Capability.PIPELINE_ENFORCE,
         Capability.AUDIT_READ,
         Capability.METRICS_READ,
+        Capability.SETTLEMENTS_READ,
+        Capability.SETTLEMENTS_WRITE,
+        Capability.BILLING_MANAGE,
     },
     Role.PRODUCER: {
         Capability.CONTRACTS_READ,
@@ -54,6 +63,7 @@ ROLE_CAPABILITIES: Dict[Role, Set[Capability]] = {
         Capability.CONTRACTS_READ,
         Capability.AUDIT_READ,
         Capability.METRICS_READ,
+        Capability.SETTLEMENTS_READ,
     },
 }
 
@@ -402,6 +412,18 @@ def preflight_authenticate_scope(scope):
         required_capability = Capability.ADMIN_MANAGE
     elif method == "DELETE" and __import__("re").fullmatch(r"/api/v1/admin/keys/[0-9a-f]{24}", path):
         required_capability = Capability.ADMIN_MANAGE
+    elif method == "POST" and path == "/api/v1/commercial-contracts":
+        required_capability = Capability.SETTLEMENTS_WRITE
+    elif method == "POST" and path == "/api/v1/settlements/calculate":
+        required_capability = Capability.SETTLEMENTS_WRITE
+    elif method == "POST" and path.startswith("/api/v1/settlements/") and path.endswith("/disputes"):
+        required_capability = Capability.SETTLEMENTS_WRITE
+    elif method == "POST" and path.startswith("/api/v1/settlements/") and path.endswith("/approvals"):
+        required_capability = Capability.BILLING_MANAGE
+    elif method == "POST" and path.startswith("/api/v1/settlements/") and path.endswith("/billing-preview"):
+        required_capability = Capability.SETTLEMENTS_READ
+    elif method == "POST" and path.startswith("/api/v1/settlements/") and path.endswith("/verify"):
+        required_capability = Capability.SETTLEMENTS_READ
     else:
         return 404, None, "Not found"
 

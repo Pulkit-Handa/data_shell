@@ -42,7 +42,7 @@ class RequestBodyLimitMiddleware:
         headers = {key.lower(): value for key, value in scope.get("headers", [])}
         path = str(scope.get("path", ""))
         request_limit = self.max_body_bytes
-        if path in {"/api/v1/contracts", "/api/v1/admin/keys"}:
+        if path in {"/api/v1/contracts", "/api/v1/admin/keys", "/api/v1/commercial-contracts"}:
             request_limit = self.max_control_body_bytes
         content_length = headers.get(b"content-length")
         if content_length:

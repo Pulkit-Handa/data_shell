@@ -94,6 +94,7 @@ class DeliveryEngine:
         all_batch_rules_passed: bool,
         should_reject_run: bool = False,
         defer_publish: bool = False,
+        rejection_reason: Optional[str] = None,
     ) -> DeliveryOutcome:
         """
         Executes atomic staged delivery, sandboxing checks, and quarantine artifact generation.
@@ -151,7 +152,7 @@ class DeliveryEngine:
             # GATE 2: Contract Gate (Stop conditions / batch rule pass / behavior check)
             # Rejection is determined by quality engine according to declared contract behavior
             if should_reject_run:
-                reason = "Violations or batch assertions exceeded policy gate"
+                reason = rejection_reason or "Violations or batch assertions exceeded policy gate"
                 ledger.mark_rejected(reason)
                 return DeliveryOutcome(
                     status=TerminalStatus.REJECTED,

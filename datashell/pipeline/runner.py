@@ -66,9 +66,21 @@ class DataShellPipeline:
     Enterprise boundary enforcement pipeline.
     Ensures bad data never lands in target storage, and never leaves to regulators.
     Supports in-memory, file, and out-of-core streaming execution.
+
+    Historical drift is opt-in (``DRIFT_ENABLED=false`` by default) because
+    cross-run comparisons are only meaningful once a feed has a stable history;
+    a small test run recorded first must never become the baseline that rejects
+    a subsequent production delivery. Pass ``drift_enabled=False`` (for example
+    from the CLI ``--no-drift`` flag) to force drift off for one pipeline
+    instance, or ``True`` to force it on.
     """
 
-    def __init__(self, contract: DataContract, tenant_id: str = "default-tenant"):
+    def __init__(
+        self,
+        contract: DataContract,
+        tenant_id: str = "default-tenant",
+        drift_enabled: Optional[bool] = None,
+    ):
         if not isinstance(tenant_id, str) or not tenant_id:
             raise ValueError("tenant_id must be a non-empty authenticated tenant identifier")
         # Validate and normalize the filesystem representation at the boundary;
@@ -76,11 +88,81 @@ class DataShellPipeline:
         settings.tenant_storage_key(tenant_id)
         self.contract = contract
         self.tenant_id = tenant_id
+        self._drift_enabled_override = drift_enabled
         self.ingestion_engine = StructuralIngestionEngine(contract)
         self.quality_engine = SemanticQualityEngine(contract)
         self.delivery_engine = DeliveryEngine(contract, tenant_id=self.tenant_id)
         self.history_tracker = ContractHistoryTracker()
         self.drift_engine = HistoricalDriftEngine(history_tracker=self.history_tracker)
+
+    def _evaluate_drift(
+        self,
+        *,
+        contract_name: str,
+        current_rows: int,
+        current_metrics: Dict[str, float],
+    ) -> List[DriftCheckResult]:
+        """Run historical drift checks when enabled, honoring a baseline reset.
+
+        Returns an empty list when drift is disabled, in which case no baseline
+        is consulted and no drift evaluation is recorded. When enabled and
+        ``DRIFT_BASELINE_RESET`` is truthy, the contract/tenant baseline is
+        cleared first so the current run establishes a fresh comparison point.
+        """
+        enabled = settings.drift_enabled if self._drift_enabled_override is None else self._drift_enabled_override
+        if not enabled:
+            return []
+        if settings.drift_baseline_reset:
+            self.history_tracker.reset_baseline(contract_name=contract_name, tenant_id=self.tenant_id)
+        return self.drift_engine.evaluate_drift(
+            contract_name=contract_name,
+            current_rows=current_rows,
+            current_metrics=current_metrics,
+            tenant_id=self.tenant_id,
+            max_volume_drop_pct=settings.drift_max_volume_drop_pct,
+            max_metric_drift_pct=settings.drift_max_metric_drift_pct,
+            baseline_window=settings.drift_baseline_window,
+            min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
+            max_rate_abs_delta=settings.drift_max_rate_abs_delta,
+        )
+
+    @staticmethod
+    def _rejection_reason(
+        batch_results: Optional[List[Any]],
+        drift_checks: Optional[List[DriftCheckResult]],
+        *,
+        held_rows: int = 0,
+        behavior: Optional[QualityBehavior] = None,
+        footing_ok: bool = True,
+    ) -> str:
+        """Build an operator-actionable rejection reason naming every failed gate.
+
+        Names the batch rule, its actual and expected values, failing drift
+        metrics, and row-policy violations so a rejection is diagnosable from
+        the CLI output and the ledger without opening the certificate.
+        """
+        reasons: List[str] = []
+        for batch in batch_results or []:
+            if getattr(batch, "passed", True):
+                continue
+            check = str(getattr(batch, "check", ""))
+            unit = " rows" if check in ("MIN_ROW_COUNT", "MAX_ROW_COUNT") else ""
+            reasons.append(
+                f"{batch.rule_id} batch rule failed "
+                f"(actual: {batch.actual_value}{unit}, expected: {batch.expected_value})"
+            )
+        for drift in drift_checks or []:
+            if drift.passed:
+                continue
+            reasons.append(f"{drift.rule_id} failed ({drift.details})")
+        if held_rows > 0:
+            behavior_label = behavior.value if isinstance(behavior, QualityBehavior) else "declared"
+            reasons.append(
+                f"row quality violations exceeded {behavior_label} policy ({held_rows} rows held)"
+            )
+        if not footing_ok:
+            reasons.append("reconciliation footing deficit; delivery refused to write")
+        return "; ".join(reasons) if reasons else "Violations exceeded declared contract gate"
 
     def _record_run_outcome(
         self,
@@ -270,18 +352,13 @@ class DataShellPipeline:
                 structural_reasons=structural_reasons
             )
 
-            # Step 4: Cross-Period Historical Drift Evaluation
+            # Step 4: Cross-Period Historical Drift Evaluation (opt-in; see
+            # DRIFT_ENABLED). When disabled no baseline is consulted.
             feed_metrics = compute_metrics(quality_res.admitted_df)
-            drift_checks = self.drift_engine.evaluate_drift(
+            drift_checks = self._evaluate_drift(
                 contract_name=contract_name,
                 current_rows=quality_res.admitted_count,
                 current_metrics=feed_metrics,
-                tenant_id=self.tenant_id,
-                max_volume_drop_pct=settings.drift_max_volume_drop_pct,
-                max_metric_drift_pct=settings.drift_max_metric_drift_pct,
-                baseline_window=settings.drift_baseline_window,
-                min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
-                max_rate_abs_delta=settings.drift_max_rate_abs_delta,
             )
             all_drift_passed = all(d.passed for d in drift_checks)
 
@@ -298,6 +375,21 @@ class DataShellPipeline:
                 all_batch_rules_passed=all_checks_passed,
                 should_reject_run=should_reject,
                 defer_publish=True,
+                rejection_reason=(
+                    self._rejection_reason(
+                        quality_res.batch_results,
+                        drift_checks,
+                        held_rows=(
+                            quality_res.held_count
+                            if quality_res.behavior == QualityBehavior.REJECT_RUN
+                            else 0
+                        ),
+                        behavior=quality_res.behavior,
+                        footing_ok=ledger.footing_matched,
+                    )
+                    if should_reject
+                    else None
+                ),
             )
             for staged_path in (outcome.staged_target_path, outcome.staged_run_artifact_path):
                 if staged_path:
@@ -443,18 +535,12 @@ class DataShellPipeline:
                 structural_reasons=structural_reasons
             )
 
-            # Historical drift evaluation (Multi-Tenant Isolated)
+            # Historical drift evaluation (opt-in; multi-tenant isolated)
             feed_metrics = compute_metrics(quality_res.admitted_df)
-            drift_checks = self.drift_engine.evaluate_drift(
+            drift_checks = self._evaluate_drift(
                 contract_name=contract_name,
                 current_rows=quality_res.admitted_count,
                 current_metrics=feed_metrics,
-                tenant_id=self.tenant_id,
-                max_volume_drop_pct=settings.drift_max_volume_drop_pct,
-                max_metric_drift_pct=settings.drift_max_metric_drift_pct,
-                baseline_window=settings.drift_baseline_window,
-                min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
-                max_rate_abs_delta=settings.drift_max_rate_abs_delta,
             )
             all_drift_passed = all(d.passed for d in drift_checks)
 
@@ -472,6 +558,21 @@ class DataShellPipeline:
                 all_batch_rules_passed=all_checks_passed,
                 should_reject_run=should_reject,
                 defer_publish=True,
+                rejection_reason=(
+                    self._rejection_reason(
+                        quality_res.batch_results,
+                        drift_checks,
+                        held_rows=(
+                            quality_res.held_count
+                            if quality_res.behavior == QualityBehavior.REJECT_RUN
+                            else 0
+                        ),
+                        behavior=quality_res.behavior,
+                        footing_ok=ledger.footing_matched,
+                    )
+                    if should_reject
+                    else None
+                ),
             )
             for staged_path in (outcome.staged_target_path, outcome.staged_run_artifact_path):
                 if staged_path:
@@ -722,18 +823,12 @@ class DataShellPipeline:
             if not all_batch_passed and self.contract.spec.quality.behavior != QualityBehavior.WARN:
                 accumulated_should_reject = True
 
-            # Cross-Period Historical Drift Evaluation (Multi-Tenant Isolated)
+            # Cross-Period Historical Drift Evaluation (opt-in; multi-tenant isolated)
             feed_metrics = compute_metrics_from_parquet(staged_target)
-            drift_checks = self.drift_engine.evaluate_drift(
+            drift_checks = self._evaluate_drift(
                 contract_name=contract_name,
                 current_rows=total_admitted,
                 current_metrics=feed_metrics,
-                tenant_id=self.tenant_id,
-                max_volume_drop_pct=settings.drift_max_volume_drop_pct,
-                max_metric_drift_pct=settings.drift_max_metric_drift_pct,
-                baseline_window=settings.drift_baseline_window,
-                min_metric_baseline_samples=settings.drift_metric_min_baseline_samples,
-                max_rate_abs_delta=settings.drift_max_rate_abs_delta,
             )
             all_drift_passed = all(d.passed for d in drift_checks)
             if not all_drift_passed and self.contract.spec.quality.behavior != QualityBehavior.WARN:
@@ -755,7 +850,17 @@ class DataShellPipeline:
             if accumulated_should_reject or not ledger.footing_matched:
                 if staged_target.exists():
                     staged_target.unlink()
-                rejection_reason = "Streaming whole-run contract violation, batch assertion, drift failure, or footing deficit"
+                rejection_reason = self._rejection_reason(
+                    batch_results,
+                    drift_checks,
+                    held_rows=(
+                        total_held_quality
+                        if self.contract.spec.quality.behavior == QualityBehavior.REJECT_RUN
+                        else 0
+                    ),
+                    behavior=self.contract.spec.quality.behavior,
+                    footing_ok=ledger.footing_matched,
+                )
                 ledger.mark_rejected(rejection_reason)
                 outcome = DeliveryOutcome(
                     status=TerminalStatus.REJECTED,

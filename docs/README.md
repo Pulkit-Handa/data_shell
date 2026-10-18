@@ -4,6 +4,8 @@ Welcome to the Data Shell documentation.
 
 ## Core Documentation
 
+- [SETTLEMENT.md](SETTLEMENT.md) - Verifiable delivery settlement: architecture, commercial contract schema, acceptance/pricing semantics, signed receipts, invariants, and limitations
+- [SETTLEMENT_OPERATIONS.md](SETTLEMENT_OPERATIONS.md) - Settlement CLI/API reference, billing configuration, idempotency, dispute runbook, threat model, and production checklist
 - [OPERATIONS.md](OPERATIONS.md) - Production operations runbook (secrets, sizing, retention, webhooks, backup)
 - [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) - Hardened features and pre-launch checklist
 - [THREAT_MODEL.md](THREAT_MODEL.md) - Assets, trust boundaries, threats, and mitigations
