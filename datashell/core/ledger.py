@@ -83,7 +83,13 @@ class BoundaryLedger:
 
     def __init__(self, db_path: Optional[Path] = None):
         self.db_path = Path(db_path or settings.history_db_path)
-        self._init_db()
+        self._init_db_failed = False
+        try:
+            self._init_db()
+        except Exception:
+            # Defer corruption errors to check_integrity() so readiness probes
+            # can detect and report an unhealthy database at runtime.
+            self._init_db_failed = True
 
     # ---------------------------------------------------------------- internal
 
@@ -669,6 +675,8 @@ class BoundaryLedger:
         Used by readiness probes so an operator learns about a corrupt or
         locked history database before a scheduled run fails.
         """
+        if self._init_db_failed:
+            return False
         try:
             with self._connect() as conn:
                 row = conn.execute("PRAGMA quick_check").fetchone()
