@@ -1,25 +1,40 @@
-# Documentation
+# Data Shell Documentation
 
-Welcome to the Data Shell documentation.
+## Authoritative References
 
-## Core Documentation
-
-- [SETTLEMENT.md](SETTLEMENT.md) - Verifiable delivery settlement: architecture, commercial contract schema, acceptance/pricing semantics, signed receipts, invariants, and limitations
-- [SETTLEMENT_OPERATIONS.md](SETTLEMENT_OPERATIONS.md) - Settlement CLI/API reference, billing configuration, idempotency, dispute runbook, threat model, and production checklist
-- [OPERATIONS.md](OPERATIONS.md) - Production operations runbook (secrets, sizing, retention, webhooks, backup)
-- [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) - Hardened features and pre-launch checklist
-- [THREAT_MODEL.md](THREAT_MODEL.md) - Assets, trust boundaries, threats, and mitigations
-- [DESIGN_RECORD.md](DESIGN_RECORD.md) - Why the P0 fixes and release-engineering changes were designed this way (and what was rejected)
+| Document | Purpose |
+|---|---|
+| [production/CONFIGURATION_REFERENCE.md](production/CONFIGURATION_REFERENCE.md) | **Single source of truth** for all environment variables, CLI options, API endpoints, roles, capabilities, and certificate fields |
+| [production/OPERATIONS_RUNBOOK.md](production/OPERATIONS_RUNBOOK.md) | Startup, health checks, backup, restore, recovery, monitoring, incident response, rollback |
+| [production/RELEASE_CHECKLIST.md](production/RELEASE_CHECKLIST.md) | Pilot release gates, acceptance evidence, ownership, remaining blockers |
+| [production/VERIFICATION_REPORT.md](production/VERIFICATION_REPORT.md) | Exact commands, test results, exit codes, and evidence limitations |
+| [THREAT_MODEL.md](THREAT_MODEL.md) | Assets, trust boundaries, threats, and mitigations |
+| [SETTLEMENT.md](SETTLEMENT.md) | Settlement architecture, commercial contract schema, pricing, acceptance |
+| [SETTLEMENT_OPERATIONS.md](SETTLEMENT_OPERATIONS.md) | Settlement CLI/API reference, billing, disputes, production checklist |
 
 ## Guides
 
-- [TUTORIAL.md](../TUTORIAL.md) - End-to-end tutorial from contract authoring to enforcement, verification, and ledger queries
-- [../examples/README](../examples/README.md) - Example contracts, quickstart, and samples
+| Document | Purpose |
+|---|---|
+| [FIRST_RUN.md](FIRST_RUN.md) | 5-minute quickstart from install to first verified delivery |
+| [../TUTORIAL.md](../TUTORIAL.md) | End-to-end tutorial from contract authoring to enforcement |
+| [../examples/README](../examples/README.md) | Example contracts, quickstart, and samples |
 
 ## Integrations
 
-- [Airflow Provider](../integrations/airflow/README.md) - Apache Airflow operators and hooks
+| Document | Purpose |
+|---|---|
+| [../integrations/airflow/README.md](../integrations/airflow/README.md) | Apache Airflow operators and hooks |
+
+## Historical Reference
+
+| Document | Purpose |
+|---|---|
+| [DESIGN_RECORD.md](DESIGN_RECORD.md) | Why P0 fixes and release-engineering changes were designed this way (historical) |
+| [archive/PRODUCT_VALIDATION.md](archive/PRODUCT_VALIDATION.md) | Prior product validation workstream findings (2026-10-17, superseded) |
 
 ## Demo
 
-- [demo.gif](demo.gif) - 60-second walkthrough showing refusal, publish, tamper detection, and recovery
+| Document | Purpose |
+|---|---|
+| [demo.gif](demo.gif) | 60-second walkthrough: refusal, publish, tamper detection, recovery |

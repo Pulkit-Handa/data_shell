@@ -1,8 +1,10 @@
 # Design Record — P0 Fixes and Release Engineering (v1.0.2)
 
+**Status:** **HISTORICAL REFERENCE** — This document records design decisions made during the v1.0.2 workstream. The fixes are implemented and verified. For current verification evidence, see `docs/production/VERIFICATION_REPORT.md`.
+
 Decisions made to close the three P0 defects and the release-engineering gaps, with the
 alternatives that were rejected. `CHANGELOG.md` records *what* changed; this file records
-*why*, and `docs/PRODUCTION_READINESS.md` records *what was verified*.
+*why*.
 
 ## P0-1 — The public demo could not succeed in production
 
