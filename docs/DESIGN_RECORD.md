@@ -97,7 +97,8 @@ changed so protection does not depend on an unverified proxy:
 - An **identity-independent** process ceiling
   (`DATASHELL_DEMO_GLOBAL_RATE_LIMIT_REQUESTS_PER_MINUTE`) is applied in addition to the
   per-client bucket, so even a fully spoofed identity is bounded. The per-client bucket is
-  now documented as a fairness control, not a security boundary, and `docs/OPERATIONS.md`
+  now documented as a fairness control, not a security boundary, and
+  `docs/production/OPERATIONS_RUNBOOK.md`
   gives the exact procedure an operator must run before enabling header trust.
 
 Rejected: keeping `*` and merely documenting it (the limit would still be bypassable);
@@ -162,9 +163,7 @@ horizontal scaling.
 
 ## Verification
 
-See `docs/PRODUCTION_READINESS.md` § "Current validation evidence" for the exact commands and
-results (247 tests green on 3.11 and 3.14, clean lock install, sdist round-trip, both images
-built and exercised, API smoke test under a read-only root filesystem, demo walkthrough and
-multipart enforcement in the production demo image). The externally gated items — live Render
+See `docs/production/VERIFICATION_REPORT.md` for the exact commands and
+results. The externally gated items — live Render
 deployment, backup/restore drill, load and soak testing, independent security review, and a
 clean CI run on 3.11/3.12/3.13 — remain open and are listed as such.

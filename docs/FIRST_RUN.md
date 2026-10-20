@@ -308,7 +308,7 @@ worker until those are moved to shared infrastructure.
 
 - [README](../README.md) — architecture, HTTP API, deployment.
 - [TUTORIAL](../TUTORIAL.md) — a longer narrative walkthrough.
-- [docs/OPERATIONS.md](OPERATIONS.md) — runbooks, retention, key rotation.
+- [docs/production/OPERATIONS_RUNBOOK.md](production/OPERATIONS_RUNBOOK.md) — runbooks, retention, key rotation.
 - [docs/THREAT_MODEL.md](THREAT_MODEL.md) — trust boundaries and assets.
-- [docs/product-validation/](product-validation/) — audit, roadmap, and
-  benchmark/claim verification notes.
+- [docs/archive/PRODUCT_VALIDATION.md](archive/PRODUCT_VALIDATION.md) — prior audit and
+  benchmark/claim verification notes (historical reference).

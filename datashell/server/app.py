@@ -175,6 +175,29 @@ RUN_SEMAPHORE = asyncio.Semaphore(settings.max_concurrent_runs)
 
 # ----------------- Middleware -----------------
 
+SECURITY_RESPONSE_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Attach baseline hardening headers to every gateway response.
+
+    ``Cache-Control: no-store`` is set only when the handler did not already
+    choose a caching policy (e.g. credential issuance sets its own), so
+    authenticated payloads are never stored by shared caches by default.
+    """
+    response: Response = await call_next(request)
+    for header, value in SECURITY_RESPONSE_HEADERS.items():
+        response.headers.setdefault(header, value)
+    if "cache-control" not in {key.lower() for key in response.headers.keys()}:
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.middleware("http")
 async def correlation_id_and_tracing(request: Request, call_next):
     """Assign correlation IDs and emit bounded-cardinality request telemetry."""

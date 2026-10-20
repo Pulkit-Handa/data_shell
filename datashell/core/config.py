@@ -85,6 +85,69 @@ def _calculate_shannon_entropy(s: str) -> float:
     return entropy
 
 
+def _dev_hmac_secret_path() -> Optional[Path]:
+    """Location of the persisted development HMAC secret, if applicable.
+
+    Separate CLI invocations in the same workspace must sign and verify with
+    the same key, so a non-production run without an explicit
+    ``DATASHELL_HMAC_SECRET`` reuses a secret stored under the resolved
+    output directory (which is git-ignored runtime state). Production never
+    uses this path: production requires an explicit high-entropy secret.
+    """
+    try:
+        output_dir = Path(
+            os.getenv(
+                "DATASHELL_OUTPUT_DIR",
+                str(Path(os.getenv("DATASHELL_STORAGE_ROOT", ".")) / "output"),
+            )
+        )
+        return output_dir / ".datashell-dev-hmac"
+    except Exception:
+        return None
+
+
+def _load_or_create_dev_secret(path: Path) -> Optional[str]:
+    """Read the persisted dev secret, creating it once with 0600 perms."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return None
+    try:
+        # Exclusive create: exactly one concurrent process wins; losers read.
+        fd = os.open(str(path), os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        fd = None
+    except OSError:
+        return None
+    if fd is not None:
+        try:
+            secret = f"dm_dev_{secrets.token_urlsafe(32)}"
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(secret)
+                handle.flush()
+                try:
+                    os.fsync(handle.fileno())
+                except OSError:
+                    pass
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+            return secret
+        except OSError:
+            return None
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            secret = handle.read().strip()
+    except OSError:
+        return None
+    # A missing/empty/corrupt file (e.g. wiped volume) falls back to an
+    # ephemeral secret for this process rather than failing startup.
+    if not secret or len(secret) < 32:
+        return None
+    return secret
+
+
 def _resolve_secret(env_var: str, purpose: str, env_mode: str, value_override: Optional[str] = None) -> str:
     """
     Resolves a security secret strictly:
@@ -132,9 +195,12 @@ def _resolve_secret(env_var: str, purpose: str, env_mode: str, value_override: O
                 f"or known placeholder value '{cleaned}'. Refusing to start production service."
             )
 
-        # Reject placeholder patterns
-        for keyword in placeholder_keywords:
-            if keyword in lower_val and len(cleaned) < 40:
+        # Reject placeholder patterns. Length is not a defense: the published
+        # .env.example placeholders are long by design, so any value
+        # containing a placeholder keyword or an example marker is refused
+        # regardless of length.
+        for keyword in placeholder_keywords + ["replace_with_", "__min_32_chars", "example"]:
+            if keyword in lower_val:
                 raise RuntimeError(
                     f"FATAL: Production security violation. '{env_var}' ({purpose}) appears to contain "
                     f"placeholder keyword '{keyword}'. Refusing to start with placeholder secret."
@@ -163,6 +229,17 @@ def _resolve_secret(env_var: str, purpose: str, env_mode: str, value_override: O
             cleaned = val.strip()
             if cleaned.lower() not in insecure_defaults:
                 return cleaned
+        # Development HMAC secret: persist per workspace so separate CLI
+        # invocations (``run`` then ``verify``) share the signing key. Only
+        # the HMAC secret is persisted — it only authenticates local audit
+        # artifacts — never the API authentication key. An explicit env value
+        # above always wins; production never reaches this branch.
+        if env_var == "DATASHELL_HMAC_SECRET":
+            secret_path = _dev_hmac_secret_path()
+            if secret_path is not None:
+                persisted = _load_or_create_dev_secret(secret_path)
+                if persisted is not None:
+                    return persisted
         # Ephemeral secure random token for testing / development
         return f"dm_ephemeral_{secrets.token_urlsafe(32)}"
 

@@ -97,6 +97,7 @@ See `integrations/airflow/README.md` for details.
 ## 7. Next Steps
 
 - Customize `examples/vendor_settlements_contract.json` for your schema
-- Configure production settings per `docs/OPERATIONS.md`
-- Review `docs/THREAT_MODEL.md` and `docs/PRODUCTION_READINESS.md` before deploying
-- Try the online Colab notebook or deploy with Render
+- Configure production settings per `docs/production/OPERATIONS_RUNBOOK.md` and
+  `docs/production/CONFIGURATION_REFERENCE.md`
+- Review `docs/THREAT_MODEL.md` and `docs/production/RELEASE_CHECKLIST.md` before deploying
+- Deploy with Render (`render.yaml` for the demo UI, `render-api.yaml` for the gateway)
