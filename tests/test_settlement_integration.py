@@ -29,8 +29,8 @@ from datashell.core.keys import generate_keypair_pem
 from datashell.core.ledger import BoundaryLedger
 from datashell.core.security import APIKeyMetadata, Role, register_api_key
 from datashell.pipeline.runner import DataShellPipeline
-from datashell.server import app as app_module
 from datashell.server.app import app
+from datashell.server.routers import settlements as settlements_router
 from datashell.settlement.certificate import (
     build_settlement_receipt,
     certificate_digest,
@@ -795,7 +795,7 @@ def api(harness, monkeypatch, tmp_path):
                                     role=Role.PRODUCER, description="alpha producer"))
     register_api_key(APIKeyMetadata(key=API_BETA_KEY, tenant_id=BETA,
                                     role=Role.DATA_ENGINEER, description="beta engineer"))
-    monkeypatch.setattr(app_module, "_settlement_service", harness.service)
+    monkeypatch.setattr(settlements_router, "_settlement_service", harness.service)
     return TestClient(app)
 
 
@@ -873,6 +873,55 @@ class TestSettlementAPI:
                                 headers=_api_headers(API_ALPHA_KEY))
         assert verification.status_code == 200
         assert verification.json()["status"] == "AUTHENTIC_AND_UNMODIFIED"
+
+    def test_settlement_preview_aggregates_portfolio(self, api, harness):
+        """GET /api/v1/settlement/preview is a bounded read-only dashboard roll-up."""
+        run_id = self._prepared(harness)
+        created = api.post("/api/v1/commercial-contracts",
+                           headers=_api_headers(API_ALPHA_KEY),
+                           json=_contract_body())
+        assert created.status_code == 201
+        calculated = api.post("/api/v1/settlements/calculate",
+                              headers=_api_headers(API_ALPHA_KEY),
+                              json={"run_id": run_id, "contract_id": "ctr_api",
+                                    "idempotency_key": "preview-1"})
+        assert calculated.status_code == 200
+
+        payload = api.get("/api/v1/settlement/preview",
+                          headers=_api_headers(API_ALPHA_KEY)).json()
+        assert payload["tenant_id"] == ALPHA
+        assert payload["total"] == 1 and payload["count"] == 1
+        currency_totals = payload["totals_by_currency"]["USD"]
+        assert currency_totals["settlement_count"] == 1
+        assert currency_totals["gross_amount_minor"] == 25
+        assert payload["status_counts"]["READY_FOR_BILLING"] == 1
+        assert len(payload["settlements"]) == 1
+        first = payload["settlements"][0]
+        assert first["settlement_id"] == calculated.json()["settlement_id"]
+        assert first["settlement_status"] == "READY_FOR_BILLING"
+        assert first["acceptance_status"] == "ACCEPTED"
+        assert {"settlement_id", "contract_id", "run_id", "currency",
+                "gross_amount_minor", "settlement_status",
+                "acceptance_status"} == set(first)
+
+    def test_settlement_preview_is_tenant_scoped_and_read_only(self, api, harness):
+        """Beta cannot see alpha's portfolio; preview mutates nothing."""
+        run_id = self._prepared(harness)
+        api.post("/api/v1/commercial-contracts",
+                 headers=_api_headers(API_ALPHA_KEY), json=_contract_body())
+        api.post("/api/v1/settlements/calculate",
+                 headers=_api_headers(API_ALPHA_KEY),
+                 json={"run_id": run_id, "contract_id": "ctr_api",
+                       "idempotency_key": "scope-1"})
+
+        beta = api.get("/api/v1/settlement/preview", headers=_api_headers(API_BETA_KEY)).json()
+        assert beta["tenant_id"] == BETA
+        assert beta["total"] == 0 and beta["totals_by_currency"] == {}
+        assert beta["settlements"] == []
+
+        before = api.get("/api/v1/settlements", headers=_api_headers(API_ALPHA_KEY)).json()["total"]
+        scoped = api.get("/api/v1/settlement/preview", headers=_api_headers(API_ALPHA_KEY)).json()
+        assert scoped["total"] == before
 
     def test_api_cross_tenant_isolation(self, api, harness):
         run_id = self._prepared(harness)

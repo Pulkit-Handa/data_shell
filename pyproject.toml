@@ -145,4 +145,4 @@ include = ["datashell*"]
 exclude = ["tests*", "benchmarks*", "examples*", "integrations*"]
 
 [tool.setuptools.package-data]
-datashell = ["py.typed"]
+datashell = ["py.typed", "server/static/*.html"]

@@ -11,8 +11,8 @@ from fastapi.testclient import TestClient
 from datashell.core.config import settings
 from datashell.core.ledger import BoundaryLedger
 from datashell.core.security import APIKeyMetadata, Role, register_api_key
-from datashell.server import app as app_module
 from datashell.server.app import app
+from datashell.server.routers import ledger as ledger_router
 
 client = TestClient(app)
 
@@ -38,7 +38,7 @@ def api_ledger(tmp_path, monkeypatch):
         "run-alpha", "alpha", "contract-a", "held_quality",
         str(tmp_path / "q.parquet"), 10, {"amount-positive": 10})
     ledger.record_usage("run-alpha", "alpha", "contract-a", "LOADED", "batch", 100, 90, bytes_processed=4096)
-    monkeypatch.setattr(app_module, "BoundaryLedger", lambda: BoundaryLedger(db))
+    monkeypatch.setattr(ledger_router, "BoundaryLedger", lambda: BoundaryLedger(db))
     return db
 
 

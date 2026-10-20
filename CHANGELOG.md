@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already used), and `DATASHELL_DUCKDB_THREADS` (batch-rule evaluation
   parallelism). `docs/SCALING.md` documents the five scaling surfaces, worked
   deployment profiles, and how to reproduce the capacity numbers.
+- **Modular gateway + a console that shows the real system.** The FastAPI app
+  assembly shrank from 1,400 lines to ~320: endpoint groups moved to
+  `datashell/server/routers/` (contracts, runs, ledger, settlements, admin),
+  with shared process state in `datashell/server/state.py`. Route paths,
+  payloads, and auth semantics are unchanged. The interactive console is now a
+  self-contained static document (`datashell/server/static/console.html`,
+  shipped in the wheel, no external requests) that renders the live run
+  ledger, Prometheus metrics, the tenant settlement portfolio, and the
+  interactive enforcement gate.
+- **`GET /api/v1/contracts`** — tenant-scoped contract-name catalog (own +
+  shared) powering client discovery and the console selector. Every read role
+  may list names; writes still require `contracts:write`.
+- **`GET /api/v1/settlement/preview`** — a bounded read-only roll-up of the
+  settlement ledger (totals by currency, status distribution, newest
+  statements) for dashboards. Requires `settlements:read`; performs no
+  calculation, transition, or billing action.
 
 ### Changed
 - **Distribution name `data-shell` → `datashell`.** The import package and the
