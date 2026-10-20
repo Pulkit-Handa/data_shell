@@ -58,7 +58,12 @@ from datashell.core.telemetry import (
     telemetry_logger,
 )
 from datashell.pipeline.artifacts import ArtifactGenerator
-from datashell.pipeline.runner import DataShellPipeline, recover_pending_publications_and_ledger
+from datashell.pipeline.runner import (
+    EXECUTION_STREAMING,
+    DataShellPipeline,
+    choose_execution_backend,
+    recover_pending_publications_and_ledger,
+)
 from datashell.server.middleware import RequestBodyLimitMiddleware
 from datashell.settlement.ledger import SettlementLedgerError
 from datashell.settlement.models import (
@@ -440,8 +445,13 @@ async def enforce_boundary(
         # above the configured threshold through the out-of-core engine even when
         # the caller did not explicitly request streaming.
         staged_size_bytes = temp_path.stat().st_size
-        use_streaming = bool(streaming) or staged_size_bytes >= settings.stream_auto_threshold_bytes
-        execution_mode = "out_of_core_streaming" if use_streaming else "in_memory"
+        execution_mode = choose_execution_backend(
+            staged_size_bytes,
+            force_streaming=True if streaming else None,
+            ingest_mode=settings.ingest_mode,
+            auto_threshold_bytes=settings.stream_auto_threshold_bytes,
+        )
+        use_streaming = execution_mode == EXECUTION_STREAMING
         async with RUN_SEMAPHORE:
             pipeline = DataShellPipeline(contract, tenant_id=client.tenant_id)
             # Execute processing in worker thread so event loop is never blocked.

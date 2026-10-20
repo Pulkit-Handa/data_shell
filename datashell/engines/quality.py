@@ -188,6 +188,7 @@ class SemanticQualityEngine:
             config={
                 "enable_external_access": False,
                 "memory_limit": settings.duckdb_memory_limit,
+                "threads": settings.duckdb_threads,
                 "temp_directory": str(settings.temp_dir),
             }
         )

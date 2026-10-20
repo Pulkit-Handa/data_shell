@@ -13,6 +13,7 @@ import polars as pl
 import pyarrow.parquet as pq
 
 from datashell.contract.models import DataContract
+from datashell.core.fileops import parquet_compression_codec
 from datashell.engines.delivery import DeliveryOutcome, TerminalStatus
 from datashell.engines.quality import QualityResult, SemanticQualityEngine
 from datashell.engines.reconciler import Reconciler, ReconciliationLedger
@@ -75,7 +76,8 @@ class StreamingBoundaryRunner:
                 if chunk_quality.admitted_df.height > 0:
                     admitted_arrow = chunk_quality.admitted_df.to_arrow()
                     if target_writer is None:
-                        target_writer = pq.ParquetWriter(target_path, admitted_arrow.schema)
+                        target_writer = pq.ParquetWriter(
+                            target_path, admitted_arrow.schema, compression=parquet_compression_codec())
                     target_writer.write_table(admitted_arrow)
                     total_delivered += chunk_quality.admitted_df.height
 
@@ -83,7 +85,8 @@ class StreamingBoundaryRunner:
                 if chunk_quality.held_df.height > 0:
                     held_arrow = chunk_quality.held_df.to_arrow()
                     if held_writer is None:
-                        held_writer = pq.ParquetWriter(held_target, held_arrow.schema)
+                        held_writer = pq.ParquetWriter(
+                            held_target, held_arrow.schema, compression=parquet_compression_codec())
                     held_writer.write_table(held_arrow)
                     total_held_quality += chunk_quality.held_df.height
 

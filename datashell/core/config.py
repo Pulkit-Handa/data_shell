@@ -348,6 +348,21 @@ class EnterpriseSettings(BaseModel):
     # fully in application memory.
     stream_auto_threshold_bytes: int = Field(
         default_factory=lambda: int(os.getenv("STREAM_AUTO_THRESHOLD_BYTES", str(64 * 1024 * 1024))))  # 64 MB
+    # Ingest backend selection. ``auto`` (the default) promotes a run to the
+    # out-of-core streaming backend when the source size reaches the threshold
+    # above; ``memory`` and ``stream`` force one backend regardless of size so
+    # capacity planning can be pinned per deployment instead of per feed.
+    ingest_mode: str = Field(default_factory=lambda: os.getenv("DATASHELL_INGEST_MODE", "auto"))
+    # Parquet codec for delivered targets and quarantine snapshots. ``zstd``
+    # was already the codec of in-memory (Polars) deliveries; unifying the
+    # streaming (pyarrow) path on it shrinks delivered artifacts for the same
+    # data. ``_DATASHELL_DELIVERY_COMPRESSION`` accepts snappy/zstd/gzip/lz4/
+    # brotli/uncompressed.
+    delivery_compression: str = Field(
+        default_factory=lambda: os.getenv("DATASHELL_DELIVERY_COMPRESSION", "zstd"))
+    # DuckDB worker threads for batch-rule (SQL) evaluation. Scale this to the
+    # cores available on nodes that evaluate large feeds through batch rules.
+    duckdb_threads: int = Field(default_factory=lambda: int(os.getenv("DATASHELL_DUCKDB_THREADS", "4")))
     duckdb_memory_limit: str = Field(default_factory=lambda: os.getenv("DUCKDB_MEMORY_LIMIT", "1GB"))
     rate_limit_requests_per_minute: int = Field(
         default_factory=lambda: int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "120")))
@@ -637,6 +652,15 @@ class EnterpriseSettings(BaseModel):
         memory_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)", self.duckdb_memory_limit, re.IGNORECASE)
         if not memory_match or float(memory_match.group(1)) <= 0:
             raise RuntimeError("DUCKDB_MEMORY_LIMIT must be a positive size such as 512MB or 1GB")
+        if self.ingest_mode not in ("auto", "memory", "stream"):
+            raise RuntimeError("DATASHELL_INGEST_MODE must be one of: auto, memory, stream")
+        ALLOWED_PARQUET_CODECS = ("snappy", "zstd", "gzip", "lz4", "brotli", "uncompressed")
+        if self.delivery_compression.lower() not in ALLOWED_PARQUET_CODECS:
+            raise RuntimeError(
+                "DATASHELL_DELIVERY_COMPRESSION must be one of: "
+                + ", ".join(ALLOWED_PARQUET_CODECS))
+        if self.duckdb_threads <= 0:
+            raise RuntimeError("DATASHELL_DUCKDB_THREADS must be a positive integer")
         origins = [origin.strip() for origin in self.allowed_origins if origin.strip()]
         if self.is_production_mode and (not origins or "*" in origins):
             raise RuntimeError(

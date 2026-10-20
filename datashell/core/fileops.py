@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
+from typing import Literal, cast
 
 
 class InsufficientStorageError(Exception):
@@ -67,3 +68,47 @@ def materialize_artifact_copy(source: Path, destination: Path) -> None:
         os.link(source, destination)
     except OSError:
         shutil.copyfile(source, destination)
+
+
+# Codecs Polars and pyarrow both accept for Parquet writes, plus the explicit
+# "no compression" spelling. All writer sites normalize through this helper so
+# the delivered-artifact codec is one deployment decision, not three.
+PARQUET_CODECS = ("snappy", "zstd", "gzip", "lz4", "brotli", "uncompressed")
+
+# The writer-facing subset: everything the two Parquet authoring layers accept
+# as a compression argument (both layers take "no compression" as None).
+ParquetCodec = Literal["lz4", "snappy", "gzip", "brotli", "zstd"]
+
+
+def polars_parquet_compression(configured: str | None = None) -> Literal[
+    "lz4", "uncompressed", "snappy", "gzip", "brotli", "zstd"
+]:
+    """Polars-facing spelling of the delivered-artifact codec.
+
+    Polars interprets ``compression=None`` as "use its own default (zstd)",
+    not as "no compression"; the explicit ``"uncompressed"`` string is the only
+    way to disable compression in a ``write_parquet`` call.
+    """
+    codec = parquet_compression_codec(configured)
+    return cast(Literal["lz4", "uncompressed", "snappy", "gzip", "brotli", "zstd"], codec or "uncompressed")
+    """Normalize ``DATASHELL_DELIVERY_COMPRESSION`` to what Polars/pyarrow accept.
+
+    ``None`` means "no compression" for both ``df.write_parquet`` and
+    ``pq.ParquetWriter``. Reads the live settings value when ``configured`` is
+    omitted, so tests and reconfiguration take effect without a restart. The
+    settings import is deferred because the config module is not always
+    importable at interpreter startup order for all entry points.
+    """
+    value = configured
+    if value is None:
+        from datashell.core.config import settings
+
+        value = settings.delivery_compression
+    value = value.strip().lower()
+    if value not in PARQUET_CODECS:
+        raise ValueError(
+            "DATASHELL_DELIVERY_COMPRESSION must be one of: " + ", ".join(PARQUET_CODECS))
+    if value in ("uncompressed", "none"):
+        return None
+    return cast(ParquetCodec, value)
+

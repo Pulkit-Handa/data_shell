@@ -29,7 +29,12 @@ from datashell.core.config import settings
 from datashell.core.ledger import BoundaryLedger
 from datashell.core.sandbox import FilesystemSandbox
 from datashell.pipeline.artifacts import ArtifactGenerator
-from datashell.pipeline.runner import DataShellPipeline, PipelineResult
+from datashell.pipeline.runner import (
+    EXECUTION_STREAMING,
+    DataShellPipeline,
+    PipelineResult,
+    choose_execution_backend,
+)
 
 # --------------------------------------------------------------------------- args
 
@@ -330,11 +335,13 @@ def command_run(args: argparse.Namespace) -> int:
             print("  Drift: disabled (DRIFT_ENABLED default is false)")
     source_path = Path(args.source)
     source_size = source_path.stat().st_size if source_path.is_file() else 0
-    use_streaming = (
-        args.streaming
-        if args.streaming is not None
-        else source_size >= settings.stream_auto_threshold_bytes
+    execution_mode = choose_execution_backend(
+        source_size,
+        force_streaming=args.streaming,
+        ingest_mode=settings.ingest_mode,
+        auto_threshold_bytes=settings.stream_auto_threshold_bytes,
     )
+    use_streaming = execution_mode == EXECUTION_STREAMING
     if use_streaming:
         if not args.json:
             print(f"  Mode: out-of-core streaming (chunk size {args.chunk_size or settings.stream_chunk_rows:,} rows)")

@@ -24,7 +24,11 @@ from datashell.core.commit import (
 from datashell.core.config import settings
 from datashell.core.crypto import CryptoEngine
 from datashell.core.events import emit_run_event
-from datashell.core.fileops import ensure_disk_headroom, materialize_artifact_copy
+from datashell.core.fileops import (
+    ensure_disk_headroom,
+    materialize_artifact_copy,
+    parquet_compression_codec,
+)
 from datashell.core.ledger import (
     BoundaryLedger,
     clear_pending_outbox,
@@ -258,6 +262,44 @@ def reconcile_pending_ledger_entries(
             )
             continue
     return {"replayed": replayed, "skipped": skipped}
+
+
+# Execution backends both runner entry points may select. ``in_memory`` loads
+# one vectorized batch; ``out_of_core_streaming`` pushes bounded micro-batches
+# through the quality/delivery gates without materializing the full feed.
+EXECUTION_IN_MEMORY = "in_memory"
+EXECUTION_STREAMING = "out_of_core_streaming"
+
+INGEST_MODES = ("auto", "memory", "stream")
+
+
+def choose_execution_backend(
+    source_size_bytes: int,
+    *,
+    force_streaming: bool | None = None,
+    ingest_mode: str = "auto",
+    auto_threshold_bytes: int = 64 * 1024 * 1024,
+) -> str:
+    """Resolve which ingestion backend serves a run.
+
+    Precedence: an explicit caller decision (``force_streaming`` — the CLI
+    ``--streaming/--no-streaming`` flag or an API request field) wins; the
+    ``DATASHELL_INGEST_MODE`` environment policy is next; the size threshold
+    (``STREAM_AUTO_THRESHOLD_BYTES``) auto-promotes large feeds last. This
+    keeps every deployment's capacity policy in configuration instead of
+    caller code.
+    """
+    if force_streaming is True:
+        return EXECUTION_STREAMING
+    if force_streaming is False:
+        return EXECUTION_IN_MEMORY
+    if ingest_mode == "stream":
+        return EXECUTION_STREAMING
+    if ingest_mode == "memory":
+        return EXECUTION_IN_MEMORY
+    if source_size_bytes >= auto_threshold_bytes:
+        return EXECUTION_STREAMING
+    return EXECUTION_IN_MEMORY
 
 
 def recover_pending_publications_and_ledger(
@@ -1187,7 +1229,8 @@ class DataShellPipeline:
                         if quality_res.admitted_df.height > 0:
                             arrow_adm = quality_res.admitted_df.to_arrow()
                             if target_writer is None:
-                                target_writer = pq.ParquetWriter(staged_target, arrow_adm.schema)
+                                target_writer = pq.ParquetWriter(
+                                    staged_target, arrow_adm.schema, compression=parquet_compression_codec())
                             target_writer.write_table(arrow_adm, row_group_size=arrow_adm.num_rows)
                             total_admitted += quality_res.admitted_df.height
 
@@ -1195,7 +1238,8 @@ class DataShellPipeline:
                         if quality_res.held_df.height > 0:
                             arrow_held = quality_res.held_df.to_arrow()
                             if held_writer is None:
-                                held_writer = pq.ParquetWriter(staged_held, arrow_held.schema)
+                                held_writer = pq.ParquetWriter(
+                                    staged_held, arrow_held.schema, compression=parquet_compression_codec())
                             held_writer.write_table(arrow_held, row_group_size=arrow_held.num_rows)
                             total_held_quality += quality_res.held_df.height
 
