@@ -15,7 +15,7 @@ import os
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -23,6 +23,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request, Response, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.routing import APIRoute
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from datashell import __version__
@@ -34,7 +35,7 @@ from datashell.core.security import (
     APIKeyMetadata,
     Capability,
     preflight_authenticate_scope,
-    require_capability,
+    require_scope,
     security_registry_ready,
 )
 from datashell.core.telemetry import (
@@ -252,13 +253,13 @@ async def correlation_id_and_tracing(request: Request, call_next: Callable[[Requ
 
 # ----------------- Core Observability Endpoints -----------------
 
-@app.get("/health")
+@app.get("/health", summary="Liveness probe")
 def healthcheck() -> dict[str, Any]:
     """Liveness probe for orchestrators, load balancers, and Kubernetes."""
     return {"status": "healthy", "service": "datashell"}
 
 
-@app.get("/ready")
+@app.get("/ready", summary="Readiness probe")
 def readinesscheck() -> dict[str, Any]:
     """Readiness probe: fail closed when required persistent directories are unavailable."""
     required_dirs = (
@@ -286,9 +287,9 @@ def readinesscheck() -> dict[str, Any]:
     return {"status": "ready", "service": "datashell"}
 
 
-@app.get("/metrics")
+@app.get("/metrics", summary="Prometheus metrics scrape")
 def prometheus_metrics(
-    client: APIKeyMetadata = Security(require_capability(Capability.METRICS_READ))
+    client: APIKeyMetadata = Security(require_scope(Capability.METRICS_READ))
 ) -> Response:
     """Prometheus telemetry scrape endpoint (authenticated)."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -302,6 +303,55 @@ app.include_router(ledger.router)
 app.include_router(settlements.router)
 app.include_router(admin.router)
 
+# Startup introspection: every endpoint that serves business data under /api
+# must authenticate through a capability guard (require_scope). The check runs
+# in lifespan, so a router endpoint that ships without an authorization
+# dependency fails the process at boot instead of serving unauthenticated data.
+
+def _iter_api_routes(application: FastAPI) -> Iterator[APIRoute]:
+    """Yield every APIRoute, flattening included routers across Starlette versions."""
+    stack: list[Any] = list(application.router.routes)
+    seen: set[int] = set()
+    while stack:
+        node = stack.pop()
+        if id(node) in seen:
+            continue
+        seen.add(id(node))
+        if isinstance(node, APIRoute):
+            yield node
+        else:
+            stack.extend(getattr(node, "routes", None) or ())
+            nested = getattr(node, "original_router", None)
+            if nested is not None:
+                stack.extend(getattr(nested, "routes", None) or ())
+
+
+def assert_routes_require_scope(application: FastAPI) -> None:
+    """Fail startup when an /api route declares no capability guard.
+
+    Guards are recognized by their ``required_capability`` marker attribute,
+    set by :func:`require_scope`. Probes (/health, /ready), the public
+    document root, and the authenticated metrics scrape are the only
+    non-/api routes by design.
+    """
+    unprotected: list[str] = []
+    for route in _iter_api_routes(application):
+        if not route.path.startswith("/api/"):
+            continue
+        guarded = any(
+            getattr(dependency.call, "required_capability", None) is not None
+            for dependency in route.dependant.dependencies
+        )
+        if not guarded and route.path not in unprotected:
+            unprotected.append(route.path)
+    if unprotected:
+        raise RuntimeError(
+            "API endpoints ship without an authorization scope: "
+            + ", ".join(sorted(set(unprotected))))
+
+
+assert_routes_require_scope(app)
+
 
 # ----------------- Enterprise Web Console -----------------
 #
@@ -313,7 +363,7 @@ app.include_router(admin.router)
 CONSOLE_HTML_PATH = Path(__file__).resolve().parent / "static" / "console.html"
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", summary="Serve the enterprise console", response_class=HTMLResponse)
 def serve_enterprise_console() -> str:
     """Serve the live enterprise console for this gateway deployment."""
     return CONSOLE_HTML_PATH.read_text(encoding="utf-8")

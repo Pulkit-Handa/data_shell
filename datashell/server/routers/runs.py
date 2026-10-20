@@ -13,7 +13,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, Security, Upl
 
 from datashell.core.commit import committed_generation_status
 from datashell.core.config import settings
-from datashell.core.security import APIKeyMetadata, Capability, require_capability, verify_tenant_access
+from datashell.core.security import APIKeyMetadata, Capability, require_scope, verify_tenant_access
 from datashell.core.telemetry import telemetry_logger
 from datashell.pipeline.artifacts import ArtifactGenerator
 from datashell.pipeline.runner import EXECUTION_STREAMING, DataShellPipeline, choose_execution_backend
@@ -22,13 +22,13 @@ from datashell.server.state import ALLOWED_EXTENSIONS, MAX_UPLOAD_SIZE, RUN_SEMA
 router = APIRouter()
 
 
-@router.post("/api/v1/enforce")
+@router.post("/api/v1/enforce", summary="Enforce the boundary for an upload")
 async def enforce_boundary(
     request: Request,
     contract_name: str = Form(...),
     file: UploadFile = File(...),
     streaming: bool = Form(False),
-    client: APIKeyMetadata = Security(require_capability(Capability.PIPELINE_ENFORCE))
+    client: APIKeyMetadata = Security(require_scope(Capability.PIPELINE_ENFORCE))
 ) -> dict[str, Any]:
     """
     Submits a data payload across the boundary for contract enforcement.
@@ -154,10 +154,10 @@ async def enforce_boundary(
         await file.close()
 
 
-@router.get("/api/v1/runs/{run_id}/certificate")
+@router.get("/api/v1/runs/{run_id}/certificate", summary="Fetch a run's audit certificate")
 def get_run_certificate(
     run_id: str,
-    client: APIKeyMetadata = Security(require_capability(Capability.AUDIT_READ))
+    client: APIKeyMetadata = Security(require_scope(Capability.AUDIT_READ))
 ) -> dict[str, Any]:
     """Retrieves the immutable cryptographic audit certificate for a specific
     run, with strict tenant ownership validation."""

@@ -16,6 +16,7 @@ This document is the **authoritative source** for all Data Shell configuration. 
 |---|---|---|
 | `ENVIRONMENT` | `development` | Environment mode. Production values: `production`, `prod`, `live`. Development values: `development`, `dev`, `local`. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity. |
+| `LOG_FORMAT` | `structured` | Log line format: `structured` (one JSON object per line for log shippers) or `pretty` (`docker logs -f`-friendly human lines with `key=value` context). Must be one of the two. |
 | `DATASHELL_STORAGE_ROOT` | `.` | Root directory for all persistent storage. All other paths derive from this. |
 | `DATASHELL_DATA_DIR` | `<storage_root>/data` | Directory for uploaded source files. |
 | `DATASHELL_CONTRACTS_DIR` | `<storage_root>/contracts_registry` | Directory for contract registry files. |

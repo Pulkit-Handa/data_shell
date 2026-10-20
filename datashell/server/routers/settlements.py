@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Request, Security
 from pydantic import BaseModel, Field, ValidationError
 
 from datashell.core.config import settings
-from datashell.core.security import APIKeyMetadata, Capability, require_capability
+from datashell.core.security import APIKeyMetadata, Capability, require_scope
 from datashell.core.telemetry import telemetry_logger
 from datashell.server.state import RUN_ID_PATTERN, bounded_limit
 from datashell.settlement.ledger import SettlementLedgerError
@@ -50,10 +50,10 @@ class CommercialContractRequest(BaseModel):
     description: str | None = None
 
 
-@router.post("/api/v1/commercial-contracts", status_code=201)
+@router.post("/api/v1/commercial-contracts", summary="Register a commercial-contract version", status_code=201)
 def create_commercial_contract(
     payload: CommercialContractRequest,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_WRITE)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_WRITE)),
 ) -> dict[str, Any]:
     """Register an immutable commercial contract version (tenant-scoped)."""
     try:
@@ -81,11 +81,11 @@ def create_commercial_contract(
     }
 
 
-@router.get("/api/v1/commercial-contracts/{contract_id}")
+@router.get("/api/v1/commercial-contracts/{contract_id}", summary="Read a commercial-contract version")
 def get_commercial_contract(
     contract_id: str,
     version: int | None = None,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_READ)),
 ) -> dict[str, Any]:
     """Retrieve a commercial contract by id and optional exact version (tenant-scoped)."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", contract_id):
@@ -97,10 +97,10 @@ def get_commercial_contract(
     return {**contract.model_dump(mode="json"), "contract_digest": contract.contract_digest}
 
 
-@router.get("/api/v1/commercial-contracts/{contract_id}/versions")
+@router.get("/api/v1/commercial-contracts/{contract_id}/versions", summary="List commercial-contract versions")
 def list_commercial_contract_versions(
     contract_id: str,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_READ)),
 ) -> dict[str, Any]:
     """List all immutable versions of a commercial contract (tenant-scoped)."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", contract_id):
@@ -119,11 +119,11 @@ class SettlementCalculateRequest(BaseModel):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
 
 
-@router.post("/api/v1/settlements/calculate")
+@router.post("/api/v1/settlements/calculate", summary="Calculate (or idempotently replay) a settlement")
 def calculate_settlement(
     payload: SettlementCalculateRequest,
     request: Request,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_WRITE)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_WRITE)),
 ) -> dict[str, Any]:
     """Calculate (or idempotently replay) the settlement for a completed run.
 
@@ -159,13 +159,13 @@ def calculate_settlement(
     return {**row, "created": created}
 
 
-@router.get("/api/v1/settlements")
+@router.get("/api/v1/settlements", summary="List settlement statements")
 def list_settlements(
     status: str | None = None,
     contract_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_READ)),
 ) -> dict[str, Any]:
     """List settlement statements for the caller's tenant (paginated)."""
     rows = _settlement_service.list_settlements(
@@ -175,10 +175,10 @@ def list_settlements(
             "settlements": bounded}
 
 
-@router.get("/api/v1/settlements/{settlement_id}")
+@router.get("/api/v1/settlements/{settlement_id}", summary="Read a settlement statement")
 def get_settlement(
     settlement_id: str,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_READ)),
 ) -> dict[str, Any]:
     """Retrieve one settlement statement (tenant-scoped)."""
     # Settlement IDs follow stl_<run>_<contract>_v<n>; validate loosely but
@@ -194,10 +194,10 @@ def get_settlement(
     return row
 
 
-@router.get("/api/v1/settlements/{settlement_id}/explanation")
+@router.get("/api/v1/settlements/{settlement_id}/explanation", summary="Explain a settlement calculation")
 def explain_settlement(
     settlement_id: str,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_READ)),
 ) -> dict[str, Any]:
     """Full calculation explanation: units, price, thresholds, rounding, evidence."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", settlement_id):
@@ -208,10 +208,10 @@ def explain_settlement(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/api/v1/settlements/{settlement_id}/verify")
+@router.post("/api/v1/settlements/{settlement_id}/verify", summary="Verify a settlement receipt")
 def verify_settlement(
     settlement_id: str,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_READ)),
 ) -> dict[str, Any]:
     """Verify a settlement's signed receipt against its delivery certificate."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", settlement_id):
@@ -230,11 +230,11 @@ class DisputeRequest(BaseModel):
     supporting_explanation: str = Field(default="", max_length=5000)
 
 
-@router.post("/api/v1/settlements/{settlement_id}/disputes", status_code=201)
+@router.post("/api/v1/settlements/{settlement_id}/disputes", summary="Open a settlement dispute", status_code=201)
 def open_settlement_dispute(
     settlement_id: str,
     payload: DisputeRequest,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_WRITE)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_WRITE)),
 ) -> dict[str, Any]:
     """Open a dispute; the settlement becomes DISPUTED and non-billable."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", settlement_id):
@@ -256,11 +256,11 @@ class ApprovalRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=2000)
 
 
-@router.post("/api/v1/settlements/{settlement_id}/approvals")
+@router.post("/api/v1/settlements/{settlement_id}/approvals", summary="Approve a settlement for billing")
 def approve_settlement(
     settlement_id: str,
     payload: ApprovalRequest,
-    client: APIKeyMetadata = Security(require_capability(Capability.BILLING_MANAGE)),
+    client: APIKeyMetadata = Security(require_scope(Capability.BILLING_MANAGE)),
 ) -> dict[str, Any]:
     """Explicitly approve a settlement for billing (BILLING_MANAGE capability).
 
@@ -288,11 +288,11 @@ def approve_settlement(
             "approved": True, "actor": f"api:{client.role.value}"}
 
 
-@router.post("/api/v1/settlements/{settlement_id}/billing-preview")
+@router.post("/api/v1/settlements/{settlement_id}/billing-preview", summary="Draft a billing instruction")
 def settlement_billing_preview(
     settlement_id: str,
     request: Request,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_READ)),
 ) -> dict[str, Any]:
     """Create or replay a draft billing instruction via the configured provider.
 
@@ -342,10 +342,10 @@ def settlement_billing_preview(
     return result.as_dict()
 
 
-@router.get("/api/v1/settlement/preview")
+@router.get("/api/v1/settlement/preview", summary="Roll up the settlement portfolio for dashboards")
 def settlement_preview(
     limit: int = 50,
-    client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
+    client: APIKeyMetadata = Security(require_scope(Capability.SETTLEMENTS_READ)),
 ) -> dict[str, Any]:
     """Dashboard-facing aggregate of the tenant's settlement portfolio.
 

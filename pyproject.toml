@@ -109,6 +109,7 @@ extend-immutable-calls = [
     # Cosmetic security (our own layer): returns a closure built from module-level
     # constants (an enum); routes declare it once per definition and it is a shared
     # per-route constant, exactly like the FastAPI primitives above.
+    "datashell.core.security.require_scope",
     "datashell.core.security.require_capability",
     "datashell.core.security.authenticate_client",
 ]

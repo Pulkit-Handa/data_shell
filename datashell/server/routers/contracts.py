@@ -8,17 +8,17 @@ from fastapi import APIRouter, HTTPException, Security
 from pydantic import ValidationError
 
 from datashell.contract.models import DataContract
-from datashell.core.security import APIKeyMetadata, Capability, require_capability
+from datashell.core.security import APIKeyMetadata, Capability, require_scope
 from datashell.core.telemetry import telemetry_logger
 from datashell.server.state import registry
 
 router = APIRouter()
 
 
-@router.post("/api/v1/contracts")
+@router.post("/api/v1/contracts", summary="Register a data-contract version")
 def register_contract(
     contract_payload: dict[str, Any],
-    client: APIKeyMetadata = Security(require_capability(Capability.CONTRACTS_WRITE))
+    client: APIKeyMetadata = Security(require_scope(Capability.CONTRACTS_WRITE))
 ) -> dict[str, Any]:
     """Registers and versions a Data Contract immutably, scoped to tenant catalog."""
     try:
@@ -48,11 +48,11 @@ def register_contract(
             detail="Contract registration failed; use the request ID when contacting an operator") from e
 
 
-@router.get("/api/v1/contracts/{name}")
+@router.get("/api/v1/contracts/{name}", summary="Read a data-contract version")
 def get_contract(
     name: str,
     version: str | None = None,
-    client: APIKeyMetadata = Security(require_capability(Capability.CONTRACTS_READ))
+    client: APIKeyMetadata = Security(require_scope(Capability.CONTRACTS_READ))
 ) -> dict[str, Any]:
     """Retrieves contract specification by name and optional point-in-time version within tenant scope."""
     try:
@@ -71,9 +71,9 @@ def get_contract(
 # ----------------- Boundary Enforcement API -----------------
 
 
-@router.get("/api/v1/contracts")
+@router.get("/api/v1/contracts", summary="List visible contract names")
 def list_contracts(
-    client: APIKeyMetadata = Security(require_capability(Capability.CONTRACTS_READ)),
+    client: APIKeyMetadata = Security(require_scope(Capability.CONTRACTS_READ)),
 ) -> dict[str, Any]:
     """Contract-name catalog visible to the caller's tenant (own + shared).
 

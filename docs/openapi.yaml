@@ -1,0 +1,1207 @@
+components:
+  schemas:
+    ApprovalRequest:
+      properties:
+        action:
+          default: APPROVE_BILLING
+          pattern: ^(APPROVE_BILLING)$
+          title: Action
+          type: string
+        reason:
+          maxLength: 2000
+          minLength: 1
+          title: Reason
+          type: string
+      required:
+      - reason
+      title: ApprovalRequest
+      type: object
+    Body_enforce_boundary_api_v1_enforce_post:
+      properties:
+        contract_name:
+          title: Contract Name
+          type: string
+        file:
+          contentMediaType: application/octet-stream
+          title: File
+          type: string
+        streaming:
+          default: false
+          title: Streaming
+          type: boolean
+      required:
+      - contract_name
+      - file
+      title: Body_enforce_boundary_api_v1_enforce_post
+      type: object
+    CommercialContractRequest:
+      description: Request body for registering a commercial contract (tenant-scoped).
+      properties:
+        acceptance:
+          additionalProperties: true
+          title: Acceptance
+          type: object
+        approved_by:
+          items:
+            type: string
+          title: Approved By
+          type: array
+        buyer_id:
+          maxLength: 128
+          minLength: 1
+          title: Buyer Id
+          type: string
+        contract_id:
+          maxLength: 128
+          minLength: 1
+          title: Contract Id
+          type: string
+        contract_version:
+          default: 1
+          minimum: 1.0
+          title: Contract Version
+          type: integer
+        currency:
+          default: USD
+          maxLength: 3
+          minLength: 3
+          title: Currency
+          type: string
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        effective_at:
+          title: Effective At
+          type: string
+        expires_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Expires At
+        feed_id:
+          maxLength: 128
+          minLength: 1
+          title: Feed Id
+          type: string
+        penalty:
+          additionalProperties: true
+          title: Penalty
+          type: object
+        pricing:
+          additionalProperties: true
+          title: Pricing
+          type: object
+        qualification:
+          additionalProperties: true
+          title: Qualification
+          type: object
+        schema_version:
+          default: 1
+          minimum: 1.0
+          title: Schema Version
+          type: integer
+        seller_id:
+          maxLength: 128
+          minLength: 1
+          title: Seller Id
+          type: string
+      required:
+      - contract_id
+      - buyer_id
+      - seller_id
+      - feed_id
+      - pricing
+      - effective_at
+      title: CommercialContractRequest
+      type: object
+    CreateAPIKeyRequest:
+      properties:
+        description:
+          default: Managed API credential
+          maxLength: 200
+          minLength: 1
+          title: Description
+          type: string
+        role:
+          $ref: '#/components/schemas/Role'
+          default: PRODUCER
+        tenant_id:
+          maxLength: 200
+          minLength: 1
+          title: Tenant Id
+          type: string
+      required:
+      - tenant_id
+      title: CreateAPIKeyRequest
+      type: object
+    DisputeRequest:
+      properties:
+        disputing_party:
+          maxLength: 128
+          minLength: 1
+          title: Disputing Party
+          type: string
+        evidence_references:
+          items:
+            type: string
+          title: Evidence References
+          type: array
+        reason:
+          maxLength: 2000
+          minLength: 1
+          title: Reason
+          type: string
+        supporting_explanation:
+          default: ''
+          maxLength: 5000
+          title: Supporting Explanation
+          type: string
+      required:
+      - disputing_party
+      - reason
+      title: DisputeRequest
+      type: object
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          title: Detail
+          type: array
+      title: HTTPValidationError
+      type: object
+    Role:
+      enum:
+      - ADMIN
+      - DATA_ENGINEER
+      - PRODUCER
+      - AUDITOR
+      title: Role
+      type: string
+    SettlementCalculateRequest:
+      properties:
+        contract_id:
+          maxLength: 128
+          minLength: 1
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
+          title: Contract Id
+          type: string
+        contract_version:
+          anyOf:
+          - minimum: 1.0
+            type: integer
+          - type: 'null'
+          title: Contract Version
+        idempotency_key:
+          anyOf:
+          - maxLength: 200
+            minLength: 1
+            type: string
+          - type: 'null'
+          title: Idempotency Key
+        run_id:
+          maxLength: 80
+          minLength: 1
+          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$
+          title: Run Id
+          type: string
+      required:
+      - run_id
+      - contract_id
+      title: SettlementCalculateRequest
+      type: object
+    ValidationError:
+      properties:
+        ctx:
+          title: Context
+          type: object
+        input:
+          title: Input
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          title: Location
+          type: array
+        msg:
+          title: Message
+          type: string
+        type:
+          title: Error Type
+          type: string
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+      type: object
+  securitySchemes:
+    APIKeyHeader:
+      in: header
+      name: X-API-Key
+      type: apiKey
+info:
+  description: Contract-driven perimeter boundary enforcement platform. Bad data never
+    lands, and never leaves.
+  title: Data Shell Enterprise Gateway
+  version: 1.0.2-enterprise
+openapi: 3.1.0
+paths:
+  /:
+    get:
+      description: Serve the live enterprise console for this gateway deployment.
+      operationId: serve_enterprise_console__get
+      responses:
+        '200':
+          content:
+            text/html:
+              schema:
+                type: string
+          description: Successful Response
+      summary: Serve the enterprise console
+  /api/v1/admin/keys:
+    post:
+      description: Create a credential and return its secret exactly once to an administrator.
+      operationId: create_managed_api_key_api_v1_admin_keys_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAPIKeyRequest'
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Create Managed Api Key Api V1 Admin Keys Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Issue a managed API credential
+  /api/v1/admin/keys/{key_id}:
+    delete:
+      description: Revoke a managed key by its fingerprint. Revocation is durable
+        in production.
+      operationId: revoke_managed_api_key_api_v1_admin_keys__key_id__delete
+      parameters:
+      - in: path
+        name: key_id
+        required: true
+        schema:
+          title: Key Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Revoke Managed Api Key Api V1 Admin Keys  Key Id  Delete
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Revoke a managed API credential
+  /api/v1/commercial-contracts:
+    post:
+      description: Register an immutable commercial contract version (tenant-scoped).
+      operationId: create_commercial_contract_api_v1_commercial_contracts_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommercialContractRequest'
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Create Commercial Contract Api V1 Commercial Contracts
+                  Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Register a commercial-contract version
+  /api/v1/commercial-contracts/{contract_id}:
+    get:
+      description: Retrieve a commercial contract by id and optional exact version
+        (tenant-scoped).
+      operationId: get_commercial_contract_api_v1_commercial_contracts__contract_id__get
+      parameters:
+      - in: path
+        name: contract_id
+        required: true
+        schema:
+          title: Contract Id
+          type: string
+      - in: query
+        name: version
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Version
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Get Commercial Contract Api V1 Commercial Contracts  Contract
+                  Id  Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Read a commercial-contract version
+  /api/v1/commercial-contracts/{contract_id}/versions:
+    get:
+      description: List all immutable versions of a commercial contract (tenant-scoped).
+      operationId: list_commercial_contract_versions_api_v1_commercial_contracts__contract_id__versions_get
+      parameters:
+      - in: path
+        name: contract_id
+        required: true
+        schema:
+          title: Contract Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response List Commercial Contract Versions Api V1 Commercial
+                  Contracts  Contract Id  Versions Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: List commercial-contract versions
+  /api/v1/contracts:
+    get:
+      description: 'Contract-name catalog visible to the caller''s tenant (own + shared).
+
+
+        Powers client discovery (CLI completion, the console contract selector):
+
+        names and active versions only, never full contract payloads.'
+      operationId: list_contracts_api_v1_contracts_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response List Contracts Api V1 Contracts Get
+                type: object
+          description: Successful Response
+      security:
+      - APIKeyHeader: []
+      summary: List visible contract names
+    post:
+      description: Registers and versions a Data Contract immutably, scoped to tenant
+        catalog.
+      operationId: register_contract_api_v1_contracts_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              additionalProperties: true
+              title: Contract Payload
+              type: object
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Register Contract Api V1 Contracts Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Register a data-contract version
+  /api/v1/contracts/{name}:
+    get:
+      description: Retrieves contract specification by name and optional point-in-time
+        version within tenant scope.
+      operationId: get_contract_api_v1_contracts__name__get
+      parameters:
+      - in: path
+        name: name
+        required: true
+        schema:
+          title: Name
+          type: string
+      - in: query
+        name: version
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Version
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Get Contract Api V1 Contracts  Name  Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Read a data-contract version
+  /api/v1/enforce:
+    post:
+      description: 'Submits a data payload across the boundary for contract enforcement.
+
+        Returns the reconciliation ledger and cryptographically signed audit certificate.'
+      operationId: enforce_boundary_api_v1_enforce_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_enforce_boundary_api_v1_enforce_post'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Enforce Boundary Api V1 Enforce Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Enforce the boundary for an upload
+  /api/v1/quarantine:
+    get:
+      description: Search the quarantine index by contract, run, kind, or dominant
+        reason.
+      operationId: list_ledger_quarantine_api_v1_quarantine_get
+      parameters:
+      - in: query
+        name: contract_name
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Contract Name
+      - in: query
+        name: run_id
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Run Id
+      - in: query
+        name: kind
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Kind
+      - in: query
+        name: reason
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Reason
+      - in: query
+        name: tenant_id
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 100
+          title: Limit
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response List Ledger Quarantine Api V1 Quarantine Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Search the quarantine index
+  /api/v1/runs:
+    get:
+      description: Newest-first forensic run records for a tenant with optional filters.
+      operationId: list_ledger_runs_api_v1_runs_get
+      parameters:
+      - in: query
+        name: contract_name
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Contract Name
+      - in: query
+        name: status_filter
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status Filter
+      - in: query
+        name: tenant_id
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 50
+          title: Limit
+          type: integer
+      - in: query
+        name: offset
+        required: false
+        schema:
+          default: 0
+          title: Offset
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response List Ledger Runs Api V1 Runs Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: List forensic run records
+  /api/v1/runs/summary:
+    get:
+      description: Aggregate delivery health for a tenant, optionally scoped to one
+        contract.
+      operationId: ledger_run_summary_api_v1_runs_summary_get
+      parameters:
+      - in: query
+        name: contract_name
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Contract Name
+      - in: query
+        name: tenant_id
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Ledger Run Summary Api V1 Runs Summary Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Aggregate run health for a tenant
+  /api/v1/runs/{run_id}:
+    get:
+      description: 'Full forensic ledger record for a single run, tenant-scoped.
+
+
+        Administrators may target any tenant with ``tenant_id`` for oversight; every
+
+        other role is pinned to its own tenant and denied explicitly for any other.'
+      operationId: get_ledger_run_api_v1_runs__run_id__get
+      parameters:
+      - in: path
+        name: run_id
+        required: true
+        schema:
+          title: Run Id
+          type: string
+      - in: query
+        name: tenant_id
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Get Ledger Run Api V1 Runs  Run Id  Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Read one forensic run record
+  /api/v1/runs/{run_id}/certificate:
+    get:
+      description: 'Retrieves the immutable cryptographic audit certificate for a
+        specific
+
+        run, with strict tenant ownership validation.'
+      operationId: get_run_certificate_api_v1_runs__run_id__certificate_get
+      parameters:
+      - in: path
+        name: run_id
+        required: true
+        schema:
+          title: Run Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Get Run Certificate Api V1 Runs  Run Id  Certificate
+                  Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Fetch a run's audit certificate
+  /api/v1/settlement/preview:
+    get:
+      description: 'Dashboard-facing aggregate of the tenant''s settlement portfolio.
+
+
+        A bounded read-only roll-up of the durable settlement ledger: totals by
+
+        currency, status distribution, and the newest statements. It performs no
+
+        calculation, transition, or billing action.'
+      operationId: settlement_preview_api_v1_settlement_preview_get
+      parameters:
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 50
+          title: Limit
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Settlement Preview Api V1 Settlement Preview Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Roll up the settlement portfolio for dashboards
+  /api/v1/settlements:
+    get:
+      description: List settlement statements for the caller's tenant (paginated).
+      operationId: list_settlements_api_v1_settlements_get
+      parameters:
+      - in: query
+        name: status
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+      - in: query
+        name: contract_id
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Contract Id
+      - in: query
+        name: limit
+        required: false
+        schema:
+          default: 50
+          title: Limit
+          type: integer
+      - in: query
+        name: offset
+        required: false
+        schema:
+          default: 0
+          title: Offset
+          type: integer
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response List Settlements Api V1 Settlements Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: List settlement statements
+  /api/v1/settlements/calculate:
+    post:
+      description: 'Calculate (or idempotently replay) the settlement for a completed
+        run.
+
+
+        Verifies the delivery certificate before calculating; an invalid
+
+        certificate, failed reconciliation, or unresolvable contract fails closed
+
+        with 422 and never produces a payable statement.'
+      operationId: calculate_settlement_api_v1_settlements_calculate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettlementCalculateRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Calculate Settlement Api V1 Settlements Calculate
+                  Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Calculate (or idempotently replay) a settlement
+  /api/v1/settlements/{settlement_id}:
+    get:
+      description: Retrieve one settlement statement (tenant-scoped).
+      operationId: get_settlement_api_v1_settlements__settlement_id__get
+      parameters:
+      - in: path
+        name: settlement_id
+        required: true
+        schema:
+          title: Settlement Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Get Settlement Api V1 Settlements  Settlement Id  Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Read a settlement statement
+  /api/v1/settlements/{settlement_id}/approvals:
+    post:
+      description: 'Explicitly approve a settlement for billing (BILLING_MANAGE capability).
+
+
+        Approval records an audited transition; it never overrides the
+
+        contractual calculation and never marks an unverified settlement as
+
+        accepted.'
+      operationId: approve_settlement_api_v1_settlements__settlement_id__approvals_post
+      parameters:
+      - in: path
+        name: settlement_id
+        required: true
+        schema:
+          title: Settlement Id
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+        required: true
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Approve Settlement Api V1 Settlements  Settlement
+                  Id  Approvals Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Approve a settlement for billing
+  /api/v1/settlements/{settlement_id}/billing-preview:
+    post:
+      description: 'Create or replay a draft billing instruction via the configured
+        provider.
+
+
+        Read-only against the settlement; the external action is a *draft* invoice.
+
+        Requires the Idempotency-Key header for the state-changing external call.'
+      operationId: settlement_billing_preview_api_v1_settlements__settlement_id__billing_preview_post
+      parameters:
+      - in: path
+        name: settlement_id
+        required: true
+        schema:
+          title: Settlement Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Settlement Billing Preview Api V1 Settlements  Settlement
+                  Id  Billing Preview Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Draft a billing instruction
+  /api/v1/settlements/{settlement_id}/disputes:
+    post:
+      description: Open a dispute; the settlement becomes DISPUTED and non-billable.
+      operationId: open_settlement_dispute_api_v1_settlements__settlement_id__disputes_post
+      parameters:
+      - in: path
+        name: settlement_id
+        required: true
+        schema:
+          title: Settlement Id
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisputeRequest'
+        required: true
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Open Settlement Dispute Api V1 Settlements  Settlement
+                  Id  Disputes Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Open a settlement dispute
+  /api/v1/settlements/{settlement_id}/explanation:
+    get:
+      description: 'Full calculation explanation: units, price, thresholds, rounding,
+        evidence.'
+      operationId: explain_settlement_api_v1_settlements__settlement_id__explanation_get
+      parameters:
+      - in: path
+        name: settlement_id
+        required: true
+        schema:
+          title: Settlement Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Explain Settlement Api V1 Settlements  Settlement
+                  Id  Explanation Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Explain a settlement calculation
+  /api/v1/settlements/{settlement_id}/verify:
+    post:
+      description: Verify a settlement's signed receipt against its delivery certificate.
+      operationId: verify_settlement_api_v1_settlements__settlement_id__verify_post
+      parameters:
+      - in: path
+        name: settlement_id
+        required: true
+        schema:
+          title: Settlement Id
+          type: string
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Verify Settlement Api V1 Settlements  Settlement Id  Verify
+                  Post
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Verify a settlement receipt
+  /api/v1/usage:
+    get:
+      description: Metering totals for a tenant, optionally since an ISO-8601 timestamp.
+      operationId: ledger_usage_api_v1_usage_get
+      parameters:
+      - in: query
+        name: contract_name
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Contract Name
+      - in: query
+        name: since
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Since
+      - in: query
+        name: tenant_id
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Tenant Id
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Ledger Usage Api V1 Usage Get
+                type: object
+          description: Successful Response
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+      security:
+      - APIKeyHeader: []
+      summary: Metering totals for a tenant
+  /health:
+    get:
+      description: Liveness probe for orchestrators, load balancers, and Kubernetes.
+      operationId: healthcheck_health_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Healthcheck Health Get
+                type: object
+          description: Successful Response
+      summary: Liveness probe
+  /metrics:
+    get:
+      description: Prometheus telemetry scrape endpoint (authenticated).
+      operationId: prometheus_metrics_metrics_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: {}
+          description: Successful Response
+      security:
+      - APIKeyHeader: []
+      summary: Prometheus metrics scrape
+  /ready:
+    get:
+      description: 'Readiness probe: fail closed when required persistent directories
+        are unavailable.'
+      operationId: readinesscheck_ready_get
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                title: Response Readinesscheck Ready Get
+                type: object
+          description: Successful Response
+      summary: Readiness probe

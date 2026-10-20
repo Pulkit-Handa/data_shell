@@ -16,7 +16,7 @@ from datashell.core.security import (
     Capability,
     Role,
     register_api_key,
-    require_capability,
+    require_scope,
     revoke_api_key_id,
 )
 from datashell.core.telemetry import telemetry_logger
@@ -30,11 +30,11 @@ class CreateAPIKeyRequest(BaseModel):
     description: str = Field(default="Managed API credential", min_length=1, max_length=200)
 
 
-@router.post("/api/v1/admin/keys", status_code=201)
+@router.post("/api/v1/admin/keys", summary="Issue a managed API credential", status_code=201)
 def create_managed_api_key(
     payload: CreateAPIKeyRequest,
     response: Response,
-    client: APIKeyMetadata = Security(require_capability(Capability.ADMIN_MANAGE)),
+    client: APIKeyMetadata = Security(require_scope(Capability.ADMIN_MANAGE)),
 ) -> dict[str, Any]:
     """Create a credential and return its secret exactly once to an administrator."""
     raw_key = "dm_live_" + secrets.token_urlsafe(32)
@@ -68,10 +68,10 @@ def create_managed_api_key(
     }
 
 
-@router.delete("/api/v1/admin/keys/{key_id}")
+@router.delete("/api/v1/admin/keys/{key_id}", summary="Revoke a managed API credential")
 def revoke_managed_api_key(
     key_id: str,
-    client: APIKeyMetadata = Security(require_capability(Capability.ADMIN_MANAGE)),
+    client: APIKeyMetadata = Security(require_scope(Capability.ADMIN_MANAGE)),
 ) -> dict[str, Any]:
     """Revoke a managed key by its fingerprint. Revocation is durable in production."""
     if not re.fullmatch(r"[0-9a-f]{24}", key_id):

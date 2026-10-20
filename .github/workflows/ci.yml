@@ -50,6 +50,10 @@ print(f'pre-commit config valid: {len(repos)} repos, hooks:',
 "
       - name: Verify release metadata consistency
         run: python scripts/check_release_metadata.py
+      - name: Verify the committed OpenAPI document is in sync (docs/openapi.yaml)
+        run: |
+          python scripts/export_openapi.py --out docs/openapi.yaml
+          git diff --exit-code -- docs/openapi.yaml
       - name: Build wheel and sdist from the pinned build backend
         run: python -m build --no-isolation --outdir dist
       - name: Verify built distribution contents (wheel + sdist)

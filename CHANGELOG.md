@@ -35,6 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   settlement ledger (totals by currency, status distribution, newest
   statements) for dashboards. Requires `settlements:read`; performs no
   calculation, transition, or billing action.
+- **API-surface hardening.** Every operation now carries an OpenAPI `summary`,
+  and the reviewable contract document `docs/openapi.yaml` is committed and
+  enforced in sync with the code in CI (`scripts/export_openapi.py`). The
+  gateway introspects its routes at startup
+  (`assert_routes_require_scope`): an `/api` endpoint that ships without a
+  `require_scope(...)` authorization dependency fails the process at boot
+  instead of serving unauthenticated data. Operators can choose
+  `LOG_FORMAT=pretty` for human-readable startup/shutdown logs
+  (`structured` JSON remains the default for log shippers).
 
 ### Changed
 - **Distribution name `data-shell` → `datashell`.** The import package and the
