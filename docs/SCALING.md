@@ -17,7 +17,7 @@ out-of-core micro-batches is configuration, not caller code.
 | # | Surface | Variable(s) | Effect |
 |---|---|---|---|
 | 1 | Ingest backend selection | `DATASHELL_INGEST_MODE`, `STREAM_AUTO_THRESHOLD_BYTES` | in-memory vs out-of-core micro-batches |
-| 2 | Micro-batch size | `STREAM_CHUNK_ROWS` | constant-RAM streaming granularity |
+| 2 | Micro-batch size | `STREAM_CHUNK_ROWS` | streaming granularity (chunk scratch; see the measured envelope below) |
 | 3 | SQL evaluation parallelism | `DATASHELL_DUCKDB_THREADS`, `DUCKDB_MEMORY_LIMIT` | batch-rule throughput and spill |
 | 4 | Delivered artifact codec | `DATASHELL_DELIVERY_COMPRESSION` | delivered size vs CPU |
 | 5 | Concurrent work & disk | `MAX_CONCURRENT_RUNS`, `MAX_CONCURRENT_REQUESTS`, `DATASHELL_DISK_HEADROOM_MULTIPLIER`, `MIN_FREE_DISK_BYTES` | how many feeds at once, and the staging footprint |
@@ -48,17 +48,31 @@ resolves, in precedence order:
      `STREAM_AUTO_THRESHOLD_BYTES` (default 64 MiB).
    - `memory`: always the in-memory backend (small, latency-sensitive nodes
      that want to fail fast instead of stream).
-   - `stream`: always out-of-core (feeds bigger than node RAM; bounded RSS).
+   - `stream`: always out-of-core (the profile is the one to study before
+     sizing hosts; see the measured envelope below).
 3. **Size threshold** — the `auto` fallback.
 
 Both backends produce byte-identical *decisions* (same rules, same ledger
-lines, same certificate claims); only the runtime profile differs:
+lines, same certificate claims); only the runtime profile differs. Measured
+on the reference development node (single machine, 13 GB RAM, Python 3.14):
 
 | | in-memory | out-of-core streaming |
 |---|---|---|
-| Peak RSS | ~source size × schema factor | bounded by chunk size, O(chunk) |
-| Throughput (measured) | **~1.9 M rows/s** at 1 M rows | throughput-bound on Parquet I/O + rule CPU |
+| Throughput (measured) | **~3.3 M rows/s** at 1 M rows | ~**4.9 M rows/s** on a 5 M-row Parquet feed; ~158 k rows/s on CSV |
+| Peak RSS (measured) | ~0.78 GB at 1 M rows | grows with rows processed, not only with chunk: roughly 0.15–0.2 GB per 1 M rows on Parquet, ~0.6 GB per 1 M rows on CSV (allocator churn included) |
 | Whole-run reject semantics | identical | identical (REJECT_RUN parity is enforced by tests) |
+
+**Measured streaming envelope.** Reproduce with
+`python benchmarks/streaming_profile.py --rows 5000000 --format parquet` and
+`--format csv`. The 5 M-row Parquet feed enforced end-to-end (cast → validate →
+reconcile → signed delivery) in ~1 s at 989 MiB peak RSS; the same rows as a
+87 MiB CSV took ~32 s at ~3.0 GB peak. The difference is by design: Parquet
+chunks arrive typed and stay on the vectorized fast path, while CSV chunk
+columns arrive as strings, so Tier-1 falls back to the strict per-row caster to
+preserve exact per-row rejection diagnostics. For very large CSV lands, convert
+to Parquet first (or measure your own envelope before sizing hosts); the
+streaming write path itself is bounded — admission, rules, and staged output
+all flush per micro-batch, one Parquet row group each.
 
 ---
 
