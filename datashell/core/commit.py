@@ -14,7 +14,7 @@ import json
 import os
 import uuid
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Dict, Iterable, Optional, Sequence
 from datashell.core.config import settings
 
 MAX_COMMIT_JOURNAL_BYTES = 1024 * 1024
@@ -62,6 +62,99 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
         os.fsync(handle.fileno())
     os.replace(temp, path)
     _fsync_dir(path.parent)
+
+
+GENERATION_POINTER_SUFFIX = ".generation.json"
+
+
+def generation_pointer_path(final_target: Path) -> Path:
+    """Path of the reader-visible commit pointer for one delivery target.
+
+    The pointer is the single atomic commit point of a publication: after the
+    staged dataset, lineage artifact, and certificate are durably renamed,
+    exactly one ``os.replace`` swaps this small JSON file to name the new
+    ``run_id``. Readers that resolve the pointer first always observe one
+    complete generation — never a mixture of the old and new file sets.
+    """
+    return final_target.with_name(final_target.name + GENERATION_POINTER_SUFFIX)
+
+
+def read_generation_pointer(final_target: Path) -> Optional[dict]:
+    """Return the committed generation for a target, or ``None`` if never set."""
+    pointer = generation_pointer_path(Path(final_target))
+    try:
+        with open(pointer, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(payload, dict) or not payload.get("run_id"):
+        return None
+    return payload
+
+
+def resolve_committed_generation(final_target: Path) -> Optional[str]:
+    """Resolve the reader-visible committed generation for a delivery target.
+
+    External consumers (audit jobs, settlement, downstream consumers) MUST call
+    this before reading the artifacts at ``final_target``'s directory so they
+    observe exactly one committed generation. Returns the committed ``run_id``
+    or ``None`` when no generation has been committed for this target.
+
+    The pointer is the single atomic commit point of a publication; it is
+    written only after every artifact for the new generation is durable. Readers
+    that resolve the pointer first therefore never observe a mixture of old and
+    new artifact generations through supported interfaces.
+    """
+    pointer = read_generation_pointer(final_target)
+    if pointer is None:
+        return None
+    return str(pointer.get("run_id"))
+
+
+def committed_generation_status(certificate: Dict[str, Any]) -> Dict[str, Any]:
+    """Report whether a certificate describes the currently committed generation.
+
+    This is the shared reader contract for every supported surface (CLI
+    verifier, HTTP certificate endpoint). A certificate remains valid evidence
+    for **its own** run even after a newer generation is committed - the
+    immutable per-run lineage artifact is what the certificate binds - but a
+    consumer that wants "the current delivery" must resolve the generation
+    pointer rather than assume the certificate is the latest.
+
+    Returns:
+        ``committed_generation`` - the committed ``run_id``, or ``None`` when no
+        generation pointer exists for the delivery target (for example a run
+        whose target was never published, such as a rejected run).
+        ``is_committed_generation`` - ``True``/``False`` when the generation can
+        be compared, or ``None`` when it cannot (no pointer, or the certificate
+        carries no run id).
+    """
+    manifest = (certificate or {}).get("cryptographic_manifest") or {}
+    target = manifest.get("delivered_file_path")
+    if not target:
+        return {"committed_generation": None, "is_committed_generation": None}
+    try:
+        committed = resolve_committed_generation(Path(str(target)))
+    except (OSError, ValueError):
+        return {"committed_generation": None, "is_committed_generation": None}
+    if committed is None:
+        return {"committed_generation": None, "is_committed_generation": None}
+    run_id = manifest.get("run_id") or (certificate or {}).get("run_id")
+    return {
+        "committed_generation": committed,
+        "is_committed_generation": (run_id is None) or (str(run_id) == committed),
+    }
+
+
+def _write_generation_pointer_atomically(pointer: Path, payload: dict) -> None:
+    """Atomically replace the generation pointer (the commit point)."""
+    temp = pointer.with_name(f".{pointer.name}.{uuid.uuid4().hex}.tmp")
+    with open(temp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp, pointer)
+    _fsync_dir(pointer.parent)
 
 
 def _transaction_paths(target: Path, transaction_root: Path | None = None) -> tuple[Path, Path]:
@@ -145,6 +238,17 @@ def _recover_locked(journal_path: Path) -> None:
         for entry in entries:
             Path(entry["backup"]).unlink(missing_ok=True)
             _fsync_dir(Path(entry["final"]).parent)
+        # Repair the reader-visible generation pointer from the durable journal.
+        # If publication crashed after every artifact rename was durable but
+        # before the pointer swap, the pointer would still name the previous
+        # generation while the final files already hold the new one. Rewriting
+        # the pointer here makes crash recovery converge to a consistent state.
+        run_id = journal.get("run_id")
+        if isinstance(run_id, str) and run_id:
+            pointer_payload = {"run_id": run_id}
+            for entry in entries:
+                pointer = generation_pointer_path(Path(entry["final"]))
+                _write_generation_pointer_atomically(pointer, pointer_payload)
         journal_path.unlink(missing_ok=True)
         _fsync_dir(journal_path.parent)
         return
@@ -208,12 +312,21 @@ def publish_transactionally(
     *,
     run_id: str,
     transaction_root: Path | None = None,
+    generation_pointer: dict | None = None,
 ) -> None:
     """Publish staged files to final paths as one recoverable transaction.
 
     The first path in each pair is the staged source and the second is its final
     destination. On any exception, prior destinations are restored before the
     exception is re-raised. A crash is recovered on the next call for that target.
+
+    When ``generation_pointer`` is supplied, it names the reader-visible commit
+    point: after every artifact rename is durable, the pointer file derived
+    from the *last* pair's destination is swapped by exactly one atomic
+    ``os.replace``. Readers resolving the pointer first therefore observe one
+    complete generation — never a mixture of old and new files. A crash before
+    the swap leaves the previous pointer with rolled-back files; a crash after
+    it leaves complete new files behind the new pointer.
     """
     if not pairs:
         return
@@ -269,6 +382,10 @@ def publish_transactionally(
             for entry in entries:
                 Path(entry["backup"]).unlink(missing_ok=True)
                 _fsync_dir(Path(entry["final"]).parent)
+            if generation_pointer is not None:
+                pointer = generation_pointer_path(target)
+                payload = {"run_id": run_id, **generation_pointer}
+                _write_generation_pointer_atomically(pointer, payload)
             journal_path.unlink(missing_ok=True)
             _fsync_dir(parent)
         except Exception:

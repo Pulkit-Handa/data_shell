@@ -19,12 +19,22 @@ construction, which is what makes the ledger safe to expose as a shared asset.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from datashell.core.config import settings
+
+
+# Size cap for pending-outbox records (same bound as commit journals: a
+# ledger payload is small structured metadata, never bulk data).
+MAX_OUTBOX_BYTES = 1024 * 1024
+
+# Suffix for durable outbox records keyed by audit certificate path.
+PENDING_OUTBOX_SUFFIX = ".ledger-pending.json"
 
 
 # Columns added to ``run_history`` after its original two-field-per-run form.
@@ -50,6 +60,8 @@ _RUN_HISTORY_MIGRATIONS: List[tuple[str, str]] = [
     ("signature_key_id", "TEXT"),
     ("rule_breakdown_json", "TEXT"),
     ("structural_reasons_json", "TEXT"),
+    ("certificate_digest", "TEXT"),
+    ("ledger_status", "TEXT"),
 ]
 
 # Runs recorded before the ledger captured ``status`` implicitly succeeded.
@@ -152,6 +164,12 @@ class BoundaryLedger:
                 "CREATE INDEX IF NOT EXISTS idx_quarantine_run "
                 "ON quarantine_index(tenant_id, run_id)"
             )
+            # A quarantine row is identified by (tenant, run, kind, artifact).
+            # The unique constraint is what makes replaying a pending ledger
+            # entry idempotent: a replay must not duplicate quarantine records.
+            # COALESCE keeps NULL artifact paths comparable (SQLite treats NULLs
+            # as distinct in unique indexes).
+            self._ensure_unique_quarantine_index(conn)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS usage_records (
@@ -193,6 +211,106 @@ class BoundaryLedger:
                 """
             )
 
+    # ------------------------------------------------------- pending outbox
+
+    @staticmethod
+    def _ensure_unique_quarantine_index(conn: sqlite3.Connection) -> None:
+        """Add the unique quarantine identity, collapsing legacy duplicates.
+
+        Databases written before this constraint may contain duplicate
+        quarantine rows (one per replay of the same pending ledger entry).
+        Adding the unique index over such a table fails, so duplicates are
+        collapsed first - keeping the earliest row, which is the original
+        observation - and the constraint is then created.
+        """
+        statement = (
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_quarantine_unique "
+            "ON quarantine_index(tenant_id, run_id, kind, COALESCE(artifact_path, ''))"
+        )
+        try:
+            conn.execute(statement)
+            return
+        except sqlite3.IntegrityError:
+            pass
+        conn.execute(
+            """
+            DELETE FROM quarantine_index
+            WHERE id NOT IN (
+                SELECT MIN(id) FROM quarantine_index
+                GROUP BY tenant_id, run_id, kind, COALESCE(artifact_path, '')
+            )
+            """
+        )
+        conn.execute(statement)
+
+    @staticmethod
+    def pending_outbox_path(audit_dest: Path, run_id: Optional[str] = None) -> Path:
+        """Durable outbox record for one run's ledger payload (LEDGER-001).
+
+        Written atomically *before* artifacts are published and removed only
+        after the ledger row is durably recorded. A crash between publication
+        and ledger recording therefore always leaves a replayable record: the
+        next startup (or an explicit ``reconcile``) re-applies it idempotently
+        via ``INSERT OR REPLACE`` keyed on ``run_id``.
+
+        The record name includes the ``run_id`` when one is supplied, so two
+        concurrent runs that were pointed at the *same* audit certificate path
+        still own separate pending records and can never overwrite one
+        another's payload. The legacy form (no run id) is still produced and
+        still discovered, so records written by earlier versions recover.
+        """
+        dest = Path(audit_dest)
+        if run_id:
+            return dest.with_name(f"{dest.name}.{run_id}{PENDING_OUTBOX_SUFFIX}")
+        return dest.with_name(dest.name + PENDING_OUTBOX_SUFFIX)
+
+    @staticmethod
+    def write_pending_outbox(outbox_path: Path, payload: dict) -> Path:
+        """Atomically persist the ledger payload ahead of publication."""
+        outbox_path = Path(outbox_path)
+        outbox_path.parent.mkdir(parents=True, exist_ok=True)
+        temp = outbox_path.with_name(f".{outbox_path.name}.{uuid.uuid4().hex}.tmp")
+        with open(temp, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, sort_keys=True, default=str)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp, outbox_path)
+        try:
+            dir_fd = os.open(str(outbox_path.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        except OSError:
+            return outbox_path
+        try:
+            os.fsync(dir_fd)
+        except OSError:
+            pass
+        finally:
+            os.close(dir_fd)
+        return outbox_path
+
+    @staticmethod
+    def clear_pending_outbox(outbox_path: Path) -> None:
+        Path(outbox_path).unlink(missing_ok=True)
+
+    @staticmethod
+    def iter_pending_outboxes(root: Path) -> Iterator[Tuple[Path, dict]]:
+        """Yield pending-outbox records beneath a storage root (oldest first)."""
+        root = Path(root)
+        if not root.is_dir():
+            return
+        for outbox in sorted(root.rglob(f"*{PENDING_OUTBOX_SUFFIX}")):
+            if outbox.is_symlink():
+                continue
+            try:
+                if outbox.stat().st_size > MAX_OUTBOX_BYTES:
+                    continue
+                with open(outbox, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except (OSError, ValueError):
+                continue
+            if isinstance(payload, dict) and payload.get("run_id"):
+                yield outbox, payload
+
+
     # --------------------------------------------------------------- run writes
 
     def record_run(
@@ -223,10 +341,17 @@ class BoundaryLedger:
         signature_key_id: Optional[str] = None,
         rule_breakdown: Optional[Dict[str, int]] = None,
         structural_reasons: Optional[Dict[str, int]] = None,
+        certificate_digest: Optional[str] = None,
+        ledger_status: Optional[str] = None,
     ) -> None:
         """Persist one forensic ledger row for an enforcement run.
 
         Idempotent on ``run_id`` so a retried finalization cannot double-count.
+
+        ``ledger_status`` is ``COMMITTED`` for a fully recorded run and
+        ``PENDING`` for a run whose artifacts are published but whose ledger
+        row still awaits outbox reconciliation. ``None`` (legacy rows) reads
+        as committed.
         """
         with self._connect() as conn:
             conn.execute(
@@ -238,10 +363,11 @@ class BoundaryLedger:
                     is_run_rejected, rejection_reason, duration_seconds,
                     execution_mode, source_name, source_bytes, target_path,
                     audit_path, quarantine_path, merkle_root, signature_key_id,
-                    rule_breakdown_json, structural_reasons_json
+                    rule_breakdown_json, structural_reasons_json,
+                    certificate_digest, ledger_status
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                    , ?, ?, ?, ?, ?, ?
+                    , ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 (
@@ -271,6 +397,150 @@ class BoundaryLedger:
                     signature_key_id,
                     _json(rule_breakdown or {}),
                     _json(structural_reasons or {}),
+                    certificate_digest,
+                    ledger_status or "COMMITTED",
+                ),
+            )
+
+    def apply_run_outcome(
+        self,
+        *,
+        run_id: str,
+        tenant_id: str,
+        contract_name: str,
+        rows_read: int,
+        rows_delivered: int,
+        metrics: Optional[Dict[str, Any]] = None,
+        contract_version: Optional[str] = None,
+        status: Optional[str] = None,
+        rows_refused: int = 0,
+        rows_held: int = 0,
+        unaccounted_for: int = 0,
+        footing_matched: bool = True,
+        is_run_rejected: bool = False,
+        rejection_reason: Optional[str] = None,
+        duration_seconds: Optional[float] = None,
+        execution_mode: Optional[str] = None,
+        source_name: Optional[str] = None,
+        source_bytes: Optional[int] = None,
+        target_path: Optional[str] = None,
+        audit_path: Optional[str] = None,
+        quarantine_path: Optional[str] = None,
+        merkle_root: Optional[str] = None,
+        signature_key_id: Optional[str] = None,
+        certificate_digest: Optional[str] = None,
+        rule_breakdown: Optional[Dict[str, int]] = None,
+        structural_reasons: Optional[Dict[str, int]] = None,
+        quarantine_rows: Optional[List[Dict[str, Any]]] = None,
+        billable: bool = True,
+        unit: str = "row",
+        units: Optional[int] = None,
+    ) -> None:
+        """Apply a complete run outcome to history, quarantine index, and usage.
+
+        All three writes commit in **one** SQLite transaction: either the run
+        row, its quarantine index rows, and its usage meter are all durable, or
+        none of them are. A run is therefore never left marked ``COMMITTED``
+        with incomplete accounting - the failure mode that would let a
+        published delivery lose its usage/settlement basis while still looking
+        recorded.
+
+        The write is idempotent: ``run_history`` is keyed by ``run_id`` and
+        ``usage_records`` by ``(tenant_id, run_id)``, and quarantine rows are
+        keyed by ``(tenant_id, run_id, kind, artifact_path)``, so replaying the
+        same outcome replaces rather than duplicates.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO run_history (
+                    run_id, tenant_id, contract_name, timestamp, rows_read,
+                    rows_delivered, metrics_json, contract_version, status,
+                    rows_refused, rows_held, unaccounted_for, footing_matched,
+                    is_run_rejected, rejection_reason, duration_seconds,
+                    execution_mode, source_name, source_bytes, target_path,
+                    audit_path, quarantine_path, merkle_root, signature_key_id,
+                    rule_breakdown_json, structural_reasons_json,
+                    certificate_digest, ledger_status
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    , ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                (
+                    run_id,
+                    tenant_id,
+                    contract_name,
+                    _utcnow(),
+                    int(rows_read),
+                    int(rows_delivered),
+                    _json(metrics or {}),
+                    contract_version,
+                    status,
+                    int(rows_refused),
+                    int(rows_held),
+                    int(unaccounted_for),
+                    1 if footing_matched else 0,
+                    1 if is_run_rejected else 0,
+                    rejection_reason,
+                    duration_seconds,
+                    execution_mode,
+                    source_name,
+                    source_bytes,
+                    target_path,
+                    audit_path,
+                    quarantine_path,
+                    merkle_root,
+                    signature_key_id,
+                    _json(rule_breakdown or {}),
+                    _json(structural_reasons or {}),
+                    certificate_digest,
+                    "COMMITTED",
+                ),
+            )
+            for row in quarantine_rows or []:
+                reasons = row.get("reasons") or {}
+                dominant = max(reasons, key=reasons.get) if reasons else None
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO quarantine_index (
+                        run_id, tenant_id, contract_name, timestamp, kind,
+                        artifact_path, row_count, dominant_reason, reasons_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        tenant_id,
+                        contract_name,
+                        _utcnow(),
+                        str(row.get("kind") or "unknown"),
+                        row.get("artifact_path"),
+                        int(row.get("row_count") or 0),
+                        dominant,
+                        _json(reasons),
+                    ),
+                )
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO usage_records (
+                    run_id, tenant_id, contract_name, timestamp, status,
+                    execution_mode, rows_read, rows_delivered, bytes_processed,
+                    billable, unit, units
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    tenant_id,
+                    contract_name,
+                    _utcnow(),
+                    status,
+                    execution_mode,
+                    int(rows_read),
+                    int(rows_delivered),
+                    int(source_bytes or 0),
+                    1 if billable else 0,
+                    unit,
+                    int(units if units is not None else rows_read),
                 ),
             )
 
@@ -284,13 +554,17 @@ class BoundaryLedger:
         row_count: int,
         reasons: Optional[Dict[str, int]] = None,
     ) -> None:
-        """Index one quarantine artifact (held rows or structural refusals)."""
+        """Index one quarantine artifact (held rows or structural refusals).
+
+        Idempotent on the (tenant, run, kind, artifact) identity so replaying a
+        pending ledger entry replaces the row instead of duplicating it.
+        """
         reason_map = reasons or {}
         dominant = max(reason_map, key=reason_map.get) if reason_map else None
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO quarantine_index (
+                INSERT OR REPLACE INTO quarantine_index (
                     run_id, tenant_id, contract_name, timestamp, kind,
                     artifact_path, row_count, dominant_reason, reasons_json
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -737,4 +1011,64 @@ class BoundaryLedger:
             "metrics": _unjson(row["metrics_json"]),
             "rule_breakdown": _unjson(row["rule_breakdown_json"]) if "rule_breakdown_json" in keys else {},
             "structural_reasons": _unjson(row["structural_reasons_json"]) if "structural_reasons_json" in keys else {},
+            "certificate_digest": row["certificate_digest"] if "certificate_digest" in keys else None,
+            "ledger_status": row["ledger_status"] if "ledger_status" in keys and row["ledger_status"] else "COMMITTED",
         }
+
+    # ------------------------------------------------------- pending outbox
+
+    def list_pending_runs(
+        self, tenant_id: Optional[str] = None, limit: int = 500
+    ) -> List[Dict[str, Any]]:
+        """Runs published but not yet fully ledger-recorded (LEDGER-001).
+
+        A ``PENDING`` row means artifacts reached durable storage while the
+        ledger write was interrupted or failed; the outbox record on disk
+        carries the payload needed for idempotent replay.
+        """
+        clauses = ["(ledger_status = 'PENDING')"]
+        params: List[Any] = []
+        if tenant_id is not None:
+            clauses.append("tenant_id = ?")
+            params.append(tenant_id)
+        params.append(max(1, int(limit)))
+        with self._connect() as conn:
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM run_history WHERE " + " AND ".join(clauses)
+                    + " ORDER BY timestamp DESC LIMIT ?",
+                    params,
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # Pre-migration database without ledger_status: no pending rows.
+                return []
+        return [self._run_dict(row) for row in rows]
+
+    def mark_run_committed(self, run_id: str, tenant_id: str) -> bool:
+        """Flip a replayed ``PENDING`` row to ``COMMITTED``. Returns True if found."""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE run_history SET ledger_status = 'COMMITTED' "
+                "WHERE run_id = ? AND tenant_id = ?",
+                (run_id, tenant_id),
+            )
+        return bool(cursor.rowcount)
+
+
+# -------------------------------------------------------------------
+# Module-level compatibility wrappers so callers can import the durable
+# outbox helpers without constructing a BoundaryLedger instance.
+def pending_outbox_path(audit_dest: Path, run_id: Optional[str] = None) -> Path:
+    return BoundaryLedger.pending_outbox_path(audit_dest, run_id)
+
+
+def write_pending_outbox(outbox_path: Path, payload: dict) -> Path:
+    return BoundaryLedger.write_pending_outbox(outbox_path, payload)
+
+
+def clear_pending_outbox(outbox_path: Path) -> None:
+    BoundaryLedger.clear_pending_outbox(outbox_path)
+
+
+def iter_pending_outboxes(root: Path):
+    return BoundaryLedger.iter_pending_outboxes(root)

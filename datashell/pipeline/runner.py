@@ -13,7 +13,20 @@ import pyarrow.parquet as pq
 from datashell.core.config import settings
 from datashell.core.sandbox import FilesystemSandbox
 from datashell.core.crypto import CryptoEngine
-from datashell.core.commit import publish_transactionally, recover_publication
+from datashell.core.commit import (
+    generation_pointer_path,
+    publish_transactionally,
+    read_generation_pointer,
+    recover_publication,
+    recover_pending_publications,
+)
+from datashell.core.ledger import (
+    BoundaryLedger,
+    clear_pending_outbox,
+    iter_pending_outboxes,
+    pending_outbox_path,
+    write_pending_outbox,
+)
 from datashell.core.fileops import materialize_artifact_copy, ensure_disk_headroom
 from datashell.core.events import emit_run_event
 from datashell.contract.models import DataContract, QualityBehavior
@@ -31,6 +44,236 @@ from datashell.core.telemetry import (
     ROWS_HELD_TOTAL, ROWS_REFUSED_TOTAL, FOOTING_ERRORS_TOTAL,
     RUN_DURATION_SECONDS, ACTIVE_RUNS, telemetry_logger
 )
+
+
+def _quarantine_rows_from_payload(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Build the quarantine index rows carried by an outbox payload."""
+    rows: List[Dict[str, Any]] = []
+    for artifact in payload.get("quarantine_files") or []:
+        name = Path(str(artifact)).name
+        is_held = name.endswith("_held_records.parquet")
+        rmap = payload.get("rule_breakdown") if is_held else payload.get("structural_reasons")
+        n = payload.get("rows_held", 0) if is_held else payload.get("rows_refused", 0)
+        rows.append(
+            {
+                "kind": "held_quality" if is_held else "structural_refused",
+                "artifact_path": str(artifact),
+                "row_count": int(n or 0),
+                "reasons": dict(rmap or {}),
+            }
+        )
+    return rows
+
+
+def _publish_with_pending_outbox(
+    *,
+    pairs: List[tuple],
+    run_id: str,
+    transaction_root: Path,
+    generation_pointer: Dict[str, Any],
+    outbox_path: Path,
+    payload: Dict[str, Any],
+) -> None:
+    """Write the pending ledger record, publish, and discard it on failure.
+
+    The pending record must exist *before* publication so that a crash
+    between publication and the ledger write stays replayable. If publication
+    itself fails, nothing was published, so the record is removed instead:
+    leaving it would make every later recovery re-report a delivery that never
+    happened. The outbox record is per-run, so a concurrent run's record is
+    never disturbed by this cleanup.
+    """
+    write_pending_outbox(outbox_path, payload)
+    try:
+        publish_transactionally(
+            pairs,
+            run_id=run_id,
+            transaction_root=transaction_root,
+            generation_pointer=generation_pointer,
+        )
+    except Exception:
+        clear_pending_outbox(outbox_path)
+        raise
+
+
+def _replay_payload_without_pipeline(store: BoundaryLedger, payload: Dict[str, Any]) -> None:
+    """Apply an outbox payload directly when no contract catalog is available.
+
+    The run row, its quarantine index rows, and its usage meter are written in
+    one transaction, so a replay can never leave a run marked ``COMMITTED``
+    with incomplete accounting.
+    """
+    store.apply_run_outcome(
+        run_id=str(payload.get("run_id")),
+        tenant_id=str(payload.get("tenant_id")),
+        contract_name=str(payload.get("contract_name")),
+        rows_read=int(payload.get("rows_read", 0) or 0),
+        rows_delivered=int(payload.get("rows_delivered", 0) or 0),
+        metrics=dict(payload.get("metrics") or {}),
+        contract_version=payload.get("contract_version"),
+        status=payload.get("status"),
+        rows_refused=int(payload.get("rows_refused", 0) or 0),
+        rows_held=int(payload.get("rows_held", 0) or 0),
+        unaccounted_for=int(payload.get("unaccounted_for", 0) or 0),
+        footing_matched=bool(payload.get("footing_matched", True)),
+        is_run_rejected=bool(payload.get("is_run_rejected", False)),
+        rejection_reason=payload.get("rejection_reason"),
+        duration_seconds=payload.get("duration_seconds"),
+        execution_mode=payload.get("execution_mode"),
+        source_name=payload.get("source_name"),
+        source_bytes=payload.get("source_bytes"),
+        target_path=payload.get("target_path"),
+        audit_path=payload.get("audit_path"),
+        quarantine_path=payload.get("quarantine_path"),
+        merkle_root=payload.get("merkle_root"),
+        signature_key_id=payload.get("signature_key_id"),
+        certificate_digest=payload.get("certificate_digest"),
+        rule_breakdown=dict(payload.get("rule_breakdown") or {}),
+        structural_reasons=dict(payload.get("structural_reasons") or {}),
+        quarantine_rows=_quarantine_rows_from_payload(payload),
+        billable=payload.get("status") != TerminalStatus.FAILED.value,
+        units=int(payload.get("rows_read", 0) or 0),
+    )
+
+
+def _published_artifacts_present(payload: Dict[str, Any]) -> bool:
+    """Return True when the run's published artifacts are actually on disk.
+
+    The pending outbox is written *before* publication. If publication then
+    fails, the outbox record survives but the artifacts it describes were
+    never published. Replaying such a record would fabricate a delivery that
+    never happened, so replay verifies the run's own immutable artifacts
+    (the lineage copy and the audit certificate, both named by ``run_id``)
+    exist before the run is recorded as committed.
+
+    A run with no artifacts (a rejected run publishes no delivery target) is
+    replayed as-is: its outcome is recorded from the payload.
+    """
+    audit_path = payload.get("audit_path")
+    run_artifact = payload.get("run_artifact_path")
+    if not audit_path and not run_artifact:
+        return True
+    for candidate in (audit_path, run_artifact):
+        if not candidate:
+            continue
+        try:
+            if not Path(str(candidate)).is_file():
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def reconcile_pending_ledger_entries(
+    storage_root: Optional[Path] = None,
+    ledger: Optional[BoundaryLedger] = None,
+) -> Dict[str, int]:
+    """Replay durable outbox records into the ledger (LEDGER-001 recovery).
+
+    Scans ``storage_root`` for pending-outbox records left by runs whose
+    publication succeeded but whose ledger write did not complete, and
+    re-applies each payload idempotently. Successfully replayed outboxes are
+    removed; malformed, tenant-invalid, or unpublished records are left for
+    the operator and counted as skipped.
+
+    Reconciliation never raises - a database outage during startup must not
+    prevent the service from booting - but every skip is reported through the
+    returned counts and an ERROR log, so unreconciled state is observable
+    rather than silently swallowed.
+    """
+    from datashell.core.telemetry import telemetry_logger as _telemetry
+
+    root = Path(storage_root) if storage_root is not None else settings.output_dir
+    store = ledger if ledger is not None else BoundaryLedger()
+    replayed = 0
+    skipped = 0
+    try:
+        outboxes = list(iter_pending_outboxes(root))
+    except Exception as exc:
+        _telemetry.error(
+            "Pending ledger reconciliation could not enumerate outbox records",
+            storage_root=str(root),
+            error_type=type(exc).__name__,
+        )
+        return {"replayed": 0, "skipped": 0}
+    for outbox_path, payload in outboxes:
+        try:
+            tenant_id = str(payload.get("tenant_id") or "")
+            run_id = str(payload.get("run_id") or "")
+            if not tenant_id or not run_id:
+                skipped += 1
+                _telemetry.error(
+                    "Pending ledger entry is malformed and was skipped",
+                    outbox=str(outbox_path),
+                )
+                continue
+            try:
+                settings.tenant_storage_key(tenant_id)
+            except Exception:
+                skipped += 1
+                _telemetry.error(
+                    "Pending ledger entry has an invalid tenant and was skipped",
+                    outbox=str(outbox_path),
+                    run_id=run_id,
+                )
+                continue
+            try:
+                existing = store.get_run(run_id, tenant_id)
+            except Exception:
+                existing = None
+            if existing is not None and existing.get("ledger_status", "COMMITTED") == "COMMITTED":
+                clear_pending_outbox(outbox_path)
+                continue
+            if not _published_artifacts_present(payload):
+                # The outbox record outlived a publication that never
+                # committed. Recording it would fabricate a delivery, so the
+                # record is left for an operator to inspect.
+                skipped += 1
+                _telemetry.error(
+                    "Pending ledger entry describes artifacts that were never "
+                    "published; left for operator review",
+                    outbox=str(outbox_path),
+                    run_id=run_id,
+                    tenant=tenant_id,
+                )
+                continue
+            _replay_payload_without_pipeline(store, payload)
+            store.mark_run_committed(run_id, tenant_id)
+            clear_pending_outbox(outbox_path)
+            replayed += 1
+            _telemetry.info("Reconciled pending ledger entry", run_id=run_id, tenant=tenant_id)
+        except Exception as exc:
+            skipped += 1
+            _telemetry.error(
+                "Pending ledger entry could not be reconciled",
+                outbox=str(outbox_path),
+                error_type=type(exc).__name__,
+            )
+            continue
+    return {"replayed": replayed, "skipped": skipped}
+
+
+def recover_pending_publications_and_ledger(
+    storage_root: Optional[Path] = None,
+    ledger: Optional[BoundaryLedger] = None,
+) -> Dict[str, int]:
+    """Startup recovery gate: publication journals first, then ledger outbox.
+
+    Returns a summary containing the number of journals recovered, the number
+    of ledger entries replayed or skipped, and the number of journal recovery
+    errors. Journal recovery errors are counted rather than raised so the
+    service can still start, but they are reported so an operator sees that
+    recovery was incomplete.
+    """
+    root = Path(storage_root) if storage_root is not None else settings.output_dir
+    journal_errors = 0
+    try:
+        journals = int(recover_pending_publications(root))
+    except Exception:
+        journals = 0
+        journal_errors = 1
+    result = reconcile_pending_ledger_entries(storage_root=root, ledger=ledger)
+    return {"journals": journals, "journal_errors": journal_errors, **result}
 
 
 def _common_transaction_root(paths: List[Path]) -> Path:
@@ -59,6 +302,7 @@ class PipelineResult:
     outcome: DeliveryOutcome
     audit_artifact_path: Optional[str]
     audit_certificate: Optional[Dict[str, Any]] = None
+    ledger_status: str = "COMMITTED"
 
 
 class DataShellPipeline:
@@ -164,6 +408,112 @@ class DataShellPipeline:
             reasons.append("reconciliation footing deficit; delivery refused to write")
         return "; ".join(reasons) if reasons else "Violations exceeded declared contract gate"
 
+    def _ledger_payload(
+        self,
+        *,
+        run_id: str,
+        contract_name: str,
+        ledger: ReconciliationLedger,
+        outcome: DeliveryOutcome,
+        audit_cert: Optional[Dict[str, Any]],
+        audit_artifact_path: Optional[str],
+        source_path: Optional[Union[str, Path]],
+        duration_seconds: float,
+        execution_mode: str,
+        metrics: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Any]:
+        """Build the durable ledger payload for one terminal run outcome."""
+        source_name: Optional[str] = None
+        source_bytes: Optional[int] = None
+        if source_path is not None:
+            source = Path(source_path)
+            source_name = source.name
+            try:
+                source_bytes = source.stat().st_size
+            except OSError:
+                source_bytes = None
+        manifest = (audit_cert or {}).get("cryptographic_manifest", {}) or {}
+        signature = (audit_cert or {}).get("digital_signature", {}) or {}
+        certificate_digest = CryptoEngine.canonical_json_hash(
+            {
+                "manifest": manifest,
+                "signature": {
+                    "algorithm": signature.get("algorithm"),
+                    "key_id": signature.get("key_id"),
+                    "signature": signature.get("signature"),
+                },
+            }
+        )
+        return {
+            "run_id": run_id,
+            "contract_name": contract_name,
+            "rows_read": ledger.rows_read,
+            "rows_delivered": outcome.rows_delivered,
+            "metrics": metrics or {},
+            "tenant_id": self.tenant_id,
+            "contract_version": self.contract.metadata.version,
+            "status": outcome.status.value,
+            "rows_refused": ledger.refused_structural,
+            "rows_held": ledger.held_quality,
+            "unaccounted_for": ledger.unaccounted_for,
+            "footing_matched": ledger.footing_matched,
+            "is_run_rejected": ledger.is_run_rejected,
+            "rejection_reason": ledger.rejection_reason,
+            "duration_seconds": duration_seconds,
+            "execution_mode": execution_mode,
+            "source_name": source_name,
+            "source_bytes": source_bytes,
+            "target_path": outcome.target_path,
+            "audit_path": str(audit_artifact_path) if audit_artifact_path else None,
+            "run_artifact_path": outcome.run_artifact_path,
+            "quarantine_path": outcome.quarantine_path,
+            "quarantine_files": list(outcome.quarantine_files),
+            "merkle_root": manifest.get("merkle_root"),
+            "signature_key_id": signature.get("key_id"),
+            "certificate_digest": certificate_digest,
+            "rule_breakdown": dict(ledger.rule_breakdown),
+            "structural_reasons": dict(ledger.structural_reasons),
+        }
+
+    def _apply_ledger_payload(self, payload: Dict[str, Any]) -> None:
+        """Idempotently apply a ledger payload (normal path or outbox replay).
+
+        The run row, its quarantine index rows, and its usage meter are written
+        in a single transaction, so a run is never left marked ``COMMITTED``
+        with incomplete accounting.
+        """
+        self.history_tracker.apply_run_outcome(
+            run_id=payload["run_id"],
+            contract_name=payload["contract_name"],
+            rows_read=payload["rows_read"],
+            rows_delivered=payload["rows_delivered"],
+            metrics=payload.get("metrics") or {},
+            tenant_id=payload["tenant_id"],
+            contract_version=payload.get("contract_version"),
+            status=payload.get("status"),
+            rows_refused=payload.get("rows_refused", 0),
+            rows_held=payload.get("rows_held", 0),
+            unaccounted_for=payload.get("unaccounted_for", 0),
+            footing_matched=payload.get("footing_matched", True),
+            is_run_rejected=payload.get("is_run_rejected", False),
+            rejection_reason=payload.get("rejection_reason"),
+            duration_seconds=payload.get("duration_seconds"),
+            execution_mode=payload.get("execution_mode"),
+            source_name=payload.get("source_name"),
+            source_bytes=payload.get("source_bytes"),
+            target_path=payload.get("target_path"),
+            audit_path=payload.get("audit_path"),
+            quarantine_path=payload.get("quarantine_path"),
+            merkle_root=payload.get("merkle_root"),
+            signature_key_id=payload.get("signature_key_id"),
+            certificate_digest=payload.get("certificate_digest"),
+            rule_breakdown=payload.get("rule_breakdown") or {},
+            structural_reasons=payload.get("structural_reasons") or {},
+            quarantine_rows=_quarantine_rows_from_payload(payload),
+            billable=payload.get("status") != TerminalStatus.FAILED.value,
+            units=int(payload.get("rows_read", 0) or 0),
+        )
+
     def _record_run_outcome(
         self,
         *,
@@ -177,89 +527,57 @@ class DataShellPipeline:
         duration_seconds: float,
         execution_mode: str,
         metrics: Optional[Dict[str, float]] = None,
-    ) -> None:
-        """Persist the forensic ledger row, quarantine index, usage meter, and event.
+        outbox_path: Optional[Path] = None,
+    ) -> str:
+        """Persist the ledger row, quarantine index, usage meter, and event.
 
-        Recording failures are non-fatal: a delivered artifact must never be
-        rolled back because auxiliary bookkeeping failed. The ledger is the
-        accumulating asset, so it captures *every* terminal outcome — including
-        rejected runs — not just successful deliveries.
+        Recording failures are non-fatal to the *artifacts* — a delivered file
+        is never rolled back because bookkeeping failed — but they are no
+        longer silent: the run stays ``published-but-ledger-pending`` (durable
+        outbox record plus a ``PENDING`` row when the DB is reachable) and this
+        returns ``PENDING`` instead of ``COMMITTED`` so callers surface it.
         """
-        source_name: Optional[str] = None
-        source_bytes: Optional[int] = None
-        if source_path is not None:
-            source = Path(source_path)
-            source_name = source.name
-            try:
-                source_bytes = source.stat().st_size
-            except OSError:
-                source_bytes = None
-
+        payload = self._ledger_payload(
+            run_id=run_id,
+            contract_name=contract_name,
+            ledger=ledger,
+            outcome=outcome,
+            audit_cert=audit_cert,
+            audit_artifact_path=audit_artifact_path,
+            source_path=source_path,
+            duration_seconds=duration_seconds,
+            execution_mode=execution_mode,
+            metrics=metrics,
+        )
         manifest = (audit_cert or {}).get("cryptographic_manifest", {}) or {}
-        signature = (audit_cert or {}).get("digital_signature", {}) or {}
-
         try:
-            self.history_tracker.record_run(
-                run_id=run_id,
-                contract_name=contract_name,
-                rows_read=ledger.rows_read,
-                rows_delivered=outcome.rows_delivered,
-                metrics=metrics or {},
-                tenant_id=self.tenant_id,
-                contract_version=self.contract.metadata.version,
-                status=outcome.status.value,
-                rows_refused=ledger.refused_structural,
-                rows_held=ledger.held_quality,
-                unaccounted_for=ledger.unaccounted_for,
-                footing_matched=ledger.footing_matched,
-                is_run_rejected=ledger.is_run_rejected,
-                rejection_reason=ledger.rejection_reason,
-                duration_seconds=duration_seconds,
-                execution_mode=execution_mode,
-                source_name=source_name,
-                source_bytes=source_bytes,
-                target_path=outcome.target_path,
-                audit_path=str(audit_artifact_path) if audit_artifact_path else None,
-                quarantine_path=outcome.quarantine_path,
-                merkle_root=manifest.get("merkle_root"),
-                signature_key_id=signature.get("key_id"),
-                rule_breakdown=ledger.rule_breakdown,
-                structural_reasons=ledger.structural_reasons,
-            )
-
-            for artifact in outcome.quarantine_files:
-                name = Path(artifact).name
-                is_held = name.endswith("_held_records.parquet")
-                self.history_tracker.record_quarantine(
-                    run_id=run_id,
-                    tenant_id=self.tenant_id,
-                    contract_name=contract_name,
-                    kind="held_quality" if is_held else "structural_refused",
-                    artifact_path=str(artifact),
-                    row_count=ledger.held_quality if is_held else ledger.refused_structural,
-                    reasons=ledger.rule_breakdown if is_held else ledger.structural_reasons,
-                )
-
-            self.history_tracker.record_usage(
-                run_id=run_id,
-                tenant_id=self.tenant_id,
-                contract_name=contract_name,
-                status=outcome.status.value,
-                execution_mode=execution_mode,
-                rows_read=ledger.rows_read,
-                rows_delivered=outcome.rows_delivered,
-                bytes_processed=source_bytes or 0,
-                billable=outcome.status != TerminalStatus.FAILED,
-                units=ledger.rows_read,
-            )
+            self._apply_ledger_payload(payload)
+            ledger_status = "COMMITTED"
+            if outbox_path is not None:
+                clear_pending_outbox(outbox_path)
         except Exception as history_error:
             telemetry_logger.warning(
-                "Run ledger update failed",
+                "Run ledger update failed; run is pending reconciliation",
                 run_id=run_id,
                 tenant=self.tenant_id,
                 error_type=type(history_error).__name__,
             )
-
+            ledger_status = "PENDING"
+            try:
+                self.history_tracker.record_run(
+                    run_id=run_id,
+                    contract_name=contract_name,
+                    rows_read=ledger.rows_read,
+                    rows_delivered=outcome.rows_delivered,
+                    metrics=metrics or {},
+                    tenant_id=self.tenant_id,
+                    contract_version=self.contract.metadata.version,
+                    status=outcome.status.value,
+                    certificate_digest=payload["certificate_digest"],
+                    ledger_status="PENDING",
+                )
+            except Exception:
+                pass
         emit_run_event({
             "event": "run.completed",
             "run_id": run_id,
@@ -267,6 +585,7 @@ class DataShellPipeline:
             "contract_name": contract_name,
             "contract_version": self.contract.metadata.version,
             "status": outcome.status.value,
+            "ledger_status": ledger_status,
             "execution_mode": execution_mode,
             "duration_seconds": duration_seconds,
             "rows_read": ledger.rows_read,
@@ -282,6 +601,7 @@ class DataShellPipeline:
             "target_path": outcome.target_path,
             "quarantine_path": outcome.quarantine_path,
         })
+        return ledger_status
 
     def _record_failed_run(self, run_id: str, contract_name: str, error: BaseException) -> None:
         """Best-effort forensic entry for a run that failed before delivery."""
@@ -425,22 +745,47 @@ class DataShellPipeline:
                 final_run_artifact = Path(outcome.run_artifact_path)
                 # Recover journals produced by earlier versions, then publish the
                 # signed certificate, immutable lineage, and active target together.
+                # The outbox record lands first so a crash between publication
+                # and ledger recording stays replayable (LEDGER-001); the
+                # generation pointer is the reader-visible commit point (PUB-001).
                 recover_publication(final_target)
+                outbox_path = pending_outbox_path(audit_dest, run_id)
                 transaction_root = _common_transaction_root([final_target, final_run_artifact, audit_dest])
-                publish_transactionally(
-                    [
+                _publish_with_pending_outbox(
+                    pairs=[
                         (Path(outcome.staged_run_artifact_path), final_run_artifact),
                         (staged_audit, audit_dest),
                         (Path(outcome.staged_target_path), final_target),
                     ],
                     run_id=run_id,
                     transaction_root=transaction_root,
+                    generation_pointer={
+                        "tenant_id": self.tenant_id,
+                        "contract_name": contract_name,
+                        "contract_version": self.contract.metadata.version,
+                        "audit_path": str(audit_dest),
+                        "lineage_path": str(final_run_artifact),
+                    },
+                    outbox_path=outbox_path,
+                    payload=self._ledger_payload(
+                        run_id=run_id,
+                        contract_name=contract_name,
+                        ledger=ledger,
+                        outcome=outcome,
+                        audit_cert=audit_cert,
+                        audit_artifact_path=str(audit_dest),
+                        source_path=source_path,
+                        duration_seconds=duration,
+                        execution_mode="in_memory",
+                        metrics=feed_metrics,
+                    ),
                 )
                 saved_audit = audit_dest
             else:
                 saved_audit = ArtifactGenerator.save_audit_file(audit_cert, audit_dest)
+                outbox_path = None
 
-            self._record_run_outcome(
+            ledger_status = self._record_run_outcome(
                 run_id=run_id,
                 contract_name=contract_name,
                 ledger=ledger,
@@ -451,6 +796,7 @@ class DataShellPipeline:
                 duration_seconds=duration,
                 execution_mode="in_memory",
                 metrics=feed_metrics,
+                outbox_path=outbox_path,
             )
 
             # Step 7: Telemetry & Prometheus Metric Recording
@@ -482,7 +828,8 @@ class DataShellPipeline:
                 ledger=ledger,
                 outcome=outcome,
                 audit_artifact_path=str(saved_audit),
-                audit_certificate=audit_cert
+                audit_certificate=audit_cert,
+                ledger_status=ledger_status,
             )
 
         except Exception as e:
@@ -605,21 +952,43 @@ class DataShellPipeline:
                 final_target = Path(outcome.target_path)
                 final_run_artifact = Path(outcome.run_artifact_path)
                 recover_publication(final_target)
+                outbox_path = pending_outbox_path(audit_dest, run_id)
                 transaction_root = _common_transaction_root([final_target, final_run_artifact, audit_dest])
-                publish_transactionally(
-                    [
+                _publish_with_pending_outbox(
+                    pairs=[
                         (Path(outcome.staged_run_artifact_path), final_run_artifact),
                         (staged_audit, audit_dest),
                         (Path(outcome.staged_target_path), final_target),
                     ],
                     run_id=run_id,
                     transaction_root=transaction_root,
+                    generation_pointer={
+                        "tenant_id": self.tenant_id,
+                        "contract_name": contract_name,
+                        "contract_version": self.contract.metadata.version,
+                        "audit_path": str(audit_dest),
+                        "lineage_path": str(final_run_artifact),
+                    },
+                    outbox_path=outbox_path,
+                    payload=self._ledger_payload(
+                        run_id=run_id,
+                        contract_name=contract_name,
+                        ledger=ledger,
+                        outcome=outcome,
+                        audit_cert=audit_cert,
+                        audit_artifact_path=str(audit_dest),
+                        source_path=None,
+                        duration_seconds=duration,
+                        execution_mode="in_memory_records",
+                        metrics=feed_metrics,
+                    ),
                 )
                 saved_audit = audit_dest
             else:
                 saved_audit = ArtifactGenerator.save_audit_file(audit_cert, audit_dest)
+                outbox_path = None
 
-            self._record_run_outcome(
+            ledger_status = self._record_run_outcome(
                 run_id=run_id,
                 contract_name=contract_name,
                 ledger=ledger,
@@ -630,6 +999,7 @@ class DataShellPipeline:
                 duration_seconds=duration,
                 execution_mode="in_memory_records",
                 metrics=feed_metrics,
+                outbox_path=outbox_path,
             )
 
             return PipelineResult(
@@ -639,7 +1009,8 @@ class DataShellPipeline:
                 ledger=ledger,
                 outcome=outcome,
                 audit_artifact_path=str(saved_audit),
-                audit_certificate=audit_cert
+                audit_certificate=audit_cert,
+                ledger_status=ledger_status,
             )
         except Exception as e:
             FOOTING_ERRORS_TOTAL.inc()
@@ -918,21 +1289,43 @@ class DataShellPipeline:
                 ArtifactGenerator.save_audit_file(audit_cert, staged_audit)
                 final_target = Path(outcome.target_path)
                 final_run_artifact = Path(outcome.run_artifact_path)
+                outbox_path = pending_outbox_path(audit_dest, run_id)
                 transaction_root = _common_transaction_root([final_target, final_run_artifact, audit_dest])
-                publish_transactionally(
-                    [
+                _publish_with_pending_outbox(
+                    pairs=[
                         (staged_run_artifact, final_run_artifact),
                         (staged_audit, audit_dest),
                         (staged_target, final_target),
                     ],
                     run_id=run_id,
                     transaction_root=transaction_root,
+                    generation_pointer={
+                        "tenant_id": self.tenant_id,
+                        "contract_name": contract_name,
+                        "contract_version": self.contract.metadata.version,
+                        "audit_path": str(audit_dest),
+                        "lineage_path": str(final_run_artifact),
+                    },
+                    outbox_path=outbox_path,
+                    payload=self._ledger_payload(
+                        run_id=run_id,
+                        contract_name=contract_name,
+                        ledger=ledger,
+                        outcome=outcome,
+                        audit_cert=audit_cert,
+                        audit_artifact_path=str(audit_dest),
+                        source_path=source_path,
+                        duration_seconds=duration,
+                        execution_mode="out_of_core_streaming",
+                        metrics=feed_metrics,
+                    ),
                 )
                 saved_audit = audit_dest
             else:
                 saved_audit = ArtifactGenerator.save_audit_file(audit_cert, audit_dest)
+                outbox_path = None
 
-            self._record_run_outcome(
+            ledger_status = self._record_run_outcome(
                 run_id=run_id,
                 contract_name=contract_name,
                 ledger=ledger,
@@ -943,6 +1336,7 @@ class DataShellPipeline:
                 duration_seconds=duration,
                 execution_mode="out_of_core_streaming",
                 metrics=feed_metrics,
+                outbox_path=outbox_path,
             )
 
             # Telemetry & Prometheus Metric Recording
@@ -971,7 +1365,8 @@ class DataShellPipeline:
                 ledger=ledger,
                 outcome=outcome,
                 audit_artifact_path=str(saved_audit),
-                audit_certificate=audit_cert
+                audit_certificate=audit_cert,
+                ledger_status=ledger_status,
             )
 
         except Exception as e:
