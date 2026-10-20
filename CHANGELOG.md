@@ -28,17 +28,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/PRODUCTION_READINESS.md`, `docs/product-validation/`, and a Colab notebook that
   do not exist; all links now resolve to the real `docs/production/*` runbook, checklist,
   verification report, configuration reference, and `docs/archive/PRODUCT_VALIDATION.md`.
+- **PUB-001 — the generation pointer was write-only, and recovery never repaired it.** The
+  pointer is the single reader-visible commit point of a publication, but no production
+  reader resolved it and `_recover_locked` ignored it: a crash between the artifact
+  renames and the pointer swap left the pointer naming the *previous* generation while
+  the files already held the new one. Recovery now rewrites the pointer from the
+  durable journal's `run_id` when the journal is in the `committed` state, and
+  `datashell verify` reports whether the certificate is the currently committed
+  generation (`this certificate: yes|no`).
+- **LEDGER-001 — replay duplicated quarantine records.** `quarantine_index` had no unique
+  identity and `record_quarantine` used a plain `INSERT`, so replaying a pending ledger
+  entry duplicated forensic rows. The table now has a unique identity on
+  `(tenant_id, run_id, kind, artifact_path)`; a migration collapses legacy duplicates
+  before adding the constraint.
+- **LEDGER-001 — a run could be marked `COMMITTED` with incomplete accounting.** The run
+  row, its quarantine index rows, and its usage meter were three separate writes. They
+  are now written in a single SQLite transaction (`BoundaryLedger.apply_run_outcome`),
+  so a failure can never leave a committed run without its usage basis.
+- **LEDGER-001 — a failed publication could be replayed as a successful delivery.** The
+  pending outbox is written *before* publication, so an outbox outliving a failed
+  publication described artifacts that were never published. Replay now verifies the
+  run's own artifacts exist before committing it; a record whose artifacts are absent is
+  skipped, left for operator review, and logged at ERROR.
+- **Reconciliation failures are no longer silently swallowed.** Every skipped pending
+  entry is logged at ERROR, and startup recovery reports `skipped` and `journal_errors`
+  so unreconciled state is observable instead of invisible.
+- **The HTTP certificate endpoint now reports the committed generation.** Only the CLI
+  verifier applied the generation contract; the API left an API consumer unable to tell
+  a current certificate from a superseded one. Both surfaces now share one
+  implementation (`datashell.core.commit.committed_generation_status`), so they cannot
+  drift apart, and a regression test asserts they agree.
+- **A failed publication no longer leaves a pending ledger record.** The pending record
+  is written before publication so a crash between publication and the ledger write
+  stays replayable; if publication itself fails, the record is removed, because nothing
+  was published and a lingering record would make every later recovery re-report a
+  delivery that never happened.
+- **Pending ledger records are now per-run.** The record name includes the `run_id`, so
+  two runs pointed at the same audit certificate path cannot overwrite each other's
+  payload. The legacy naming is still produced and still discovered, so records written
+  by earlier versions recover normally.
+- **Unreconciled state is alertable, not log-only.** The startup recovery path exports
+  `datashell_pending_ledger_entries`, `datashell_publication_recovery_errors`, and
+  `datashell_publication_recovery_journals`, and `deploy/prometheus-alerts.yaml` gains
+  the matching `DataShellPendingLedgerEntries` and `DataShellPublicationRecoveryErrors`
+  rules with runbook links.
+- **The volumetric benchmark could not run.** It wrote to a relative `./output` that no
+  longer resolved under a configured storage root and aborted with `ValueError`. It now
+  uses the configured output/audit directories.
+- **The API benchmark measured the wrong thing.** It offered concurrency 8 against the
+  configured limit of 2, so 48/50 requests were rejected with HTTP 503 capacity
+  rejections. It now caps offered concurrency to the configured limit, retries capacity
+  rejections with backoff, reports them separately, and fails if any request does not
+  succeed.
 
 ### Added
 - **`.env.example`** with placeholders only: every supported environment variable,
   secret-generation guidance, and production requirements. The published placeholder
   values are rejected by the production secret gate.
-- **Regression tests** (`tests/test_cli_verify_roundtrip.py`): cross-process
-  run→verify continuity, per-workspace dev-secret persistence (0600, env-override
-  precedence), production rejection of the published placeholders, and security-header
-  assertions for both HTTP surfaces.
-
-### Added
+- **Publication-coherence and ledger-durability regression suites**
+  (`tests/test_publication_coherence.py`, `tests/test_ledger_outbox.py`): pointer
+  repair on recovery, the reader contract, serial publication convergence, pending
+  ledger state, idempotent replay, quarantine de-duplication, legacy-row migration,
+  and refusal to commit an unpublished run.
+- **Large-file capacity probe** (`benchmarks/large_file_capacity_test.py`): measures
+  the out-of-core streaming path against a target file size and reports throughput,
+  peak RSS, and storage growth, failing if the run does not foot to zero.
+- **Backup/restore drill** (`scripts/backup_restore_drill.py`): executes real runs,
+  backs up, restores into an isolated directory, re-verifies the restored certificates
+  against the restored artifacts, and reports measured recovery duration.
+- **Production documentation**: `docs/production/RELEASE_VALIDATION_PACKAGE.md`
+  (index and release-gate matrix), `docs/production/DEPLOYMENT_VERIFICATION.md`
+  (executable deployment verification runbook), `docs/production/BENCHMARK_PROCEDURE.md`
+  (procedure plus measured results), `docs/production/BACKUP_RESTORE_DRILL.md` (drill
+  record and target drill), `docs/production/SECURITY_REVIEW_PACKAGE.md` (review
+  package for an independent reviewer), `docs/production/INCIDENT_RESPONSE.md`
+  (incident runbooks), `docs/production/GENERATION_CONTRACT.md` (the commit point and
+  the reader contract), and `docs/production/RESIDUAL_RISK_REGISTER.md`.
+- **Alert-signal verification** (`scripts/alert_signal_test.py`): triggers each
+  documented alert condition and proves the corresponding metric moves, so the
+  alert rules are checked against real signals rather than only being present.
+- **Cross-process certificate verification regression suite**
+  (`tests/test_cli_verify_roundtrip.py`): run→verify continuity, per-workspace
+  dev-secret persistence (0600, env-override precedence), production rejection of the
+  published placeholders, and security-header assertions for both HTTP surfaces.
+- **Release-validation package finalisation.** `docs/production/RELEASE_VALIDATION_PACKAGE.md`
+  now carries a § "Local verification record" with the exact interpreter, OS, SQLite
+  version, import path, and the 17 commands behind every `LOCAL-VERIFIED` gate row,
+  together with an explicit statement of what the local run does *not* evidence.
+  `docs/production/DEPLOYMENT_VERIFICATION.md` gains a consolidated 19-step
+  target-host session checklist (action, command, expected result, evidence to
+  retain) and 14 numbered **stop conditions** that abort the session, so the
+  authorised operator session is executable without re-deriving the order.
+- **Residual-risk register closure entries.** RR-F08 (reader-contract asymmetry
+  between the CLI and the API certificate endpoint), RR-F09 (two runs sharing an
+  audit path overwriting each other's pending ledger record), and RR-F10 (a failed
+  publication leaving a pending record describing a delivery that never happened)
+  are recorded with their fix and their regression test.
+- **The test-count badge now matches the suite.** The README badge claimed 445
+  passing tests; the suite contains 466. The badge and the quick-start section
+  were corrected, and the count is now stated as measured rather than estimated.
 - **Verifiable data delivery & settlement**: versioned commercial contracts (`datashell contract validate|create|show|versions`), a deterministic exact-arithmetic settlement engine (integer minor units, single `ROUND_HALF_UP` stage, tiers, caps, overflow refusal, no binary floats), contractual acceptance verdicts with machine-readable reason codes, and settlement statements bound to exactly one immutable contract version. New CLI surface `datashell settlement calculate|show|list|explain|verify|invoice-preview|invoice-export|dispute-open|dispute-resolve|billing-preview` with a dedicated refusal exit code `4`.
 - **Signed settlement receipts**: a versioned extension of the audit-certificate signature envelope binding the delivery-certificate digest, contract id/version/digest, and the full calculation. Ed25519 when provisioned (third-party verifiable); HMAC-SHA256 otherwise, never mislabelled as third-party verifiable. Tampering with any settlement-critical field fails verification.
 - **Durable settlement ledger**: `settlements`, `settlement_events` (append-only lifecycle transitions), `disputes`, `billing_instructions`, and `contract_versions` tables extending the boundary-ledger SQLite database, with tenant scoping, deterministic statement IDs, and uniqueness constraints backing idempotency and duplicate-prevention guarantees.

@@ -6,6 +6,14 @@
 |---|---|
 | [production/CONFIGURATION_REFERENCE.md](production/CONFIGURATION_REFERENCE.md) | **Single source of truth** for all environment variables, CLI options, API endpoints, roles, capabilities, and certificate fields |
 | [production/OPERATIONS_RUNBOOK.md](production/OPERATIONS_RUNBOOK.md) | Startup, health checks, backup, restore, recovery, monitoring, incident response, rollback |
+| [production/DEPLOYMENT_VERIFICATION.md](production/DEPLOYMENT_VERIFICATION.md) | Executable procedure to verify a deployment in the target environment |
+| [production/RELEASE_VALIDATION_PACKAGE.md](production/RELEASE_VALIDATION_PACKAGE.md) | Index and release-gate matrix for target-host qualification |
+| [production/GENERATION_CONTRACT.md](production/GENERATION_CONTRACT.md) | The publication commit point, the reader contract, and what is explicitly **not** claimed |
+| [production/INCIDENT_RESPONSE.md](production/INCIDENT_RESPONSE.md) | Incident runbooks: publication failure, unreconciled ledger, DB outage, disk exhaustion, tampering, credential compromise, tenant isolation, failed deployment |
+| [production/BENCHMARK_PROCEDURE.md](production/BENCHMARK_PROCEDURE.md) | Reproducible capacity procedure with the measured results |
+| [production/BACKUP_RESTORE_DRILL.md](production/BACKUP_RESTORE_DRILL.md) | Backup/restore drill record, measured recovery time, and the target drill |
+| [production/SECURITY_REVIEW_PACKAGE.md](production/SECURITY_REVIEW_PACKAGE.md) | Package prepared for an independent security review |
+| [production/RESIDUAL_RISK_REGISTER.md](production/RESIDUAL_RISK_REGISTER.md) | Residual risks with severity, consequence, evidence gap, and owner dependency |
 | [production/RELEASE_CHECKLIST.md](production/RELEASE_CHECKLIST.md) | Pilot release gates, acceptance evidence, ownership, remaining blockers |
 | [production/VERIFICATION_REPORT.md](production/VERIFICATION_REPORT.md) | Exact commands, test results, exit codes, and evidence limitations |
 | [THREAT_MODEL.md](THREAT_MODEL.md) | Assets, trust boundaries, threats, and mitigations |

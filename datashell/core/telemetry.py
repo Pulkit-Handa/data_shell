@@ -112,6 +112,23 @@ LEDGER_PERSISTENCE_FAILURES_TOTAL = Counter(
     ["entity"],
 )
 
+# Operational state of the durable pending-ledger recovery path. These are
+# gauges (point-in-time state, not a rate) so an alert can fire on "there are
+# unreconciled entries right now" rather than on a rate that would need a
+# nonzero window to evaluate.
+PENDING_LEDGER_ENTRIES = Gauge(
+    "datashell_pending_ledger_entries",
+    "Published runs whose ledger record is still pending reconciliation",
+)
+PUBLICATION_RECOVERY_ERRORS = Gauge(
+    "datashell_publication_recovery_errors",
+    "Publication journal recovery errors observed at the last startup recovery",
+)
+PUBLICATION_RECOVERY_JOURNALS = Gauge(
+    "datashell_publication_recovery_journals",
+    "Publication journals recovered at the last startup recovery",
+)
+
 
 # ----------------- Structured Logging -----------------
 

@@ -29,7 +29,8 @@ from datashell.server.middleware import RequestBodyLimitMiddleware
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from datashell.core.config import settings
-from datashell.core.commit import recover_pending_publications
+from datashell.core.commit import committed_generation_status
+from datashell.pipeline.runner import recover_pending_publications_and_ledger
 from datashell import __version__
 from datashell.core.security import (
     authenticate_client, require_capability, verify_tenant_access, Capability, APIKeyMetadata,
@@ -41,6 +42,7 @@ from datashell.core.ledger import BoundaryLedger
 from datashell.core.telemetry import (
     telemetry_logger, HTTP_REQUESTS_TOTAL, HTTP_REQUEST_DURATION_SECONDS, HTTP_IN_FLIGHT_REQUESTS,
     STORAGE_FREE_BYTES, STORAGE_TOTAL_BYTES,
+    PENDING_LEDGER_ENTRIES, PUBLICATION_RECOVERY_ERRORS, PUBLICATION_RECOVERY_JOURNALS,
 )
 from datashell.contract.models import DataContract
 from datashell.contract.registry import ContractRegistry
@@ -109,10 +111,31 @@ def seed_default_contracts(reg: ContractRegistry) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Recovery is a startup gate: do not mutate contract state, accept requests,
-    # or report readiness until every interrupted publication has been examined.
+    # or report readiness until every interrupted publication has been examined
+    # AND every published-but-unrecorded run has been reconciled into the ledger.
     # In particular, avoid seeding contracts at module import time because an
     # ASGI server imports the module before it runs the lifespan startup phase.
-    recover_pending_publications(settings.output_dir)
+    recovery = recover_pending_publications_and_ledger(settings.output_dir)
+    # Expose the recovery outcome as metrics so an unreconciled state is
+    # alertable, not only visible in a log line.
+    PUBLICATION_RECOVERY_JOURNALS.set(float(recovery.get("journals", 0) or 0))
+    PUBLICATION_RECOVERY_ERRORS.set(float(recovery.get("journal_errors", 0) or 0))
+    PENDING_LEDGER_ENTRIES.set(float(recovery.get("skipped", 0) or 0))
+    if recovery.get("replayed"):
+        telemetry_logger.info("Reconciled pending ledger entries at startup", **recovery)
+    if recovery.get("skipped"):
+        # Unreconciled ledger entries are a real inconsistency, not a no-op.
+        # They stay durable on disk for operator repair and are surfaced here
+        # so the condition is visible in logs and alerts.
+        telemetry_logger.error(
+            "Unreconciled pending ledger entries remain after startup recovery",
+            **recovery,
+        )
+    if recovery.get("journal_errors"):
+        telemetry_logger.error(
+            "Publication journal recovery reported errors",
+            **recovery,
+        )
     seed_default_contracts(registry)
     # Enforce configured ledger retention at startup. A non-positive retention
     # keeps history forever, so this is a no-op by default.
@@ -490,10 +513,18 @@ def get_run_certificate(
 
     # Recompute and verify signature + all underlying artifacts
     verification_report = ArtifactGenerator.verify_certificate_and_artifacts(cert_data)
-    
+
+    # Report whether this certificate describes the currently committed
+    # generation. The certificate remains valid evidence for its own run, but a
+    # consumer that wants "the current delivery" must resolve the generation
+    # pointer. This is the same contract the CLI verifier applies.
+    generation_status = committed_generation_status(cert_data)
+
     return {
         "certificate": cert_data,
-        "verification": verification_report
+        "verification": verification_report,
+        "committed_generation": generation_status.get("committed_generation"),
+        "is_committed_generation": generation_status.get("is_committed_generation"),
     }
 
 

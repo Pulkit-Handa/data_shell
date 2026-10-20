@@ -523,6 +523,7 @@ def command_verify(args: argparse.Namespace) -> int:
         return 1
 
     report = ArtifactGenerator.verify_certificate_and_artifacts(cert_data)
+    report.update(_committed_generation_check(cert_data))
     if args.json:
         print(json.dumps(report, indent=2))
     else:
@@ -535,8 +536,24 @@ def command_verify(args: argparse.Namespace) -> int:
         for name, detail in (report.get("artifact_details") or {}).items():
             detail_status = detail.get("status") if isinstance(detail, dict) else detail
             print(f"      - {name}: {detail_status}")
+        committed = report.get("committed_generation")
+        if committed is not None:
+            same = report.get("is_committed_generation")
+            note = "yes" if same else "no (a newer generation is committed)"
+            print(f"    committed generation: {committed} (this certificate: {note})")
 
     return 0 if report.get("status") == "AUTHENTIC_AND_UNMODIFIED" else 3
+
+
+def _committed_generation_check(cert_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Report whether the certificate is the currently committed generation.
+
+    Delegates to the shared reader contract in ``datashell.core.commit`` so the
+    CLI verifier and the HTTP certificate endpoint cannot drift apart.
+    """
+    from datashell.core.commit import committed_generation_status
+
+    return committed_generation_status(cert_data)
 
 
 # --------------------------------------------------------------- commands: ledger

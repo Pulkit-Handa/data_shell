@@ -56,3 +56,36 @@ groups:
         annotations:
           summary: Data Shell persistent storage is nearly full
           description: Less than 1 GiB of free space remains on the persistent storage filesystem.
+
+      # Durable-history integrity. These two conditions are the ones an
+      # operator must never miss: a published delivery whose ledger record is
+      # not reconciled, and a publication journal that could not be recovered.
+      # They are exposed as gauges by the startup recovery path, so they are
+      # alertable rather than log-only.
+      - alert: DataShellPendingLedgerEntries
+        expr: datashell_pending_ledger_entries > 0
+        for: 5m
+        labels:
+          severity: page
+          service: data-shell
+        annotations:
+          summary: Data Shell has published runs awaiting ledger reconciliation
+          description: >-
+            One or more published deliveries have no complete ledger record.
+            The pending records are durable on disk. Follow the reconciliation
+            repair procedure in docs/production/INCIDENT_RESPONSE.md section 2.
+          runbook_url: docs/production/INCIDENT_RESPONSE.md#2-unreconciled-ledger-entries-published-but-not-recorded
+
+      - alert: DataShellPublicationRecoveryErrors
+        expr: datashell_publication_recovery_errors > 0
+        for: 1m
+        labels:
+          severity: page
+          service: data-shell
+        annotations:
+          summary: Data Shell publication recovery reported errors
+          description: >-
+            Startup recovery could not fully recover a publication journal, so
+            the committed generation is unknown. Follow the interrupted-recovery
+            procedure in docs/production/INCIDENT_RESPONSE.md section 8.
+          runbook_url: docs/production/INCIDENT_RESPONSE.md#8-interrupted-startup-recovery

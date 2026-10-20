@@ -153,21 +153,34 @@ def run_benchmark():
 
     test_scales = [10_000, 100_000, 500_000, 1_000_000]
 
+    # The delivery target and the audit certificate must live under the same
+    # storage root, and in production both must stay under the configured
+    # output directory. Use the configured directories rather than a relative
+    # "./output" so the benchmark measures the deployed layout instead of the
+    # repository working directory.
+    from datashell.core.config import settings
+
+    bench_output_dir = settings.output_dir.resolve() / "benchmarks"
+    bench_audit_dir = settings.audit_dir.resolve() / "benchmarks"
+    bench_output_dir.mkdir(parents=True, exist_ok=True)
+    bench_audit_dir.mkdir(parents=True, exist_ok=True)
+
     print("=" * 75)
     print("      DATA SHELL — VOLUMETRIC & SYSTEMS BENCHMARK SUITE")
     print("=" * 75)
+    print(f"Storage root: {settings.storage_root.resolve()}")
     print(f"{'Scale (Rows)':<14} | {'Duration':<10} | {'Throughput':<16} | {'Delivered':<12} | {'Peak RSS':<10} | {'Footing':<10}")
     print("-" * 75)
 
     for scale in test_scales:
         data_path = generate_synthetic_batch(scale, defect_rate=0.04)
 
-        audit_path = Path(f"./output/audits/benchmark_{scale}_audit.json").resolve()
+        audit_path = bench_audit_dir / f"benchmark_{scale}_audit.json"
         start_time = time.perf_counter()
         with ProcessRSSSampler() as rss_sampler:
             result = pipeline.run_file(
                 source_path=data_path,
-                target_path_override=f"./output/benchmark_{scale}.parquet",
+                target_path_override=str(bench_output_dir / f"benchmark_{scale}.parquet"),
                 audit_output_path=str(audit_path)
             )
         duration = time.perf_counter() - start_time

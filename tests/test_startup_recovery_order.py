@@ -13,14 +13,14 @@ import datashell.server.app as server_app
 def test_publication_recovery_runs_before_contract_seeding(monkeypatch):
     events = []
 
-    def recover(root):
+    def recover_and_reconcile(root=None, ledger=None):
         events.append(("recover", root))
-        return 0
+        return {"journals": 0, "replayed": 0, "skipped": 0}
 
     def seed(registry):
         events.append(("seed", registry))
 
-    monkeypatch.setattr(server_app, "recover_pending_publications", recover)
+    monkeypatch.setattr(server_app, "recover_pending_publications_and_ledger", recover_and_reconcile)
     monkeypatch.setattr(server_app, "seed_default_contracts", seed)
 
     async def scenario():
@@ -34,14 +34,14 @@ def test_publication_recovery_runs_before_contract_seeding(monkeypatch):
 def test_recovery_failure_prevents_contract_seeding_and_readiness(monkeypatch):
     events = []
 
-    def fail_recovery(root):
+    def fail_recovery(root=None, ledger=None):
         events.append("recover")
         raise RuntimeError("journal integrity failure")
 
     def seed(registry):
         events.append("seed")
 
-    monkeypatch.setattr(server_app, "recover_pending_publications", fail_recovery)
+    monkeypatch.setattr(server_app, "recover_pending_publications_and_ledger", fail_recovery)
     monkeypatch.setattr(server_app, "seed_default_contracts", seed)
 
     async def scenario():
