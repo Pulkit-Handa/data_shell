@@ -67,3 +67,4 @@ contracts_registry/
 !requirements.lock
 !requirements-dev.lock
 !requirements-build.lock
+sdks/typescript-client/node_modules/

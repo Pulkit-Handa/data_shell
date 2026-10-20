@@ -65,6 +65,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation with the group name spelled out, and broken plugins are logged
   instead of taking enforcement down.
 
+### Added
+- **Generated client SDKs (via OpenAPI Generator, pinned image).** Both the
+  Python (`urllib3`) and TypeScript (`fetch`) clients under `sdks/` are
+  regenerated deterministically from the CI-synced `docs/openapi.yaml` with
+  the pinned `openapitools/openapi-generator-cli:v7.12.0` image
+  (`scripts/generate_sdks.sh` — Docker is the only prerequisite; the script
+  fails with an explicit message when the schema or the generator is
+  missing). The Python client carries `py.typed`; the TypeScript client is
+  validated to compile clean with `tsc --noEmit`. `docs/SDK.md` documents
+  regeneration, install, and the versioning truth table: the clients track
+  the API contract, so schema changes, SDK diffs, and the regenerated
+  artifacts land together.
+
 ### Changed
 - **Distribution name `data-shell` → `datashell`.** The import package and the
   pip distribution now share one name, so `pip install datashell` is all a new
