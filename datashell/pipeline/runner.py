@@ -672,7 +672,7 @@ class DataShellPipeline:
                 footing_matched=False,
                 rejection_reason=f"{type(error).__name__}: {error}"[:1000],
             )
-        except Exception:  # noqa: BLE001 - bookkeeping must never mask the original error
+        except Exception:  # noqa: BLE001 - bookkeeping must never mask the original error  # nosec B110 — bookkeeping cleanup; real status surfaces in the ledger record above
             pass
 
     def run_file(

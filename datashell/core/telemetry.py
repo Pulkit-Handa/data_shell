@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -133,30 +134,49 @@ PUBLICATION_RECOVERY_JOURNALS = Gauge(
 # ----------------- Structured Logging -----------------
 
 class StructuredLogger:
-    """Emits production JSON logs with correlation trace IDs."""
-    
-    def __init__(self, name: str = "datashell"):
+    """Emits production JSON logs (default) or operator-friendly lines.
+
+    ``LOG_FORMAT=structured`` (the default) emits one JSON object per line so
+    log shippers get stable fields. ``LOG_FORMAT=pretty`` renders a
+    human-readable line for interactive sessions (``docker logs -f``,
+    local shells): the message first, optional ``key=value`` context after.
+    """
+
+    def __init__(self, name: str = "datashell", log_format: str | None = None) -> None:
+        self.format = (
+            log_format if log_format is not None else os.getenv("LOG_FORMAT", "structured")
+        ).strip().lower()
+        if self.format not in ("structured", "pretty"):
+            raise RuntimeError("LOG_FORMAT must be 'structured' or 'pretty'")
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.INFO)
         if not self.logger.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(logging.Formatter("%(message)s"))
             self.logger.addHandler(handler)
+        self.logger.propagate = False
 
-    def log(self, level: str, message: str, **kwargs: Any) -> None:
+    def _render(self, level: str, message: str, **kwargs: Any) -> str:
+        if self.format == "pretty":
+            context = " ".join(f"{key}={value}" for key, value in kwargs.items())
+            rendered = f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} [{level.upper():<7}] {message}"
+            return rendered if not context else rendered + " — " + context
         payload = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "level": level.upper(),
             "message": message,
-            **kwargs
+            **kwargs,
         }
-        json_line = json.dumps(payload, default=str)
+        return json.dumps(payload, default=str)
+
+    def log(self, level: str, message: str, **kwargs: Any) -> None:
+        line = self._render(level, message, **kwargs)
         if level.upper() == "ERROR":
-            self.logger.error(json_line)
+            self.logger.error(line)
         elif level.upper() == "WARNING":
-            self.logger.warning(json_line)
+            self.logger.warning(line)
         else:
-            self.logger.info(json_line)
+            self.logger.info(line)
 
     def info(self, message: str, **kwargs: Any) -> None:
         self.log("INFO", message, **kwargs)

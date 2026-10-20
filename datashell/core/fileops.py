@@ -80,24 +80,14 @@ PARQUET_CODECS = ("snappy", "zstd", "gzip", "lz4", "brotli", "uncompressed")
 ParquetCodec = Literal["lz4", "snappy", "gzip", "brotli", "zstd"]
 
 
-def polars_parquet_compression(configured: str | None = None) -> Literal[
-    "lz4", "uncompressed", "snappy", "gzip", "brotli", "zstd"
-]:
-    """Polars-facing spelling of the delivered-artifact codec.
-
-    Polars interprets ``compression=None`` as "use its own default (zstd)",
-    not as "no compression"; the explicit ``"uncompressed"`` string is the only
-    way to disable compression in a ``write_parquet`` call.
-    """
-    codec = parquet_compression_codec(configured)
-    return cast(Literal["lz4", "uncompressed", "snappy", "gzip", "brotli", "zstd"], codec or "uncompressed")
+def parquet_compression_codec(configured: str | None = None) -> ParquetCodec | None:
     """Normalize ``DATASHELL_DELIVERY_COMPRESSION`` to what Polars/pyarrow accept.
 
-    ``None`` means "no compression" for both ``df.write_parquet`` and
-    ``pq.ParquetWriter``. Reads the live settings value when ``configured`` is
-    omitted, so tests and reconfiguration take effect without a restart. The
-    settings import is deferred because the config module is not always
-    importable at interpreter startup order for all entry points.
+    ``None`` means "no compression" for ``pq.ParquetWriter``. Reads the live
+    settings value when ``configured`` is omitted, so tests and
+    reconfiguration take effect without a restart. The settings import is
+    deferred because the config module is not always importable at interpreter
+    startup order for all entry points.
     """
     value = configured
     if value is None:
@@ -111,4 +101,17 @@ def polars_parquet_compression(configured: str | None = None) -> Literal[
     if value in ("uncompressed", "none"):
         return None
     return cast(ParquetCodec, value)
+
+
+def polars_parquet_compression(configured: str | None = None) -> Literal[
+    "lz4", "uncompressed", "snappy", "gzip", "brotli", "zstd"
+]:
+    """Polars-facing spelling of the delivered-artifact codec.
+
+    Polars interprets ``compression=None`` as "use its own default (zstd)",
+    not as "no compression"; the explicit ``"uncompressed"`` string is the only
+    way to disable compression in a ``write_parquet`` call.
+    """
+    codec = parquet_compression_codec(configured)
+    return codec or "uncompressed"
 

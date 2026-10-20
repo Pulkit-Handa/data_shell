@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datashell-airflow"
-version = "1.0.2"
+version = "2.0.0"
 description = "Apache Airflow provider that gates DAGs on Data Shell boundary enforcement."
 readme = "README.md"
 requires-python = ">=3.9"

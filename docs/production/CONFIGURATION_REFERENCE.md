@@ -16,6 +16,9 @@ This document is the **authoritative source** for all Data Shell configuration. 
 |---|---|---|
 | `ENVIRONMENT` | `development` | Environment mode. Production values: `production`, `prod`, `live`. Development values: `development`, `dev`, `local`. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity. |
+| `LOG_FORMAT` | `structured` | Log line format: `structured` (one JSON object per line for log shippers) or `pretty` (`docker logs -f`-friendly human lines with `key=value` context). Must be one of the two. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | *(unset)* | Standard OpenTelemetry endpoint. When set **and** the `datashell[otel]` extra is installed, every gateway request is traced (server spans named after the resolved route, status attributes, batched OTLP/gRPC export). Without the env or the extra, tracing is a no-op — the decision lives in configuration, not code. |
+| `DATASHELL_OTEL_SERVICE_NAME` | `datashell` | `service.name` resource attribute for exported traces (only meaningful with `OTEL_EXPORTER_OTLP_ENDPOINT`). |
 | `DATASHELL_STORAGE_ROOT` | `.` | Root directory for all persistent storage. All other paths derive from this. |
 | `DATASHELL_DATA_DIR` | `<storage_root>/data` | Directory for uploaded source files. |
 | `DATASHELL_CONTRACTS_DIR` | `<storage_root>/contracts_registry` | Directory for contract registry files. |
@@ -61,6 +64,9 @@ This document is the **authoritative source** for all Data Shell configuration. 
 | `RATE_LIMIT_REQUESTS_PER_MINUTE` | `120` | Token bucket rate limit per API key. |
 | `STREAM_CHUNK_ROWS` | `100000` | Rows per micro-batch in streaming mode. Must be >= 1. |
 | `STREAM_AUTO_THRESHOLD_BYTES` | `67108864` (64 MiB) | Files at or above this size use streaming automatically. |
+| `DATASHELL_INGEST_MODE` | `auto` | Ingest backend policy: `auto` (promote by size), `memory` (always in-memory), `stream` (always out-of-core). Explicit CLI `--streaming`/`--no-streaming` or API request field beats this. |
+| `DATASHELL_DELIVERY_COMPRESSION` | `zstd` | Parquet codec for delivered targets and quarantine snapshots (`snappy`, `zstd`, `gzip`, `lz4`, `brotli`, `uncompressed`). One setting covers both in-memory (Polars) and streaming (pyarrow) writers. |
+| `DATASHELL_DUCKDB_THREADS` | `4` | DuckDB worker threads for batch-rule (SQL) evaluation. Must be >= 1; scale to node cores on dedicated batch-SQL nodes. |
 
 ### 1.5 Drift Configuration
 

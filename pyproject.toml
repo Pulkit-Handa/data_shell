@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datashell"
-version = "1.0.2"
+version = "2.0.0"
 description = "Contract-driven boundary enforcement engine: Bad data never lands, and never leaves."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,6 +40,13 @@ duckdb = [
 # client, so this extra is only what gives you a runnable scheduler).
 airflow = [
     "apache-airflow>=2.7.0,<3.1.0"
+]
+# OpenTelemetry tracing bridge (no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is
+# set AND this extra is installed; see datashell/core/observability.py).
+# gRPC OTLP exporter is the standard default protocol.
+otel = [
+    "opentelemetry-sdk>=1.24.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.24.0,<2.0.0"
 ]
 dev = [
     "pytest>=8.0.0,<10.0.0",
@@ -81,6 +88,7 @@ exclude = [
     "dist",
     "output",
     "web",
+    "sdks",
 ]
 
 [tool.ruff.lint]
@@ -109,6 +117,7 @@ extend-immutable-calls = [
     # Cosmetic security (our own layer): returns a closure built from module-level
     # constants (an enum); routes declare it once per definition and it is a shared
     # per-route constant, exactly like the FastAPI primitives above.
+    "datashell.core.security.require_scope",
     "datashell.core.security.require_capability",
     "datashell.core.security.authenticate_client",
 ]
@@ -145,4 +154,4 @@ include = ["datashell*"]
 exclude = ["tests*", "benchmarks*", "examples*", "integrations*"]
 
 [tool.setuptools.package-data]
-datashell = ["py.typed"]
+datashell = ["py.typed", "server/static/*.html"]

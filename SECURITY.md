@@ -1,13 +1,28 @@
 # Security Policy
 
+## Static security gates
+
+Two automated gates run in CI on every push (see `.github/workflows/ci.yml`):
+
+* **bandit** — static security lint with a **zero-findings policy**. Every
+  suppression is an inline `# nosec BXXX` comment with a written reason,
+  reviewer-visible in the diff. The only suppressed families are reviewed SQL
+  builders (B608) that bind values through the driver (`?` placeholders),
+  validate identifiers through a quote/enum gate, and are covered by exact
+  compile/behavior tests; and benign identifier labels (`B105`), cleanup
+  bookkeeping (`B110`), and a tolerant point-in-time parser (`B112`).
+* **pip-audit** — audits `requirements.lock`, `requirements-dev.lock`, and the
+  generated Python client's `sdks/python-client/requirements.txt` against the
+  OSV database. Any known GHSA/OSV vulnerability fails the build.
+
 ## Supported Versions
 
 The following versions of Data Shell receive security updates:
 
 | Version | Supported |
 | --- | --- |
-| 1.0.2 | ✅ Supported |
-| < 1.0.2 | ❌ No longer supported |
+| 2.0.0 | ✅ Supported |
+| < 2.0.0 | ❌ No longer supported |
 
 ## Reporting a Vulnerability
 

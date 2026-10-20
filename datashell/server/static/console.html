@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Shell — Enterprise Perimeter Gateway</title>
+<style>
+  :root {
+    --bg:#0B0E14; --card:#151922; --inner:#1C2230; --paper:#F1F3F6;
+    --stain:#C1247E; --stain-hover:#E24C9F; --mute:#8A97A8;
+    --rule:#2C3543; --good:#34D399; --warn:#FBBF24; --bad:#F87171; --info:#60A5FA;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--paper); font-family:'Segoe UI',system-ui,-apple-system,sans-serif; }
+  code,pre,.mono { font-family:'Cascadia Code','IBM Plex Mono',ui-monospace,monospace; }
+  header { display:flex; justify-content:space-between; align-items:center; padding:18px 28px; border-bottom:1px solid var(--rule); }
+  .logo { font-weight:800; letter-spacing:2px; font-size:15px; }
+  .badge { font-size:10px; padding:3px 9px; border-radius:10px; margin-left:8px; vertical-align:middle; letter-spacing:1px; }
+  .badge-live { background:rgba(52,211,153,.12); color:var(--good); border:1px solid rgba(52,211,153,.4); }
+  .badge-crypto { background:rgba(96,165,250,.12); color:var(--info); border:1px solid rgba(96,165,250,.4); }
+  .container { max-width:1280px; margin:0 auto; padding:26px 28px 60px; }
+  .hero { font-size:30px; font-weight:800; letter-spacing:-.4px; margin:6px 0 6px; }
+  .hero-sub { color:var(--mute); font-size:13.5px; max-width:720px; line-height:1.55; }
+  .conn { display:flex; gap:10px; align-items:center; margin:22px 0 8px; }
+  .conn input { flex:0 1 460px; background:var(--inner); border:1px solid var(--rule); color:var(--paper);
+    padding:10px 12px; border-radius:8px; font-family:ui-monospace,monospace; font-size:12px; }
+  button { background:var(--stain); border:none; color:#fff; font-weight:700; padding:10px 16px;
+    border-radius:8px; cursor:pointer; letter-spacing:.6px; font-size:12px; }
+  button:hover { background:var(--stain-hover); }
+  button:disabled { opacity:.45; cursor:default; }
+  .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-top:18px; }
+  @media (max-width:980px){ .grid { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--rule); border-radius:14px; padding:18px; }
+  .card h2 { font-size:12px; letter-spacing:1.6px; color:var(--mute); font-weight:600; margin-bottom:12px; }
+  label { display:block; font-size:11px; color:var(--mute); margin:10px 0 4px; letter-spacing:.8px; }
+  select,input[type=text] { width:100%; background:var(--inner); border:1px solid var(--rule); color:var(--paper);
+    padding:9px 10px; border-radius:8px; font-size:13px; }
+  .drop { border:1.5px dashed var(--rule); border-radius:10px; padding:16px; text-align:center; color:var(--mute);
+    font-size:12px; margin-top:10px; }
+  .drop input { display:none; }
+  .drop.has { border-color:var(--stain); color:var(--paper); }
+  .kpi { display:flex; gap:12px; flex-wrap:wrap; margin-top:8px; }
+  .kpi div { background:var(--inner); border:1px solid var(--rule); border-radius:10px; padding:8px 14px; min-width:110px; }
+  .kpi b { display:block; font-size:17px; font-family:ui-monospace,monospace; }
+  .kpi span { font-size:10px; color:var(--mute); letter-spacing:1px; }
+  table { width:100%; border-collapse:collapse; font-size:11.5px; margin-top:8px; font-family:ui-monospace,monospace; }
+  th { text-align:left; color:var(--mute); font-weight:600; border-bottom:1px solid var(--rule); padding:6px 6px; }
+  td { border-bottom:1px solid rgba(44,53,67,.45); padding:6px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:170px; }
+  .chip { font-size:9.5px; padding:2px 8px; border-radius:9px; letter-spacing:.5px; }
+  .st-LOADED,.st-ACCEPTED,.st-APPROVED { background:rgba(52,211,153,.13); color:var(--good); }
+  .st-REJECT_RUN,.st-DISPUTED,.st-FAILED { background:rgba(248,113,113,.13); color:var(--bad); }
+  .st-HELD,.st-PENDING_REVIEW,.st-CONTESTED { background:rgba(251,191,36,.12); color:var(--warn); }
+  .st-anything { background:rgba(96,165,250,.12); color:var(--info); }
+  pre.out { background:var(--inner); border:1px solid var(--rule); border-radius:10px; padding:12px;
+    font-size:11px; line-height:1.5; overflow:auto; max-height:320px; white-space:pre; margin-top:10px; }
+  .err { color:var(--bad); font-size:12px; margin-top:8px; }
+  .muted { color:var(--mute); font-size:12px; }
+  .row { display:flex; gap:8px; align-items:center; margin-top:12px; }
+  .metrics-list { font-family:ui-monospace,monospace; font-size:11.5px; line-height:1.7; }
+  .metrics-list b { color:var(--paper); font-weight:600; }
+  .actions { margin-left:auto; display:flex; gap:8px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><span style="color:var(--stain)">●</span> DATA SHELL
+    <span class="badge badge-live">ENTERPRISE CONSOLE</span>
+    <span class="badge badge-crypto">HMAC-SHA256 SIGNED</span>
+  </div>
+  <div class="muted">Zero-Deficit Boundary Gateway</div>
+</header>
+
+<div class="container">
+  <div class="hero">Bad data never lands, and never leaves.</div>
+  <div class="hero-sub">This console renders the live gateway state through the same authenticated
+    API every integration uses: the run ledger, Prometheus metrics, the settlement portfolio, and the
+    interactive enforcement gate. Nothing is mocked — supply an API key with the capabilities you need.</div>
+
+  <div class="conn">
+    <input id="apiKey" type="password" placeholder="X-API-Key (dm_live_… from your administrator)" autocomplete="off">
+    <button id="connect">CONNECT</button>
+    <button id="refresh" class="actions" style="margin-left:0" disabled>REFRESH</button>
+  </div>
+  <div class="muted" id="connState">Disconnected: enter an API key and connect.</div>
+
+  <div class="grid">
+    <!-- Enforcement gate -->
+    <div class="card">
+      <h2>ENFORCEMENT GATE</h2>
+      <form id="enforceForm">
+        <label>DATA CONTRACT</label>
+        <select id="contractSelect"><option value="">— connect to load contracts —</option></select>
+        <div class="drop" id="drop">
+          Drop dataset here or click to choose a file (.parquet · .csv · .jsonl · .ndjson)
+          <input type="file" id="fileInput" accept=".parquet,.csv,.jsonl,.ndjson">
+          <div id="fileName" style="margin-top:6px;font-family:ui-monospace,monospace;color:var(--paper)"></div>
+        </div>
+        <label><input type="checkbox" id="streaming" style="accent-color:var(--stain)"> Force out-of-core streaming</label>
+        <div class="row">
+          <button type="submit" id="enforceBtn" disabled>ENFORCE BOUNDARY</button>
+          <span class="muted">POST /api/v1/enforce</span>
+        </div>
+      </form>
+      <pre class="out" id="enforceOut" hidden></pre>
+      <div class="err" id="enforceErr" hidden></div>
+    </div>
+
+    <!-- Run ledger -->
+    <div class="card">
+      <h2>RUN LEDGER — GET /api/v1/runs</h2>
+      <div class="kpi" id="ledgerKpi"></div>
+      <table id="runsTable" hidden>
+        <thead><tr><th>RUN ID</th><th>CONTRACT</th><th>STATUS</th><th>READ</th><th>DELIVERED</th><th>HELD</th><th>REFUSED</th><th>MODE</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="muted" id="runsEmpty">Connect to load the newest forensic run records.</div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="card">
+      <h2>BOUNDARY METRICS — GET /metrics</h2>
+      <div class="kpi" id="metricKpi"></div>
+      <div class="metrics-list" id="metricList">Connect with a <code>metrics:read</code> credential to scrape Prometheus.</div>
+    </div>
+
+    <!-- Settlement portfolio -->
+    <div class="card">
+      <h2>SETTLEMENT PORTFOLIO — GET /api/v1/settlement/preview</h2>
+      <div class="kpi" id="settleKpi"></div>
+      <div id="settleStatus" class="metrics-list" style="margin-top:10px"></div>
+      <table id="settleTable" hidden>
+        <thead><tr><th>SETTLEMENT</th><th>CONTRACT</th><th>Currency</th><th>GROSS</th><th>STATUS</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="muted" id="settleEmpty">Connect with a <code>settlements:read</code> credential to load the portfolio.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let apiKey = "";
+
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c])); }
+
+async function api(path, opts = {}) {
+  const headers = opts.headers || {};
+  if (apiKey) headers["X-API-Key"] = apiKey;
+  const resp = await fetch(path, { ...opts, headers });
+  const text = await resp.text();
+  let data; try { data = JSON.parse(text); } catch { data = text; }
+  if (!resp.ok) {
+    const detail = data && data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : text.slice(0, 300);
+    throw new Error(resp.status + (detail ? " — " + detail : ""));
+  }
+  return data;
+}
+
+function chip(status) {
+  const known = ["LOADED","REJECT_RUN","ACCEPTED","DISPUTED","APPROVED","HELD","PENDING_REVIEW","CONTESTED","FAILED","READY_FOR_BILLING"];
+  const key = known.includes(status) ? status : "anything";
+  return `<span class="chip st-${key}">${esc(status)}</span>`;
+}
+
+/* ---- Enforcement gate ---- */
+$("drop").addEventListener("click", () => $("fileInput").click());
+$("fileInput").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  $("drop").classList.toggle("has", !!file);
+  $("fileName").textContent = file ? `${file.name} — ${(file.size / 1048576).toFixed(2)} MB` : "";
+});
+$("enforceForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const out = $("enforceOut"), err = $("enforceErr");
+  out.hidden = true; err.hidden = true;
+  const contract = $("contractSelect").value;
+  const file = $("fileInput").files[0];
+  if (!contract || !file) {
+    err.textContent = "Choose a contract and a dataset file first."; err.hidden = false; return;
+  }
+  const form = new FormData();
+  form.append("contract_name", contract);
+  form.append("file", file);
+  form.append("streaming", $("streaming").checked ? "true" : "false");
+  const btn = $("enforceBtn"); btn.disabled = true; btn.textContent = "ENFORCING…";
+  try {
+    const data = await api("/api/v1/enforce", { method: "POST", body: form });
+    const r = data.reconciliation;
+    const line = "─".repeat(58);
+    out.textContent =
+      "┌" + line + "┐\n" +
+      `│ RUN ID          ${data.run_id.padEnd(38)} │\n` +
+      `│ STATUS          ${data.status.padEnd(38)} │\n` +
+      `│ EXECUTION MODE  ${data.execution_mode.padEnd(38)} │\n` +
+      "├" + line + "┤\n" +
+      `│ Rows read                          ${r.rows_read.toLocaleString().padStart(15)} │\n` +
+      `│ Refused at the door (structural)  -${r.refused_structural.toLocaleString().padStart(15)} │\n` +
+      `│ Held by semantic quality rules    -${r.held_quality.toLocaleString().padStart(15)} │\n` +
+      `│ Delivered                          ${r.rows_delivered.toLocaleString().padStart(15)} │\n` +
+      `│ Unaccounted for                    ${r.unaccounted_for.toLocaleString().padStart(15)} │\n` +
+      `│ Footing matched                    ${String(r.footing_matched).padStart(15)} │\n` +
+      "└" + line + "┘\n" +
+      `certificate id: ${data.artifacts.audit_certificate_id} · ${data.duration_seconds?.toFixed(3)}s`;
+    out.hidden = false;
+  } catch (ex) {
+    err.textContent = "GATEWAY: " + ex.message; err.hidden = false;
+  } finally {
+    btn.disabled = false; btn.textContent = "ENFORCE BOUNDARY";
+    if (apiKey) loadRuns();
+  }
+});
+
+/* ---- Contracts for the gate selector ---- */
+async function loadContracts() {
+  const data = await api("/api/v1/contracts");
+  const sel = $("contractSelect");
+  sel.innerHTML = "";
+  if (!data.contracts.length) {
+    sel.innerHTML = '<option value="">no contracts visible to this key</option>';
+    return;
+  }
+  for (const c of data.contracts) {
+    const opt = document.createElement("option");
+    opt.value = c.name;
+    opt.textContent = `${c.name} (v${c.version}${c.source === "shared" ? " · shared" : ""})`;
+    sel.appendChild(opt);
+  }
+}
+
+/* ---- Run ledger ---- */
+async function loadRuns() {
+  const data = await api("/api/v1/runs?limit=12");
+  $("ledgerKpi").innerHTML =
+    `<div><b>${(data.total ?? 0).toLocaleString()}</b><span>LEDGER RUNS</span></div>` +
+    `<div><b>${data.runs?.filter(r => r.status === "LOADED").length ?? 0}</b><span>LOADED (PAGE)</span></div>` +
+    `<div><b>${data.runs?.reduce((a, r) => a + (r.rows_delivered || 0), 0).toLocaleString()}</b><span>DELIVERED (PAGE)</span></div>`;
+  const body = $("runsTable").querySelector("tbody");
+  body.innerHTML = (data.runs || []).map(r =>
+    `<tr><td title="${esc(r.run_id)}">${esc(r.run_id)}</td><td title="${esc(r.contract_name)}">${esc(r.contract_name)}</td>` +
+    `<td>${chip(r.status)}</td><td>${(r.rows_read || 0).toLocaleString()}</td>` +
+    `<td>${(r.rows_delivered || 0).toLocaleString()}</td><td>${(r.rows_held || 0).toLocaleString()}</td>` +
+    `<td>${(r.rows_refused || 0).toLocaleString()}</td><td>${esc(r.execution_mode || "")}</td></tr>`).join("");
+  $("runsTable").hidden = !(data.runs || []).length;
+  $("runsEmpty").hidden = !!(data.runs || []).length;
+}
+
+/* ---- Prometheus metrics ---- */
+async function loadMetrics() {
+  const text = await api("/metrics");
+  const samples = new Map();
+  for (const line of text.split("\n")) {
+    if (!line || line.startsWith("#")) continue;
+    const m = line.match(/^(datashell_[a-z_]+)(\{[^}]*\})?\s+([0-9.eE+-]+)$/);
+    if (!m) continue;
+    const [, name, labels, value] = m;
+    if (labels) continue;                       // aggregate label-less totals only
+    samples.set(name, (samples.get(name) || 0) + parseFloat(value));
+  }
+  const pick = (n) => (samples.get(n) ?? 0).toLocaleString();
+  $("metricKpi").innerHTML =
+    `<div><b>${pick("datashell_rows_read_total")}</b><span>ROWS READ</span></div>` +
+    `<div><b>${pick("datashell_rows_delivered_total")}</b><span>ROWS DELIVERED</span></div>` +
+    `<div><b>${pick("datashell_rows_held_total")}</b><span>ROWS HELD</span></div>` +
+    `<div><b>${pick("datashell_rows_refused_total")}</b><span>ROWS REFUSED</span></div>`;
+  const ordered = [
+    "datashell_runs_total", "datashell_footing_errors_total", "datashell_active_runs",
+    "datashell_settlements_calculated_total", "datashell_http_in_flight_requests",
+    "datashell_storage_free_bytes", "datashell_storage_total_bytes",
+  ].filter((n) => samples.has(n));
+  $("metricList").innerHTML = ordered.map((n) =>
+    `<div><b style="display:inline-block;min-width:340px">${esc(n)}</b> ${esc(samples.get(n))}</div>`).join("");
+}
+
+/* ---- Settlement portfolio ---- */
+async function loadSettlements() {
+  const data = await api("/api/v1/settlement/preview?limit=10");
+  const totals = Object.entries(data.totals_by_currency || {});
+  $("settleKpi").innerHTML =
+    `<div><b>${(data.total ?? 0).toLocaleString()}</b><span>SETTLEMENTS</span></div>` +
+    `<div><b>${totals.length}</b><span>CURRENCIES</span></div>` +
+    `<div><b>${Object.keys(data.status_counts || {}).filter(s => s === "READY_FOR_BILLING").length ? "1" : "0"}</b><span>BILLABLE NOW</span></div>`;
+  $("settleStatus").innerHTML =
+    Object.keys(data.status_counts || {}).map((s) =>
+      `<div style="display:flex;justify-content:space-between;max-width:320px"><span>${chip(s)}</span><b>${data.status_counts[s]}</b></div>`).join("") +
+    totals.map(([cur, t]) =>
+      `<div style="display:flex;justify-content:space-between;max-width:320px"><span class="muted">${esc(cur)} gross (minor units)</span><b>${t.gross_amount_minor.toLocaleString()}</b></div>`).join("");
+  const body = $("settleTable").querySelector("tbody");
+  body.innerHTML = (data.settlements || []).map(r =>
+    `<tr><td title="${esc(r.settlement_id)}">${esc(r.settlement_id)}</td><td title="${esc(r.contract_id)}">${esc(r.contract_id)}</td>` +
+    `<td>${esc(r.currency)}</td><td>${(r.gross_amount_minor || 0).toLocaleString()}</td><td>${chip(r.settlement_status)}</td></tr>`).join("");
+  $("settleTable").hidden = !(data.settlements || []).length;
+  $("settleEmpty").hidden = !!(data.settlements || []).length;
+}
+
+/* ---- Connect ---- */
+async function connect() {
+  apiKey = $("apiKey").value.trim();
+  $("connect").disabled = true;
+  $("connState").textContent = "Connecting…";
+  const fails = [];
+  await Promise.allSettled([
+    loadContracts().then(null, (e) => fails.push("contracts: " + e.message)),
+    loadRuns().then(null, (e) => fails.push("runs: " + e.message)),
+    loadMetrics().then(null, (e) => fails.push("metrics: " + e.message)),
+    loadSettlements().then(null, (e) => fails.push("settlements: " + e.message)),
+  ]);
+  const ok = !fails.some((f) => f.includes("401"));
+  $("connState").textContent = fails.length
+    ? (ok ? "Connected with limited capabilities — unavailable panels: " : "Connection refused (401): check the API key — ")
+        + fails.join("; ")
+    : "Connected: all dashboard panels are live against the real gateway API.";
+  $("refresh").disabled = !apiKey;
+  $("enforceBtn").disabled = !apiKey || !$("fileInput").files.length;
+  $("connect").disabled = false;
+}
+$("connect").addEventListener("click", connect);
+$("refresh").addEventListener("click", connect);
+$("fileInput").addEventListener("change", () => {
+  $("enforceBtn").disabled = !apiKey || !$("fileInput").files.length;
+});
+</script>
+</body>
+</html>

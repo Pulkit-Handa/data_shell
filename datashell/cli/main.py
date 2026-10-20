@@ -125,6 +125,20 @@ def build_parser() -> argparse.ArgumentParser:
     demo_parser = subparsers.add_parser("demo", help="Run a self-contained refusal/tamper/verify walkthrough")
     demo_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    # rules command (check-type catalog)
+    rules_parser = subparsers.add_parser(
+        "rules", help="List quality-rule check types: built-ins plus any installed plugins")
+    rules_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    # benchmark command (throughput measurement on a synthetic feed)
+    benchmark_parser = subparsers.add_parser(
+        "benchmark", help="Measure boundary throughput on a deterministic synthetic feed")
+    benchmark_parser.add_argument("--rows", type=int, default=500_000,
+                                  help="Number of synthetic settlement rows (default: 500000)")
+    benchmark_parser.add_argument("--out", default=None,
+                                  help="Workspace directory for feed/delivery/artifacts (default: fresh temp dir)")
+    benchmark_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     # doctor command (environment capability report)
     doctor_parser = subparsers.add_parser("doctor", help="Report which capabilities this environment has")
     doctor_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
@@ -553,6 +567,11 @@ def command_doctor(args: argparse.Namespace) -> int:
         ("duckdb", [("duckdb", "duckdb")]),
         ("billing", [("httpx", "httpx")]),
         ("airflow", [("airflow", "apache-airflow")]),
+        # Tracing intent is configuration: the endpoint env turns it on, the
+        # extra provides the SDK. Doctor reports both halves separately, so
+        # "requested but missing extra" is diagnosable without guessing.
+        ("otel", [("opentelemetry.sdk", "opentelemetry-sdk"),
+                  ("opentelemetry.exporter.otlp.grpc", "opentelemetry-exporter-otlp-proto-grpc")]),
     )
 
     core_status: dict[str, Any] = {}
@@ -908,6 +927,171 @@ def _demo_records() -> list[dict[str, Any]]:
     return records
 
 
+# --------------------------------------------------------------------------- benchmark
+
+# The benchmark is self-contained (it must run in wheel-only installs without
+# the repository's examples directory), so the feed contract ships as a literal.
+# tests/test_benchmark_cli.py pins this dict to examples/vendor_settlements_contract.json
+# so the two definitions cannot drift.
+_BENCHMARK_CONTRACT: dict[str, Any] = {
+    "apiVersion": "daas/v1",
+    "kind": "DataProduct",
+    "metadata": {
+        "name": "vendor-settlements",
+        "owner": "finance-data",
+        "version": "1.0.0",
+        "status": "ACTIVE",
+        "description": "Enforces settlements incoming from external vendor feeds",
+    },
+    "spec": {
+        "sources": [{
+            "type": "LOCAL",
+            "connectionRef": "local-landing",
+            "path": "incoming/settlements/",
+            "format": "jsonl",
+            "schema": [
+                {"name": "settlement_id", "polars_type": "Utf8", "nullable": False},
+                {"name": "amount", "polars_type": "Float64", "nullable": False},
+                {"name": "currency", "polars_type": "Utf8", "nullable": False},
+            ],
+        }],
+        "quality": {
+            "behavior": "DROP_ROW",
+            "rules": [
+                {"rule_id": "id-present", "check": "NOT_NULL", "column": "settlement_id",
+                 "description": "Settlement ID must not be null"},
+                {"rule_id": "amount-positive", "check": "GREATER_THAN", "column": "amount",
+                 "value": 0, "description": "Settlement amount must be strictly greater than 0"},
+                {"rule_id": "currency-settled", "check": "ALLOWED_VALUES", "column": "currency",
+                 "value": ["USD", "EUR", "GBP"],
+                 "description": "Currency must be one of authorized settlement currencies"},
+            ],
+            "batch_rules": [
+                {"rule_id": "not-partial", "check": "MIN_ROW_COUNT", "value": 3,
+                 "description": "Feed batch must contain at least 3 surviving records"},
+            ],
+        },
+        "transformation": {"map": [], "reduce": []},
+        "delivery": {
+            "refreshSchedule": "0 * * * *",
+            "targets": [{
+                "type": "PARQUET",
+                "connectionRef": "curated-storage",
+                "path": "./output/curated/settlements.parquet",
+                "mode": "overwrite",
+            }],
+            "quarantinePath": "./output/quarantine",
+        },
+    },
+}
+
+
+# --------------------------------------------------------------------------- rules
+
+
+def command_rules(args: argparse.Namespace) -> int:
+    """List every quality-rule check type: built-ins first, then plugins."""
+    from datashell.contract import rule_registry
+
+    rows = [(name, "row", source) for name, source in rule_registry.available_row_checks().items()]
+    rows += [(name, "batch", source) for name, source in rule_registry.available_batch_checks().items()]
+
+    errors = rule_registry.plugin_load_errors()
+    if args.json:
+        print(json.dumps({"checks": rows, "plugin_errors": errors}, indent=2))
+        return 0
+
+    width = max((len(name) for name, _, _ in rows), default=4)
+    for name, kind, source in sorted(rows, key=lambda r: (r[1] != "row", r[2] != "builtin", r[0])):
+        marker = "" if source == "builtin" else f"  ({source})"
+        print(f"{name:<{width}}  {kind:<5}{marker}")
+    for error in errors:
+        print(f"PLUGIN ERROR: {error}", file=sys.stderr)
+    return 0
+
+
+def command_benchmark(args: argparse.Namespace) -> int:
+    """Measure boundary throughput on a deterministic synthetic feed.
+
+    Everything is local: the feed is generated in the output workspace, the
+    in-memory engine enforces the bundled settlement contract, and the run
+    flows through the real delivery gate, ledger record, and audit
+    certificate. This is the smallest honest number a mixture of python and
+    rust can produce on this machine; it is not a distributed-system claim.
+    """
+    import resource
+    import time
+
+    from pyarrow import Table, parquet
+
+    contract = DataContract(**_BENCHMARK_CONTRACT)
+    rows = int(args.rows)
+    if rows <= 0:
+        print("ERROR: --rows must be positive", file=sys.stderr)
+        return 2
+
+    out_dir = Path(args.out or tempfile.mkdtemp(prefix="datashell_benchmark_"))
+    out_dir.mkdir(parents=True, exist_ok=True)
+    source = out_dir / f"feed_{rows}.parquet"
+    target = out_dir / "curated.parquet"
+    audit = out_dir / f"benchmark_{rows}_audit_certificate.json"
+
+    table = Table.from_pydict({
+        "settlement_id": [f"B{i:09d}" for i in range(rows)],
+        "amount": [100.0 + ((i * 37) % 1000) / 4.0 for i in range(rows)],
+        "currency": [("USD", "EUR", "GBP")[i % 3] for i in range(rows)],
+    })
+    parquet.write_table(table, source)
+
+    pipeline = DataShellPipeline(contract, tenant_id="benchmark-tenant", drift_enabled=False)
+    if not args.json:
+        print(f"▶ Benchmark: {rows:,} settlement rows against '{contract.metadata.name}'")
+        print(f"  Feed: {source} ({source.stat().st_size / 1_048_576:.2f} MiB)")
+
+    wall_start = time.perf_counter()
+    result = pipeline.run_file(
+        source_path=source,
+        target_path_override=str(target),
+        audit_output_path=str(audit),
+    )
+    wall = time.perf_counter() - wall_start
+
+    peak_rss_mib = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+    report = {
+        "rows": rows,
+        "feed_bytes": source.stat().st_size,
+        "wall_seconds": round(wall, 3),
+        "pipeline_seconds": round(result.duration_seconds or 0.0, 3),
+        "rows_per_second": int(rows / wall) if wall > 0 else 0,
+        "status": result.status.value,
+        "execution_mode": "in_memory",
+        "rows_read": result.ledger.rows_read,
+        "rows_delivered": result.outcome.rows_delivered,
+        "held_quality": result.ledger.held_quality,
+        "refused_structural": result.ledger.refused_structural,
+        "unaccounted_for": result.ledger.unaccounted_for,
+        "footing_matched": result.ledger.footing_matched,
+        "peak_rss_mib": round(peak_rss_mib, 1),
+        "run_id": result.run_id,
+        "audit_certificate": str(result.audit_artifact_path),
+        "output_dir": str(out_dir),
+    }
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print("  Reports the smallest honest single-node number; it is not a distributed claim.")
+        print(f"  Wall: {report['wall_seconds']}s (pipeline {report['pipeline_seconds']}s)"
+              f" · {report['rows_per_second']:,} rows/s")
+        print(f"  Status: {report['status']} · read {report['rows_read']:,}"
+              f" · delivered {report['rows_delivered']:,}"
+              f" · held {report['held_quality']:,}"
+              f" · refused {report['refused_structural']:,}"
+              f" · unaccounted {report['unaccounted_for']:,}")
+        print(f"  Footing matched: {report['footing_matched']} · peak RSS {report['peak_rss_mib']} MiB")
+        print(f"  Run: {report['run_id']} · artifacts in {report['output_dir']}")
+    return 0
+
+
 def command_demo(args: argparse.Namespace) -> int:
     """Self-contained proof: refuse bad rows, publish good ones, detect tampering."""
     workspace = Path(tempfile.mkdtemp(prefix="datashell_demo_"))
@@ -1051,6 +1235,12 @@ def main(argv: list[str] | None = None) -> None:
 
         if args.command == "demo":
             sys.exit(command_demo(args))
+
+        if args.command == "benchmark":
+            sys.exit(command_benchmark(args))
+
+        if args.command == "rules":
+            sys.exit(command_rules(args))
 
         if args.command == "doctor":
             sys.exit(command_doctor(args))

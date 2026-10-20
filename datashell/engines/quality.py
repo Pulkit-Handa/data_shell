@@ -226,7 +226,7 @@ class SemanticQualityEngine:
 
                 batch_results.append(BatchRuleResult(
                     rule_id=b_rule.rule_id,
-                    check=b_rule.check.value,
+                    check=str(b_rule.check),
                     passed=passed,
                     actual_value=actual_val,
                     expected_value=expected_val,

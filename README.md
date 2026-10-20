@@ -1,6 +1,6 @@
 # Data Shell — Enterprise Perimeter Gateway
 
-[![Tests](https://img.shields.io/badge/tests-466%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-519%20passing-brightgreen.svg)]()
 [![Security](https://img.shields.io/badge/security-hardened%20RBAC%20%2B%20sandboxed-blueviolet.svg)]()
 [![Cryptography](https://img.shields.io/badge/crypto-Ed25519%20%2B%20HMAC--SHA256-blue.svg)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-Prometheus%20metrics-orange.svg)]()
@@ -14,6 +14,38 @@
 It is a **write gate, not a report**. Rejected records are never published. A four-stage pipeline casts and validates every record, a zero-deficit reconciliation gate refuses to publish unless every input row is accounted for, and a successful delivery is committed atomically and bound to a signed, independently verifiable certificate. Every terminal outcome is written to a durable forensic ledger.
 
 The reference deployment is deliberately **single-replica**: the credential registry and rate limiter are process-local. See [Release-readiness status](#release-readiness-status) before promoting a deployment.
+
+## Why not Great Expectations?
+
+The 30-second answer: Great Expectations tells you what is wrong with your data;
+**Data Shell refuses to publish bad data and proves, cryptographically, that what
+it delivered is exactly what it validated**.
+
+1. **Enforcement, not observation.** GX executes expectations and hands back a
+   validation report; the decision to quarantine, substitute, or publish — and the
+   guarantee that every input row is accounted for — remains your code. Here that
+   is the engine: held/refused/dead row accounting, a zero-deficit reconciliation
+   gate that refuses the whole run when a single row is unaccounted for, and
+   atomic, sequenced delivery.
+2. **Tamper evidence, not trust.** GX reports are not signed. Every delivery here
+   is bound to a Merkle-rooted certificate signed with Ed25519 (third-party
+   verifiable from a public key) or HMAC-SHA256, plus a durable forensic ledger;
+   `datashell verify` detects a single flipped byte in the delivered Parquet
+   after the fact — and proves it — in the 60-second walkthrough below.
+3. **The boundary ships as a system.** GX is a library you wire into a pipeline
+   program you also have to build, secure, and audit. Data Shell ships that
+   pipeline side as an API gateway: key-based roles and capabilities, upload
+   size/format refusals, Prometheus metrics, a signed run ledger, and a
+   production console — with the same engine available as a library
+   (`DataShellPipeline`) and pluggable rule checks.
+4. **Honest trade-off.** GX has a far larger expectation ecosystem, profiling,
+   data documentation, and a bigger community. If you are building an internal
+   data-catalog/observability stack, GX is a reasonable choice — this project is
+   not trying to replace that breadth. Data Shell is for a **controlled perimeter
+   with inputs you have reason not to trust**, where refusal semantics and
+   auditability matter more than expectation breadth. The reference deployment is
+   intentionally single-replica and self-contained; scale-out moves the same
+   engine onto shared infrastructure (see `docs/SCALING.md`).
 
 ---
 
@@ -312,6 +344,8 @@ figures for capacity planning. Measure on your own hardware:
 ```bash
 python benchmarks/volumetric_stress_test.py   # row throughput up to 1,000,000 rows
 python benchmarks/api_latency_load_test.py     # gateway request latency under load
+# or the built-in measurement (no repository checkout required):
+datashell benchmark --rows 1000000             # synthetic feed, JSON with --json
 ```
 
 The harnesses assert expected delivered counts and inspect the resulting files, so a
@@ -328,6 +362,8 @@ memory stays bounded by the streaming batch size rather than the input size.
 * `docs/production/RELEASE_CHECKLIST.md` — pilot release gates, acceptance evidence, and remaining blockers.
 * `docs/production/OPERATIONS_RUNBOOK.md` — runbook: startup, health checks, backup/restore, monitoring, rollback.
 * `docs/production/CONFIGURATION_REFERENCE.md` — every environment variable, CLI option, API endpoint, role, and certificate field.
+* `docs/SCALING.md` — the five scaling surfaces (ingest backend, batch size, SQL threads, delivery codec, concurrency/disk) and worked deployment profiles.
+* `docs/SDK.md` — regenerated Python/TypeScript clients, the pinned OpenAPI Generator workflow, and the client versioning truth table.
 * `docs/THREAT_MODEL.md` — assets, trust boundaries, and mitigations.
 * `docs/SETTLEMENT.md` — settlement architecture, schemas, acceptance/pricing semantics, invariants, and limitations.
 * `docs/SETTLEMENT_OPERATIONS.md` — settlement CLI/API reference, billing configuration, disputes, threat model, and production checklist.

@@ -538,7 +538,13 @@ def authenticate_client(
 
 
 def require_capability(required: Capability) -> Callable[..., APIKeyMetadata]:
-    """Dependency factory ensuring authenticated client holds required capability."""
+    """Dependency factory ensuring authenticated client holds required capability.
+
+    The returned guard carries its ``required_capability`` attribute so the
+    gateway can introspect every route at startup (see
+    ``assert_routes_require_scope``) and fail fast when an endpoint would ship
+    without an explicit authorization check.
+    """
     def check_cap(meta: APIKeyMetadata = Security(authenticate_client)) -> APIKeyMetadata:
         if required not in meta.capabilities:
             raise HTTPException(
@@ -549,7 +555,18 @@ def require_capability(required: Capability) -> Callable[..., APIKeyMetadata]:
                 )
             )
         return meta
+    check_cap.required_capability = required  # type: ignore[attr-defined]  # guard marker
     return check_cap
+
+
+def require_scope(required: Capability) -> Callable[..., APIKeyMetadata]:
+    """Preferred alias of :func:`require_capability` for endpoint dependencies.
+
+    The require-scope spelling is the documented contract: declare one scope
+    per endpoint, and the startup introspection verifies that every route with
+    an ``/api`` prefix actually carries one.
+    """
+    return require_capability(required)
 
 
 def verify_tenant_access(resource_tenant_id: str, client: APIKeyMetadata) -> None:

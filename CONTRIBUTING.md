@@ -29,8 +29,12 @@ By participating in this project, you agree to abide by our Code of Conduct.
 4. Add tests for new functionality
 5. Run the full test suite: `pytest -q`
 6. Ensure all tests pass and code compiles: `python -m compileall datashell tests`
-7. Update documentation if needed
-8. Submit a pull request with a clear description
+7. Run the security gates locally when touching SQL builders or dependencies:
+   `bandit -r datashell -q` (zero findings; every suppression is an inline
+   `# nosec` with a written reason) and
+   `pip-audit -r requirements.lock -r requirements-dev.lock`
+8. Update documentation if needed
+9. Submit a pull request with a clear description
 
 ## Development Setup
 

@@ -135,7 +135,7 @@ being handed off. It is a record of a local run, not of a target deployment.
 | 6 | `python -m pytest tests/test_startup_recovery_order.py -v` | **2 passed** | 0 |
 | 7 | `bandit -q -r datashell web -c .bandit -ll` | no findings at or above medium | 0 |
 | 8 | `pip-audit -r requirements.lock -r requirements-dev.lock -r requirements-build.lock` | No known vulnerabilities | 0 |
-| 9 | `python scripts/check_release_metadata.py` | `data-shell 1.0.2` — package, web app, changelog, lockfiles agree | 0 |
+| 9 | `python scripts/check_release_metadata.py` | `datashell 2.0.0` — package, web app, changelog, lockfiles agree | 0 |
 | 10 | `python -m build --no-isolation` | wheel + sdist built | 0 |
 | 11 | `python scripts/verify_distribution_contents.py` | allowlisted content only, required files present (wheel + sdist) | 0 |
 | 12 | `datashell run --contract examples/vendor_settlements_contract.json --source … --target … --audit … --json` | `LOADED`, 1000 read, 900 delivered, 40 structural refused, 60 held, **0 unaccounted**, footing matched | 0 |

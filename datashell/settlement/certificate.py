@@ -87,7 +87,7 @@ def build_settlement_receipt(
             "key_id": getattr(settings, "ed25519_active_key_id", "datashell-ed25519-v1"),
             "integrity_type": "ASYMMETRIC_ED25519_SIGNATURE",
             "third_party_verifiable": True,
-            "requires_shared_secret": False,
+            "requires_shared_secret": False,  # nosec B105 — key *identifier* label, not a secret
             "tamper_evident": True,
         }
         receipt_payload["signature_header"] = sig_envelope
@@ -98,7 +98,7 @@ def build_settlement_receipt(
             "key_id": getattr(settings, "active_key_id", "datashell-hmac-v1"),
             "integrity_type": "SYMMETRIC_HMAC_AUTHENTICATION",
             "third_party_verifiable": False,
-            "requires_shared_secret": True,
+            "requires_shared_secret": True,  # nosec B105 — key *identifier* label, not a secret
             "tamper_evident": True,
         }
         receipt_payload["signature_header"] = sig_envelope

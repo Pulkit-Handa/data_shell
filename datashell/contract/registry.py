@@ -9,6 +9,7 @@ import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from datashell.contract.models import DataContract
 from datashell.core.config import settings
@@ -223,10 +224,55 @@ class ContractRegistry:
                     v_dt = datetime.strptime(ts_str, "%Y%m%dT%H%M%S_%fZ").replace(tzinfo=UTC)
                     if v_dt <= target_dt:
                         active_version_file = v_file
-                except Exception:
+                except Exception:  # nosec B112 — point-in-time parser skips unparseable historical files by design
                     continue
 
         if active_version_file:
             with open(active_version_file, encoding="utf-8") as f:
                 return DataContract(**json.load(f))
         return None
+
+    def list_contracts(self, tenant_id: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
+        """Catalog entries visible to a tenant: its own contracts plus shared ones.
+
+        Summaries are read from each contract's ``latest.json``; entries that
+        cannot be parsed are skipped so one corrupt artifact cannot hide the
+        catalog (individual reads still fail closed through ``get_latest``).
+        Tenant-owned entries take precedence over shared ones with the same
+        name, mirroring read resolution in ``get_latest``.
+        """
+        entries: dict[str, dict[str, Any]] = {}
+
+        def read_summary(path: Path) -> dict[str, Any] | None:
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                metadata = payload.get("metadata", {})
+                name = metadata.get("name")
+                version = metadata.get("version")
+                if isinstance(name, str) and isinstance(version, str):
+                    return {"name": name, "version": version, "source": source}
+            except (OSError, ValueError, AttributeError):
+                return None
+            return None
+
+        if tenant_id is not None:
+            source = "tenant"
+            tenant_root = self.storage_dir / "tenants" / settings.tenant_storage_key(tenant_id)
+            if tenant_root.is_dir():
+                for latest in sorted(tenant_root.glob("*/latest.json")):
+                    summary = read_summary(latest)
+                    if summary:
+                        entries[summary["name"]] = summary
+
+        source = "shared"
+        for name in sorted(self._shared_contract_names()):
+            if name in entries:
+                continue
+            latest = self.storage_dir / name / "latest.json"
+            if latest.is_file():
+                summary = read_summary(latest)
+                if summary:
+                    entries[summary["name"]] = summary
+
+        return list(entries.values())[:max(1, int(limit))]

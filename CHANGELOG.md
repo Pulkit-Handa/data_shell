@@ -5,7 +5,110 @@ All notable changes to Data Shell are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-10-20
+
+Production-readiness release: everything below was shipped incrementally and
+gated by CI at each step (lint, strict typing, 519 tests, zero-findings
+bandit, OSV clean dependency audit, wheel/sdist content checks, and a
+CI-verified OpenAPI schema). One version number now covers all of it.
+
+### Migration notes (1.0.x → 2.0.0)
+
+- **Upgrades are configuration-only.** The boundary model, defaults, ledger
+  format, and contract schema (`daas/v1`) are unchanged; no data or ledger
+  migration is required.
+- **New optional things stay off until asked for:** tracing activates only
+  with `OTEL_EXPORTER_OTLP_ENDPOINT` **and** `datashell[otel]`; the benchmark
+  output lives in a fresh temp directory unless `--out` is given; plugin
+  rule checks are inert unless a package registers them via the
+  `datashell.rule_checks.row`/`batch` entry-point groups.
+- **Removed/renamed:** none. (`py.typed` was already shipped; extras gained
+  `otel` — core installs and every existing extra are unchanged, and
+  `all` still excludes `airflow` for its own Python-range support reasons.)
+- **Operators should read** `docs/SCALING.md` (backend policy env knobs),
+  `docs/production/CONFIGURATION_REFERENCE.md` (OTEL + LOG_FORMAT rows),
+  `docs/SDK.md` (client regeneration truth table), and `docs/THREAT_MODEL.md`
+  before promotion; CI now *fails* on new `bandit` findings or new known
+  dependency vulnerabilities, so vendored dependency drift is visible.
+
+### Added
+- **Scaling backend controls + `docs/SCALING.md`.** The ingest backend is now a
+  documented policy: `DATASHELL_INGEST_MODE` (`auto|memory|stream`) resolves in
+  one place (`choose_execution_backend`) after explicit CLI/API requests, and
+  size-threshold auto-promotion stays the default. Three new environment
+  knobs: `DATASHELL_INGEST_MODE`, `DATASHELL_DELIVERY_COMPRESSION`
+  (`snappy|zstd|gzip|lz4|brotli|uncompressed`, applied to delivered targets and
+  quarantine snapshots on both the in-memory Polars writer and the streaming
+  pyarrow writers — unified on `zstd`, the codec in-memory 1.0 deliveries
+  already used), and `DATASHELL_DUCKDB_THREADS` (batch-rule evaluation
+  parallelism). `docs/SCALING.md` documents the five scaling surfaces, worked
+  deployment profiles, and how to reproduce the capacity numbers.
+- **Modular gateway + a console that shows the real system.** The FastAPI app
+  assembly shrank from 1,400 lines to ~320: endpoint groups moved to
+  `datashell/server/routers/` (contracts, runs, ledger, settlements, admin),
+  with shared process state in `datashell/server/state.py`. Route paths,
+  payloads, and auth semantics are unchanged. The interactive console is now a
+  self-contained static document (`datashell/server/static/console.html`,
+  shipped in the wheel, no external requests) that renders the live run
+  ledger, Prometheus metrics, the tenant settlement portfolio, and the
+  interactive enforcement gate.
+- **`GET /api/v1/contracts`** — tenant-scoped contract-name catalog (own +
+  shared) powering client discovery and the console selector. Every read role
+  may list names; writes still require `contracts:write`.
+- **`GET /api/v1/settlement/preview`** — a bounded read-only roll-up of the
+  settlement ledger (totals by currency, status distribution, newest
+  statements) for dashboards. Requires `settlements:read`; performs no
+  calculation, transition, or billing action.
+- **API-surface hardening.** Every operation now carries an OpenAPI `summary`,
+  and the reviewable contract document `docs/openapi.yaml` is committed and
+  enforced in sync with the code in CI (`scripts/export_openapi.py`). The
+  gateway introspects its routes at startup
+  (`assert_routes_require_scope`): an `/api` endpoint that ships without a
+  `require_scope(...)` authorization dependency fails the process at boot
+  instead of serving unauthenticated data. Operators can choose
+  `LOG_FORMAT=pretty` for human-readable startup/shutdown logs
+  (`structured` JSON remains the default for log shippers).
+- **OpenTelemetry tracing (optional extra).** With `datashell[otel]` installed
+  and the standard `OTEL_EXPORTER_OTLP_ENDPOINT` set, every gateway exchange
+  is exported as a server span (named after the resolved route, with status
+  attributes) over batched OTLP/gRPC. Without either half the bridge is a
+  no-op — `datashell doctor` reports both halves so "requested but missing
+  extra" is diagnosable.
+- **`datashell benchmark`.** A self-contained throughput measurement:
+  generates a deterministic synthetic settlement feed, enforces the real
+  contract through the real delivery gate and ledger, and reports rows/s,
+  reconciliation counts, zero-deficit status, and peak RSS (JSON with
+  `--json`). Minimum-row-count batch rules make small runs work; no invented
+  numbers ship in the docs.
+- **Extension points for quality rules.** New row/batch check types can arrive
+  as plugins: a package registers compilers through the
+  `datashell.rule_checks.row` / `datashell.rule_checks.batch` entry-point
+  groups, and `datashell rules` lists every check type with its provenance.
+  Built-in checks cannot be shadowed (a plugin named after a built-in is
+  rejected and reported), unknown check names are rejected at contract
+  validation with the group name spelled out, and broken plugins are logged
+  instead of taking enforcement down.
+
+- **Security gates (bandit + pip-audit).** CI enforces a zero-findings bandit
+  policy (every suppression is an inline commented `# nosec` with a written
+  reason) and audits `requirements.lock`, `requirements-dev.lock`, and the
+  generated Python client's requirements against the OSV database. The
+  reviewed SQL builders (batch-rule templates, ledger filters) carry the
+  suppression rationale inline, and the batch/ledger query results are
+  pinned by tests, so the builders stay behavior-verified.
+
+### Added
+- **Generated client SDKs (via OpenAPI Generator, pinned image).** Both the
+  Python (`urllib3`) and TypeScript (`fetch`) clients under `sdks/` are
+  regenerated deterministically from the CI-synced `docs/openapi.yaml` with
+  the pinned `openapitools/openapi-generator-cli:v7.12.0` image
+  (`scripts/generate_sdks.sh` — Docker is the only prerequisite; the script
+  fails with an explicit message when the schema or the generator is
+  missing). The Python client carries `py.typed`; the TypeScript client is
+  validated to compile clean with `tsc --noEmit`. `docs/SDK.md` documents
+  regeneration, install, and the versioning truth table: the clients track
+  the API contract, so schema changes, SDK diffs, and the regenerated
+  artifacts land together.
 
 ### Changed
 - **Distribution name `data-shell` → `datashell`.** The import package and the
