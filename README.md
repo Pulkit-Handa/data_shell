@@ -312,6 +312,8 @@ figures for capacity planning. Measure on your own hardware:
 ```bash
 python benchmarks/volumetric_stress_test.py   # row throughput up to 1,000,000 rows
 python benchmarks/api_latency_load_test.py     # gateway request latency under load
+# or the built-in measurement (no repository checkout required):
+datashell benchmark --rows 1000000             # synthetic feed, JSON with --json
 ```
 
 The harnesses assert expected delivered counts and inspect the resulting files, so a

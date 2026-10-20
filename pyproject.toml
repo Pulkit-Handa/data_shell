@@ -41,6 +41,13 @@ duckdb = [
 airflow = [
     "apache-airflow>=2.7.0,<3.1.0"
 ]
+# OpenTelemetry tracing bridge (no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is
+# set AND this extra is installed; see datashell/core/observability.py).
+# gRPC OTLP exporter is the standard default protocol.
+otel = [
+    "opentelemetry-sdk>=1.24.0,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.24.0,<2.0.0"
+]
 dev = [
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.23.0,<2.0.0",

@@ -44,6 +44,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of serving unauthenticated data. Operators can choose
   `LOG_FORMAT=pretty` for human-readable startup/shutdown logs
   (`structured` JSON remains the default for log shippers).
+- **OpenTelemetry tracing (optional extra).** With `datashell[otel]` installed
+  and the standard `OTEL_EXPORTER_OTLP_ENDPOINT` set, every gateway exchange
+  is exported as a server span (named after the resolved route, with status
+  attributes) over batched OTLP/gRPC. Without either half the bridge is a
+  no-op — `datashell doctor` reports both halves so "requested but missing
+  extra" is diagnosable.
+- **`datashell benchmark`.** A self-contained throughput measurement:
+  generates a deterministic synthetic settlement feed, enforces the real
+  contract through the real delivery gate and ledger, and reports rows/s,
+  reconciliation counts, zero-deficit status, and peak RSS (JSON with
+  `--json`). Minimum-row-count batch rules make small runs work; no invented
+  numbers ship in the docs.
 
 ### Changed
 - **Distribution name `data-shell` → `datashell`.** The import package and the

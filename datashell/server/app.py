@@ -31,6 +31,8 @@ from datashell.contract.models import DataContract
 from datashell.contract.registry import ContractRegistry
 from datashell.core.config import settings
 from datashell.core.ledger import BoundaryLedger
+from datashell.core.observability import configure_otel
+from datashell.core.observability import http_server_span as http_server_span_context
 from datashell.core.security import (
     APIKeyMetadata,
     Capability,
@@ -106,6 +108,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # AND every published-but-unrecorded run has been reconciled into the ledger.
     # In particular, avoid seeding contracts at module import time because an
     # ASGI server imports the module before it runs the lifespan startup phase.
+    configure_otel()
     recovery = recover_pending_publications_and_ledger(settings.output_dir)
     # Expose the recovery outcome as metrics so an unreconciled state is
     # alertable, not only visible in a log line.
@@ -221,34 +224,40 @@ async def correlation_id_and_tracing(request: Request, call_next: Callable[[Requ
     method = request.method.upper()
     HTTP_IN_FLIGHT_REQUESTS.inc()
     status_code = "500"
-    try:
-        response: Response = await call_next(request)
-        status_code = str(response.status_code)
-        latency = time.perf_counter() - start_time
-        route_obj = request.scope.get("route")
-        route_label = getattr(route_obj, "path", "unmatched")
-        HTTP_REQUESTS_TOTAL.labels(method=method, route=route_label, status_code=status_code).inc()
-        HTTP_REQUEST_DURATION_SECONDS.labels(method=method, route=route_label).observe(latency)
-        response.headers["X-Request-ID"] = corr_id
-        response.headers["X-Response-Time-Ms"] = f"{latency * 1000.0:.2f}"
-        if int(status_code) >= 500:
+    with http_server_span_context(method) as span:
+        try:
+            response: Response = await call_next(request)
+            status_code = str(response.status_code)
+            latency = time.perf_counter() - start_time
+            route_obj = request.scope.get("route")
+            route_label = getattr(route_obj, "path", "unmatched")
+            HTTP_REQUESTS_TOTAL.labels(method=method, route=route_label, status_code=status_code).inc()
+            HTTP_REQUEST_DURATION_SECONDS.labels(method=method, route=route_label).observe(latency)
+            response.headers["X-Request-ID"] = corr_id
+            response.headers["X-Response-Time-Ms"] = f"{latency * 1000.0:.2f}"
+            if span is not None:
+                span.update_name(f"{method} {route_label}")
+                span.set_attribute("http.route", route_label)
+                span.set_attribute("http.response.status_code", int(status_code))
+            if int(status_code) >= 500:
+                telemetry_logger.error(
+                    "HTTP request failed", correlation_id=corr_id, method=method,
+                    route=route_label, status_code=status_code,
+                )
+            return response
+        except Exception:
+            route_obj = request.scope.get("route")
+            route_label = getattr(route_obj, "path", "unmatched")
+            HTTP_REQUESTS_TOTAL.labels(method=method, route=route_label, status_code="500").inc()
+            HTTP_REQUEST_DURATION_SECONDS.labels(method=method, route=route_label).observe(
+                time.perf_counter() - start_time)
             telemetry_logger.error(
-                "HTTP request failed", correlation_id=corr_id, method=method,
-                route=route_label, status_code=status_code,
+                "HTTP request raised an unhandled exception", correlation_id=corr_id,
+                method=method, route=route_label, status_code="500",
             )
-        return response
-    except Exception:
-        route_obj = request.scope.get("route")
-        route_label = getattr(route_obj, "path", "unmatched")
-        HTTP_REQUESTS_TOTAL.labels(method=method, route=route_label, status_code="500").inc()
-        HTTP_REQUEST_DURATION_SECONDS.labels(method=method, route=route_label).observe(time.perf_counter() - start_time)
-        telemetry_logger.error(
-            "HTTP request raised an unhandled exception", correlation_id=corr_id,
-            method=method, route=route_label, status_code="500",
-        )
-        raise
-    finally:
-        HTTP_IN_FLIGHT_REQUESTS.dec()
+            raise
+        finally:
+            HTTP_IN_FLIGHT_REQUESTS.dec()
 
 
 # ----------------- Core Observability Endpoints -----------------
