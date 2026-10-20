@@ -23,8 +23,7 @@ contractual rule says otherwise.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from datashell.core.crypto import CryptoEngine
 from datashell.settlement.acceptance import (
@@ -45,9 +44,8 @@ from datashell.settlement.models import (
     SettlementStatus,
     settlement_id_for,
 )
-from datashell.settlement.pricing import calculate as calculate_price
 from datashell.settlement.pricing import PricingResult
-
+from datashell.settlement.pricing import calculate as calculate_price
 
 CALCULATION_VERSION = "1"
 
@@ -74,14 +72,14 @@ def derive_qualified_units(spec: QualificationSpec, evidence: RunEvidence) -> in
     raise SettlementEngineError(f"unsupported qualification unit: {unit}")
 
 
-def build_run_evidence(ledger_run: Dict[str, Any], certificate_valid: bool,
+def build_run_evidence(ledger_run: dict[str, Any], certificate_valid: bool,
                        certificate_status: str = "AUTHENTIC_AND_UNMODIFIED") -> RunEvidence:
     """Assemble compact run evidence from the durable ledger record.
 
     Only compact summaries and digests are consumed — never the source
     dataset — so settlement memory use is independent of feed size.
     """
-    batch_failures: List[str] = []
+    batch_failures: list[str] = []
     for batch in (ledger_run.get("batch_evaluations") or []):
         if isinstance(batch, dict) and not batch.get("passed", True):
             batch_failures.append(str(batch.get("rule_id", "batch_rule")))
@@ -111,7 +109,7 @@ def build_run_evidence(ledger_run: Dict[str, Any], certificate_valid: bool,
 
 
 def _apply_penalty(contract: CommercialContract, verdict: AcceptanceVerdict,
-                   gross_minor: int) -> Tuple[int, Optional[str]]:
+                   gross_minor: int) -> tuple[int, str | None]:
     """Apply an explicitly contracted penalty; never invent one."""
     spec = contract.penalty
     if spec.model == PenaltyModel.NONE:
@@ -127,6 +125,7 @@ def _apply_penalty(contract: CommercialContract, verdict: AcceptanceVerdict,
     if spec.model == PenaltyModel.FLAT_FEE:
         return spec.flat_penalty_minor, f"contracted flat penalty ({spec.flat_penalty_minor} minor)"
     from fractions import Fraction
+
     from datashell.settlement.money import round_half_up
     amount = round_half_up(Fraction(gross_minor) * Fraction(spec.penalty_percent_bps, 10000))
     return amount, f"contracted penalty {spec.penalty_percent_bps} bps of gross"
@@ -149,14 +148,14 @@ def calculate_settlement(
     *,
     tenant_id: str,
     contract: CommercialContract,
-    ledger_run: Dict[str, Any],
+    ledger_run: dict[str, Any],
     certificate_digest: str,
     certificate_valid: bool,
     certificate_status: str = "AUTHENTIC_AND_UNMODIFIED",
     actor: str,
-    idempotency_key: Optional[str] = None,
+    idempotency_key: str | None = None,
     dispute_open: bool = False,
-    unique_entities_delivered: Optional[int] = None,
+    unique_entities_delivered: int | None = None,
 ) -> SettlementStatement:
     """Calculate the settlement for one run against one immutable contract version.
 
@@ -189,7 +188,7 @@ def calculate_settlement(
     gross = pricing.gross_amount_minor + penalty_minor
 
     status = _settlement_status(verdict, contract)
-    reason_codes = [r for r in verdict.reason_codes if r != ReasonCode.NONE]
+    reason_codes: list[ReasonCode] = [r for r in verdict.reason_codes if r != ReasonCode.NONE]
     if contract.pricing.model == PricingModel.HOLD_OR_DISPUTE:
         # The contract defers the payable amount to manual handling: an
         # automatically calculated statement is never billing-eligible.
@@ -243,7 +242,7 @@ def new_settlement_id() -> str:
     return f"stl_{uuid.uuid4().hex[:16]}"
 
 
-def canonical_settlement_payload(statement: SettlementStatement) -> Dict[str, Any]:
+def canonical_settlement_payload(statement: SettlementStatement) -> dict[str, Any]:
     """Canonical signed payload for the settlement receipt certificate."""
     return statement.model_dump(mode="json")
 

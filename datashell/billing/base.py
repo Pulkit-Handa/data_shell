@@ -17,11 +17,11 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, Optional, Protocol
+from enum import StrEnum
+from typing import Any, Protocol
 
 
-class BillingProviderName(str, Enum):
+class BillingProviderName(StrEnum):
     DRY_RUN = "dry-run"
     STRIPE = "stripe"
 
@@ -46,7 +46,7 @@ class InvoicePayload:
     seller_id: str = ""
     idempotency_key: str = ""
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
 
 
@@ -65,15 +65,15 @@ class BillingResult:
     ok: bool
     status: str
     provider: str
-    provider_invoice_id: Optional[str] = None
-    provider_state: Optional[str] = None
+    provider_invoice_id: str | None = None
+    provider_state: str | None = None
     ambiguous: bool = False
-    error_code: Optional[str] = None
-    error_message: Optional[str] = None
-    request_meta: Dict[str, Any] = field(default_factory=dict)
+    error_code: str | None = None
+    error_message: str | None = None
+    request_meta: dict[str, Any] = field(default_factory=dict)
     billing_instruction_id: str = field(default_factory=lambda: f"bil_{uuid.uuid4().hex[:16]}")
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
             "status": self.status,
@@ -107,7 +107,7 @@ class BillingProvider(Protocol):
         ...
 
     def verify_webhook(self, *, body: bytes, signature_header: str,
-                       secret: str, tolerance_seconds: int = 300) -> Dict[str, Any]:
+                       secret: str, tolerance_seconds: int = 300) -> dict[str, Any]:
         """Verify an incoming provider webhook signature.
 
         Returns the parsed event on success; raises on any verification

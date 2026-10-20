@@ -1,27 +1,33 @@
 """Enterprise Security: RBAC, Multi-tenancy, Dynamic Key Management, and Rate Limiting."""
 
 from __future__ import annotations
-import os
-import json
-import time
+
+import contextlib
 import hashlib
+import json
+import os
+import re
 import sqlite3
 import threading
-from enum import Enum
-from typing import Dict, Set, Optional, Tuple, List
-from fastapi import Request, HTTPException, Security, status
+import time
+from collections.abc import Callable
+from enum import StrEnum
+from typing import Any, cast
+
+from fastapi import HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
-from datashell.core.config import settings, is_production
+
+from datashell.core.config import is_production, settings
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     ADMIN = "ADMIN"
     DATA_ENGINEER = "DATA_ENGINEER"
     PRODUCER = "PRODUCER"
     AUDITOR = "AUDITOR"
 
 
-class Capability(str, Enum):
+class Capability(StrEnum):
     CONTRACTS_READ = "contracts:read"
     CONTRACTS_WRITE = "contracts:write"
     PIPELINE_ENFORCE = "pipeline:enforce"
@@ -33,7 +39,7 @@ class Capability(str, Enum):
     BILLING_MANAGE = "billing:manage"
 
 
-ROLE_CAPABILITIES: Dict[Role, Set[Capability]] = {
+ROLE_CAPABILITIES: dict[Role, set[Capability]] = {
     Role.ADMIN: {
         Capability.CONTRACTS_READ,
         Capability.CONTRACTS_WRITE,
@@ -69,7 +75,7 @@ ROLE_CAPABILITIES: Dict[Role, Set[Capability]] = {
 
 
 class APIKeyMetadata:
-    def __init__(self, key: str, tenant_id: str, role: Role, description: str):
+    def __init__(self, key: str, tenant_id: str, role: Role, description: str) -> None:
         # Validate the identity once when a credential is constructed. The exact
         # tenant_id remains the security principal; encoding is only for paths.
         settings.tenant_storage_key(tenant_id)
@@ -77,13 +83,13 @@ class APIKeyMetadata:
         self.tenant_id = tenant_id
         self.role = role
         self.description = description
-        self.capabilities: Set[Capability] = ROLE_CAPABILITIES.get(role, set()).copy()
+        self.capabilities: set[Capability] = ROLE_CAPABILITIES.get(role, set()).copy()
 
 
 # In-memory cache preserves the existing public API for tests and fast lookups.
 # In production, dynamically managed keys are also stored as SHA-256 fingerprints
 # in a durable SQLite registry. Raw API keys are never written to disk.
-API_KEY_STORE: Dict[str, APIKeyMetadata] = {}
+API_KEY_STORE: dict[str, APIKeyMetadata] = {}
 _API_KEY_LOCK = threading.RLock()
 
 
@@ -91,7 +97,7 @@ def _key_fingerprint(key: str) -> str:
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def _security_connection(*, initialize: bool = True):
+def _security_connection(*, initialize: bool = True) -> sqlite3.Connection:
     settings.output_dir.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.security_db_path, timeout=5.0, isolation_level=None)
     conn.execute("PRAGMA busy_timeout=5000")
@@ -116,14 +122,12 @@ def _security_connection(*, initialize: bool = True):
             description TEXT NOT NULL,
             event_timestamp REAL NOT NULL
         )""")
-        try:
+        with contextlib.suppress(OSError):
             os.chmod(settings.security_db_path, 0o600)
-        except OSError:
-            pass
     return conn
 
 
-def register_api_key(metadata: APIKeyMetadata, *, persist: Optional[bool] = None, actor_tenant_id: str = "system") -> None:
+def register_api_key(metadata: APIKeyMetadata, *, persist: bool | None = None, actor_tenant_id: str = "system") -> None:
     """Register a key; production runtime-managed keys are persisted by fingerprint."""
     if not metadata.key or not isinstance(metadata.key, str):
         raise ValueError("API key must be a non-empty string")
@@ -136,23 +140,24 @@ def register_api_key(metadata: APIKeyMetadata, *, persist: Optional[bool] = None
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 conn.execute(
-                    "INSERT INTO api_credentials(key_hash, tenant_id, role, description, created_at, revoked_at, active) "
+                    "INSERT INTO api_credentials(key_hash, tenant_id, role, description, "
+                    "created_at, revoked_at, active) "
                     "VALUES (?, ?, ?, ?, ?, NULL, 1) ON CONFLICT(key_hash) DO UPDATE SET "
                     "tenant_id=excluded.tenant_id, role=excluded.role, description=excluded.description, "
                     "revoked_at=NULL, active=1",
                     (key_hash, metadata.tenant_id, metadata.role.value, metadata.description, timestamp),
                 )
                 conn.execute(
-                    "INSERT INTO security_events(event_type, actor_tenant_id, target_tenant_id, key_id, role, description, event_timestamp) "
+                    "INSERT INTO security_events(event_type, actor_tenant_id, "
+                    "target_tenant_id, key_id, role, description, event_timestamp) "
                     "VALUES ('created', ?, ?, ?, ?, ?, ?)",
-                    (actor_tenant_id, metadata.tenant_id, key_hash[:24], metadata.role.value, metadata.description, timestamp),
+                    (actor_tenant_id, metadata.tenant_id, key_hash[:24],
+                     metadata.role.value, metadata.description, timestamp),
                 )
                 conn.execute("COMMIT")
             except Exception:
-                try:
+                with contextlib.suppress(sqlite3.Error):
                     conn.execute("ROLLBACK")
-                except sqlite3.Error:
-                    pass
                 raise
             finally:
                 conn.close()
@@ -173,9 +178,13 @@ def revoke_api_key(key: str, *, actor_tenant_id: str = "system") -> bool:
                     (timestamp, key_hash),
                 )
                 if cur.rowcount > 0:
-                    row = conn.execute("SELECT tenant_id, role, description FROM api_credentials WHERE key_hash=?", (key_hash,)).fetchone()
+                    row = conn.execute(
+                        "SELECT tenant_id, role, description FROM api_credentials WHERE key_hash=?",
+                        (key_hash,),
+                    ).fetchone()
                     conn.execute(
-                        "INSERT INTO security_events(event_type, actor_tenant_id, target_tenant_id, key_id, role, description, event_timestamp) "
+                        "INSERT INTO security_events(event_type, actor_tenant_id, "
+                        "target_tenant_id, key_id, role, description, event_timestamp) "
                         "VALUES ('revoked', ?, ?, ?, ?, ?, ?)",
                         (actor_tenant_id, row[0], key_hash[:24], row[1], row[2], timestamp),
                     )
@@ -187,10 +196,8 @@ def revoke_api_key(key: str, *, actor_tenant_id: str = "system") -> bool:
                 # deployment secret source, not revoked through this API.
                 return False
             except Exception:
-                try:
+                with contextlib.suppress(sqlite3.Error):
                     conn.execute("ROLLBACK")
-                except sqlite3.Error:
-                    pass
                 raise
             finally:
                 conn.close()
@@ -211,7 +218,8 @@ def revoke_api_key_id(key_id: str, *, actor_tenant_id: str = "system") -> bool:
         try:
             conn.execute("BEGIN IMMEDIATE")
             rows = conn.execute(
-                "SELECT key_hash, tenant_id, role, description FROM api_credentials WHERE substr(key_hash, 1, 24)=? AND active=1", (key_id,)
+                "SELECT key_hash, tenant_id, role, description FROM api_credentials "
+                "WHERE substr(key_hash, 1, 24)=? AND active=1", (key_id,)
             ).fetchall()
             if len(rows) != 1:
                 conn.execute("ROLLBACK")
@@ -220,7 +228,8 @@ def revoke_api_key_id(key_id: str, *, actor_tenant_id: str = "system") -> bool:
             timestamp = time.time()
             conn.execute("UPDATE api_credentials SET active=0, revoked_at=? WHERE key_hash=?", (timestamp, key_hash))
             conn.execute(
-                "INSERT INTO security_events(event_type, actor_tenant_id, target_tenant_id, key_id, role, description, event_timestamp) "
+                "INSERT INTO security_events(event_type, actor_tenant_id, "
+                "target_tenant_id, key_id, role, description, event_timestamp) "
                 "VALUES ('revoked', ?, ?, ?, ?, ?, ?)",
                 (actor_tenant_id, tenant_id, key_hash[:24], role, description, timestamp),
             )
@@ -230,16 +239,14 @@ def revoke_api_key_id(key_id: str, *, actor_tenant_id: str = "system") -> bool:
                     API_KEY_STORE.pop(raw_key, None)
             return True
         except Exception:
-            try:
+            with contextlib.suppress(sqlite3.Error):
                 conn.execute("ROLLBACK")
-            except sqlite3.Error:
-                pass
             raise
         finally:
             conn.close()
 
 
-def get_api_key_metadata(key: str) -> Optional[APIKeyMetadata]:
+def get_api_key_metadata(key: str) -> APIKeyMetadata | None:
     """Resolve a credential from memory or the durable production registry."""
     with _API_KEY_LOCK:
         metadata = API_KEY_STORE.get(key)
@@ -337,7 +344,7 @@ class TokenBucketRateLimiter:
     def __init__(self, rate_per_minute: int = 120):
         self.capacity = float(rate_per_minute)
         self.refill_rate = self.capacity / 60.0  # tokens per second
-        self.buckets: Dict[str, Tuple[float, float]] = {}  # key -> (tokens, last_update)
+        self.buckets: dict[str, tuple[float, float]] = {}  # key -> (tokens, last_update)
         self._lock = threading.Lock()
         self._last_cleanup = time.monotonic()
 
@@ -390,7 +397,9 @@ API_KEY_METADATA_ANONYMOUS = APIKeyMetadata(
 API_KEY_METADATA_ANONYMOUS.capabilities = set()
 
 
-def preflight_authenticate_scope(scope):
+def preflight_authenticate_scope(
+    scope: dict[str, Any],
+) -> tuple[int | None, APIKeyMetadata | None, str | None]:
     """Authenticate a body-bearing ASGI request before multipart parsing begins.
 
     Returns (status_code, metadata, detail). A None status means authentication
@@ -404,25 +413,33 @@ def preflight_authenticate_scope(scope):
 
     method = str(scope.get("method", "GET")).upper()
     path = str(scope.get("path", ""))
+    settlements_write = (
+        method == "POST" and (
+            path == "/api/v1/commercial-contracts"
+            or path == "/api/v1/settlements/calculate"
+            or (path.startswith("/api/v1/settlements/") and path.endswith("/disputes"))
+        )
+    )
+    settlements_read = (
+        method == "POST" and path.startswith("/api/v1/settlements/") and (
+            path.endswith("/billing-preview") or path.endswith("/verify")
+        )
+    )
+    admin_delete_key = (
+        method == "DELETE"
+        and re.fullmatch(r"/api/v1/admin/keys/[0-9a-f]{24}", path) is not None
+    )
     if method == "POST" and path == "/api/v1/contracts":
         required_capability = Capability.CONTRACTS_WRITE
     elif method == "POST" and path == "/api/v1/enforce":
         required_capability = Capability.PIPELINE_ENFORCE
-    elif method == "POST" and path == "/api/v1/admin/keys":
+    elif (method == "POST" and path == "/api/v1/admin/keys") or admin_delete_key:
         required_capability = Capability.ADMIN_MANAGE
-    elif method == "DELETE" and __import__("re").fullmatch(r"/api/v1/admin/keys/[0-9a-f]{24}", path):
-        required_capability = Capability.ADMIN_MANAGE
-    elif method == "POST" and path == "/api/v1/commercial-contracts":
-        required_capability = Capability.SETTLEMENTS_WRITE
-    elif method == "POST" and path == "/api/v1/settlements/calculate":
-        required_capability = Capability.SETTLEMENTS_WRITE
-    elif method == "POST" and path.startswith("/api/v1/settlements/") and path.endswith("/disputes"):
+    elif settlements_write:
         required_capability = Capability.SETTLEMENTS_WRITE
     elif method == "POST" and path.startswith("/api/v1/settlements/") and path.endswith("/approvals"):
         required_capability = Capability.BILLING_MANAGE
-    elif method == "POST" and path.startswith("/api/v1/settlements/") and path.endswith("/billing-preview"):
-        required_capability = Capability.SETTLEMENTS_READ
-    elif method == "POST" and path.startswith("/api/v1/settlements/") and path.endswith("/verify"):
+    elif settlements_read:
         required_capability = Capability.SETTLEMENTS_READ
     else:
         return 404, None, "Not found"
@@ -460,14 +477,17 @@ def preflight_authenticate_scope(scope):
 
 def authenticate_client(
     request: Request,
-    api_key: Optional[str] = Security(api_key_header)
+    api_key: str | None = Security(api_key_header)
 ) -> APIKeyMetadata:
     """Authenticates API Key from headers only and checks rate limits."""
     # Body-bearing requests are pre-authenticated by ASGI middleware before the
     # request parser can spool a multipart upload to disk. ``request`` is not
     # guaranteed to expose Starlette's ``.state`` (e.g. lightweight test doubles
     # or non-Starlette callers), so resolve the attribute defensively.
-    preauthenticated = getattr(getattr(request, "state", None), "preauthenticated_client", None)
+    preauthenticated = cast(
+        APIKeyMetadata,
+        getattr(getattr(request, "state", None), "preauthenticated_client", None),
+    )
     if preauthenticated is not None:
         return preauthenticated
 
@@ -507,7 +527,7 @@ def authenticate_client(
         )
 
     # Check Rate Limiter
-    if not rate_limiter.allow(token):
+    if not rate_limiter.allow(token or "unknown"):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Rate limit exceeded. Too many requests. Please throttle."
@@ -517,7 +537,7 @@ def authenticate_client(
 
 
 
-def require_capability(required: Capability):
+def require_capability(required: Capability) -> Callable[..., APIKeyMetadata]:
     """Dependency factory ensuring authenticated client holds required capability."""
     def check_cap(meta: APIKeyMetadata = Security(authenticate_client)) -> APIKeyMetadata:
         if required not in meta.capabilities:

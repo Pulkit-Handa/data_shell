@@ -17,7 +17,6 @@ from datashell.core.ledger import BoundaryLedger
 from datashell.engines.drift import HistoricalDriftEngine
 from datashell.engines.metrics import MEAN, RATE, SUM, UNKNOWN, metric_kind
 
-
 CONTRACT = "drift-metric-feed"
 TENANT = "default-tenant"
 

@@ -21,8 +21,7 @@ import threading
 import time
 import urllib.request
 import uuid
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 from urllib.parse import urlsplit
 
 from datashell.core.config import settings
@@ -37,7 +36,7 @@ def _sign(body: bytes, timestamp: str) -> str:
     return hmac.new(settings.hmac_secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
 
 
-def _post(url: str, payload: Dict[str, Any], timeout: float) -> bool:
+def _post(url: str, payload: dict[str, Any], timeout: float) -> bool:
     # Defense in depth: only ever open http(s) endpoints. Configuration already
     # validates the scheme, but enforcing it here means a bad value can never
     # cause urlopen to touch a file:/ or other local scheme.
@@ -49,7 +48,6 @@ def _post(url: str, payload: Dict[str, Any], timeout: float) -> bool:
         return False
     body = json.dumps(payload).encode("utf-8")
     timestamp = str(int(time.time()))
-    signature = _sign(body, timestamp)
     for attempt in range(1, 4):
         request = urllib.request.Request(
             url,
@@ -68,7 +66,7 @@ def _post(url: str, payload: Dict[str, Any], timeout: float) -> bool:
             with urllib.request.urlopen(request, timeout=timeout):  # nosec B310
                 return True
         except Exception as exc:  # noqa: BLE001 - delivery is best-effort
-            if attempt >= _post.attempts:
+            if attempt >= _WEBHOOK_ATTEMPTS:
                 telemetry_logger.warning(
                     "Run event webhook delivery failed",
                     error_type=type(exc).__name__,
@@ -79,10 +77,10 @@ def _post(url: str, payload: Dict[str, Any], timeout: float) -> bool:
     return False
 
 
-_post.attempts = 3  # type: ignore[attr-defined]
+_WEBHOOK_ATTEMPTS = 3
 
 
-def emit_run_event(payload: dict) -> None:
+def emit_run_event(payload: dict[str, Any]) -> None:
     """Emit a ``run.completed`` event if a webhook URL is configured.
 
     Runs on a daemon thread so a slow or unavailable endpoint never blocks (or

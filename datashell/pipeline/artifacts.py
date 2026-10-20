@@ -1,13 +1,15 @@
 """Generates immutable run reconciliation ledgers and cryptographically signed audit certificates."""
 
 from __future__ import annotations
+
 import json
 from pathlib import Path
-from typing import Dict, Any, List, Optional
-from datashell.engines.reconciler import ReconciliationLedger
-from datashell.engines.quality import BatchRuleResult
-from datashell.core.crypto import CryptoEngine
+from typing import Any
+
 from datashell.core.config import settings
+from datashell.core.crypto import CryptoEngine
+from datashell.engines.quality import BatchRuleResult
+from datashell.engines.reconciler import ReconciliationLedger
 
 
 class ArtifactGenerator:
@@ -16,20 +18,20 @@ class ArtifactGenerator:
     @staticmethod
     def generate_audit_certificate(
         ledger: ReconciliationLedger,
-        batch_results: List[BatchRuleResult],
+        batch_results: list[BatchRuleResult],
         contract_name: str,
         contract_version: str,
-        contract_canonical_hash: Optional[str] = None,
-        source_file_path: Optional[Path] = None,
-        source_payload_sha256: Optional[str] = None,
-        delivered_file_path: Optional[Path] = None,
-        delivered_sha256_override: Optional[str] = None,
-        run_artifact_path: Optional[Path] = None,
-        quarantine_file_path: Optional[Path] = None,
-        quarantine_files: Optional[List[Path]] = None,
-        drift_results: Optional[List[Dict[str, Any]]] = None,
+        contract_canonical_hash: str | None = None,
+        source_file_path: Path | None = None,
+        source_payload_sha256: str | None = None,
+        delivered_file_path: Path | None = None,
+        delivered_sha256_override: str | None = None,
+        run_artifact_path: Path | None = None,
+        quarantine_file_path: Path | None = None,
+        quarantine_files: list[Path] | None = None,
+        drift_results: list[dict[str, Any]] | None = None,
         tenant_id: str = "default-tenant"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Produce tamper-evident cryptographic audit certificate."""
         
         # 1. Compute Cryptographic File Checksums
@@ -61,7 +63,7 @@ class ArtifactGenerator:
             raise FileNotFoundError(f"Delivered file '{delivered_file_path}' expected but not found on disk")
 
         # Quarantine artifacts: combine all held records and structural rejections
-        quarantine_list: List[Path] = []
+        quarantine_list: list[Path] = []
         if quarantine_files:
             for p in quarantine_files:
                 if not p.exists():
@@ -73,7 +75,7 @@ class ArtifactGenerator:
                 raise FileNotFoundError(f"Expected quarantine artifact '{p}' was not found on disk")
             quarantine_list.append(p)
 
-        quarantine_manifest: Dict[str, Any] = {}
+        quarantine_manifest: dict[str, Any] = {}
         for q_path in quarantine_list:
             quarantine_manifest[q_path.name] = {
                 "sha256": CryptoEngine.sha256_file(q_path),
@@ -88,7 +90,7 @@ class ArtifactGenerator:
 
         # 2. Canonical Contract Hash (Binds directly to full contract specification)
         contract_hash = contract_canonical_hash or CryptoEngine.sha256_bytes(
-            f"{contract_name}:{contract_version}".encode("utf-8")
+            f"{contract_name}:{contract_version}".encode()
         )
 
         # 3. Compute Merkle Root over all dataset stages
@@ -199,7 +201,7 @@ class ArtifactGenerator:
         return certificate
 
     @staticmethod
-    def verify_certificate_and_artifacts(cert_data: Dict[str, Any]) -> Dict[str, Any]:
+    def verify_certificate_and_artifacts(cert_data: dict[str, Any]) -> dict[str, Any]:
         """
         Comprehensive cryptographic verifier:
         1. Validates signature algorithm, key identifier trust, and HMAC signature integrity.
@@ -225,8 +227,8 @@ class ArtifactGenerator:
         # The keyring is the source of truth. A key ID on an allowlist without
         # its actual key material is not a trusted signing key.
         payload = {k: v for k, v in cert_data.items() if k != "digital_signature"}
-        verification_secret: Optional[str] = None
-        verification_public_key: Optional[str] = None
+        verification_secret: str | None = None
+        verification_public_key: str | None = None
         if algorithm == "HMAC-SHA256":
             trusted_keyring = getattr(settings, "trusted_hmac_keys", {})
             verification_secret = CryptoEngine.resolve_verification_secret(key_id, trusted_keyring)
@@ -243,7 +245,12 @@ class ArtifactGenerator:
         header_intact = True
         if "signature_header" in cert_data:
             sig_hdr = cert_data["signature_header"]
-            if not isinstance(sig_hdr, dict) or sig_hdr.get("key_id") != key_id or sig_hdr.get("algorithm") != algorithm:
+            sig_ok = (
+                isinstance(sig_hdr, dict)
+                and sig_hdr.get("key_id") == key_id
+                and sig_hdr.get("algorithm") == algorithm
+            )
+            if not sig_ok:
                 header_intact = False
 
         if not key_trusted or not header_intact:
@@ -256,9 +263,13 @@ class ArtifactGenerator:
             except (TypeError, ValueError):
                 sig_valid = False
         else:  # Ed25519
-            sig_valid = isinstance(signature, str) and CryptoEngine.verify_signature_ed25519(
-                payload, signature, verification_public_key
-            )
+            # key_trusted checked above means a resolved verification key exists
+            if not isinstance(signature, str) or verification_public_key is None:
+                sig_valid = False
+            else:
+                sig_valid = CryptoEngine.verify_signature_ed25519(
+                    payload, signature, verification_public_key
+                )
 
         # Never dereference artifact paths from an untrusted certificate. A
         # modified certificate could otherwise turn verification into an
@@ -289,7 +300,7 @@ class ArtifactGenerator:
 
         # 2. Recompute and verify underlying data artifacts only after the
         # certificate signature is authentic.
-        artifact_details: Dict[str, Any] = {}
+        artifact_details: dict[str, Any] = {}
         manifest = cert_data.get("cryptographic_manifest", {})
         if not isinstance(manifest, dict):
             return {
@@ -317,7 +328,7 @@ class ArtifactGenerator:
             delivery_roots.extend([settings.output_dir.resolve(), Path(tempfile.gettempdir()).resolve()])
             quarantine_roots.extend([settings.quarantine_dir.resolve(), Path(tempfile.gettempdir()).resolve()])
 
-        def safe_artifact_path(raw_path: Any, allowed_roots: list[Path], label: str) -> Optional[Path]:
+        def safe_artifact_path(raw_path: Any, allowed_roots: list[Path], label: str) -> Path | None:
             if not isinstance(raw_path, str) or not raw_path.strip():
                 artifact_details[label] = {"status": "UNSAFE_PATH"}
                 return None
@@ -375,7 +386,10 @@ class ArtifactGenerator:
                     try:
                         actual_active_hash = CryptoEngine.sha256_file(active_file)
                         artifact_details["active_delivered_target"] = {
-                            "status": "VERIFIED" if actual_active_hash == expected_delivered_hash else "SUPERSEDED_OR_MODIFIED",
+                            "status": (
+                                "VERIFIED" if actual_active_hash == expected_delivered_hash
+                                else "SUPERSEDED_OR_MODIFIED"
+                            ),
                             "expected_sha256": expected_delivered_hash,
                             "sha256": actual_active_hash,
                             "path": str(active_file)
@@ -422,7 +436,8 @@ class ArtifactGenerator:
                     artifact_details[str(q_name)] = {"status": "UNSAFE_PATH"}
                     continue
                 candidate = tenant_quarantine_dir / q_name
-                if not candidate.exists() and not settings.is_production_mode and (settings.quarantine_dir / q_name).exists():
+                fallback_exists = (settings.quarantine_dir / q_name).exists()
+                if not candidate.exists() and not settings.is_production_mode and fallback_exists:
                     candidate = settings.quarantine_dir / q_name
                 q_file = safe_artifact_path(str(candidate), quarantine_roots, q_name)
 
@@ -458,7 +473,10 @@ class ArtifactGenerator:
                     }
 
         any_missing = any(v.get("status") == "MISSING" for v in artifact_details.values())
-        any_modified = any(v.get("status") in ("MODIFIED", "ERROR_READING", "UNSAFE_PATH") for v in artifact_details.values())
+        any_modified = any(
+            v.get("status") in ("MODIFIED", "ERROR_READING", "UNSAFE_PATH")
+            for v in artifact_details.values()
+        )
         all_artifacts_ok = not any_missing and not any_modified and len(artifact_details) > 0
 
         if not key_trusted:
@@ -482,14 +500,16 @@ class ArtifactGenerator:
             "signature_algorithm": algorithm,
             "key_id": key_id,
             "key_trusted": key_trusted,
-            "artifacts_verified": all_artifacts_ok or (delivered_status != "DELIVERED" and not any_missing and not any_modified),
+            "artifacts_verified": all_artifacts_ok or (
+                delivered_status != "DELIVERED" and not any_missing and not any_modified
+            ),
             "artifacts_status": artifacts_status,
             "status": overall_status,
             "artifact_details": artifact_details
         }
 
     @staticmethod
-    def save_audit_file(audit_data: Dict[str, Any], output_path: Path) -> Path:
+    def save_audit_file(audit_data: dict[str, Any], output_path: Path) -> Path:
         """Persist audit JSON certificate to disk atomically."""
         output_path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = output_path.with_name(f".tmp_{output_path.name}")

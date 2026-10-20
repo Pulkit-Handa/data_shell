@@ -34,7 +34,9 @@ def api_ledger(tmp_path, monkeypatch):
     ledger = BoundaryLedger(db)
     ledger.record_run("run-alpha", "contract-a", 100, 90, {}, tenant_id="alpha", status="LOADED", rows_held=10)
     ledger.record_run("run-beta", "contract-b", 50, 50, {}, tenant_id="beta", status="LOADED")
-    ledger.record_quarantine("run-alpha", "alpha", "contract-a", "held_quality", str(tmp_path / "q.parquet"), 10, {"amount-positive": 10})
+    ledger.record_quarantine(
+        "run-alpha", "alpha", "contract-a", "held_quality",
+        str(tmp_path / "q.parquet"), 10, {"amount-positive": 10})
     ledger.record_usage("run-alpha", "alpha", "contract-a", "LOADED", "batch", 100, 90, bytes_processed=4096)
     monkeypatch.setattr(app_module, "BoundaryLedger", lambda: BoundaryLedger(db))
     return db

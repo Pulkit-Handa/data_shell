@@ -7,8 +7,8 @@ import json
 import pytest
 
 from datashell.cli import main as cli
-from datashell.core.ledger import BoundaryLedger
 from datashell.contract.models import DataContract
+from datashell.core.ledger import BoundaryLedger
 from datashell.pipeline.runner import DataShellPipeline
 
 
@@ -25,7 +25,9 @@ def _seed(tmp_path):
         "run-2", "contract-a", 50, 0, {}, tenant_id="alpha", status="REJECTED",
         is_run_rejected=True, rows_held=50, rejection_reason="min row count",
     )
-    ledger.record_quarantine("run-1", "alpha", "contract-a", "held_quality", str(tmp_path / "q.parquet"), 6, {"amount-positive": 6})
+    ledger.record_quarantine(
+        "run-1", "alpha", "contract-a", "held_quality",
+        str(tmp_path / "q.parquet"), 6, {"amount-positive": 6})
     ledger.record_usage("run-1", "alpha", "contract-a", "LOADED", "batch", 100, 90, bytes_processed=2048)
     return db
 
@@ -136,7 +138,10 @@ def test_verify_real_certificate_is_authentic(tmp_path, capsys):
                 "batch_rules": [{"rule_id": "min-3", "check": "MIN_ROW_COUNT", "value": 3}],
             },
             "delivery": {
-                "targets": [{"type": "PARQUET", "connectionRef": "local", "path": str(tmp_path / "out.parquet"), "mode": "overwrite"}],
+                "targets": [{
+                    "type": "PARQUET", "connectionRef": "local",
+                    "path": str(tmp_path / "out.parquet"), "mode": "overwrite",
+                }],
                 "quarantinePath": str(tmp_path / "quarantine"),
             },
         },
@@ -169,7 +174,10 @@ def test_verify_detects_a_tampered_artifact(tmp_path, capsys):
             }],
             "quality": {"behavior": "DROP_ROW", "rules": []},
             "delivery": {
-                "targets": [{"type": "PARQUET", "connectionRef": "local", "path": str(tmp_path / "out.parquet"), "mode": "overwrite"}],
+                "targets": [{
+                    "type": "PARQUET", "connectionRef": "local",
+                    "path": str(tmp_path / "out.parquet"), "mode": "overwrite",
+                }],
                 "quarantinePath": str(tmp_path / "quarantine"),
             },
         },

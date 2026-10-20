@@ -1,19 +1,28 @@
 """Exhaustive regression test suite verifying remediation of all audit findings."""
 
-import pytest
-from pathlib import Path
+
 import polars as pl
+import pytest
 
 from datashell.contract.models import (
-    DataContract, SourceDefinition, SchemaColumn, QualitySpec,
-    QualityRule, BatchRule, RowRuleCheckType, BatchRuleCheckType,
-    QualityBehavior, DeliverySpec, DeliveryTarget, ExtraColumnsPolicy
+    BatchRule,
+    BatchRuleCheckType,
+    DataContract,
+    DeliverySpec,
+    DeliveryTarget,
+    ExtraColumnsPolicy,
+    QualityBehavior,
+    QualityRule,
+    QualitySpec,
+    RowRuleCheckType,
+    SchemaColumn,
+    SourceDefinition,
 )
-from datashell.engines.quality import SemanticQualityEngine
-from datashell.engines.ingestion import StructuralIngestionEngine
-from datashell.pipeline.runner import DataShellPipeline
 from datashell.contract.registry import ContractRegistry
 from datashell.core.sandbox import FilesystemSandbox, PathSecurityViolation
+from datashell.engines.ingestion import StructuralIngestionEngine
+from datashell.engines.quality import SemanticQualityEngine
+from datashell.pipeline.runner import DataShellPipeline
 
 
 def test_empty_input_does_not_bypass_batch_validation():
@@ -95,7 +104,8 @@ def test_quality_policy_warn_does_not_drop_rows():
 
 
 def test_reject_run_on_row_failures_stops_delivery_and_records_zero_delivered(tmp_path):
-    """Audit Finding: REJECT_RUN with row failures must reject whole run, record 0 delivered, and preserve quarantine."""
+    """Audit Finding: REJECT_RUN with row failures must reject the whole run,
+    record 0 delivered, and preserve quarantine."""
     target_out = tmp_path / "out.parquet"
     contract = DataContract(
         metadata={"name": "test-reject-row"},
@@ -273,6 +283,7 @@ def test_atomic_delivery_leaves_no_staged_artifacts(tmp_path):
 def test_cli_exit_code_on_rejection(tmp_path, monkeypatch):
     """Audit Finding: CLI must exit with code 2 on REJECTED status, not 0."""
     import json
+
     from datashell.cli.main import main
 
     # Create contract JSON that rejects run on violations

@@ -1,6 +1,4 @@
-import pytest
-import polars as pl
-from datashell.contract.models import DataContract, SourceDefinition, SchemaColumn
+from datashell.contract.models import DataContract, SchemaColumn, SourceDefinition
 from datashell.engines.ingestion import StructuralIngestionEngine
 
 

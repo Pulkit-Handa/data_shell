@@ -1,10 +1,9 @@
-import pytest
 import polars as pl
-from datashell.contract.models import (
-    DataContract, SourceDefinition, SchemaColumn, DeliverySpec, DeliveryTarget
-)
-from datashell.engines.reconciler import Reconciler, ReconciliationFootingError
+import pytest
+
+from datashell.contract.models import DataContract, DeliverySpec, DeliveryTarget, SchemaColumn, SourceDefinition
 from datashell.engines.delivery import DeliveryEngine, TerminalStatus
+from datashell.engines.reconciler import Reconciler, ReconciliationFootingError
 
 
 def test_reconciler_balances_perfectly():

@@ -1,16 +1,17 @@
-import pytest
 import json
 from pathlib import Path
+
 import polars as pl
+
 from datashell.contract.models import DataContract
-from datashell.pipeline.runner import DataShellPipeline
 from datashell.engines.delivery import TerminalStatus
+from datashell.pipeline.runner import DataShellPipeline
 
 
 def test_end_to_end_boundary_enforcement(tmp_path):
     # 1. Load contract
     contract_path = Path(__file__).parent.parent / "examples" / "vendor_settlements_contract.json"
-    with open(contract_path, "r") as f:
+    with open(contract_path) as f:
         contract_data = json.load(f)
     contract = DataContract(**contract_data)
 

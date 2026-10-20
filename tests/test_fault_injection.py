@@ -9,27 +9,19 @@ No real credentials or production data are used.
 from __future__ import annotations
 
 import json
-import os
-import signal
-import subprocess
-import sys
-import tempfile
-import time
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 pytest.importorskip("polars")
 
+from datashell.contract.models import DataContract
 from datashell.core.commit import (
     publish_transactionally,
-    recover_publication,
     recover_pending_publications,
+    recover_publication,
 )
-from datashell.core.config import EnterpriseSettings, settings
 from datashell.core.ledger import BoundaryLedger
-from datashell.contract.models import DataContract
 from datashell.pipeline.runner import DataShellPipeline
 
 
@@ -88,7 +80,8 @@ class TestCrashDuringPublication:
                 "had_original": False,
             }],
         }
-        journal_path = tmp_path / f".dm-commit-{__import__('hashlib').sha256(str(target).encode()).hexdigest()[:20]}.json"
+        digest_target = __import__("hashlib").sha256(str(target).encode()).hexdigest()[:20]
+        journal_path = tmp_path / f".dm-commit-{digest_target}.json"
         journal_path.write_text(json.dumps(journal_data))
 
         # Recovery should roll back: target should not exist, staged should be cleaned
@@ -114,11 +107,20 @@ class TestCrashDuringPublication:
             "run_id": run_id,
             "state": "prepared",
             "entries": [
-                {"staged": str(staged1), "final": str(target1), "backup": str(target1.with_name(f".{target1.name}.{run_id}.0.backup")), "had_original": False},
-                {"staged": str(staged2), "final": str(target2), "backup": str(target2.with_name(f".{target2.name}.{run_id}.1.backup")), "had_original": False},
+                {
+                    "staged": str(staged1), "final": str(target1),
+                    "backup": str(target1.with_name(f".{target1.name}.{run_id}.0.backup")),
+                    "had_original": False,
+                },
+                {
+                    "staged": str(staged2), "final": str(target2),
+                    "backup": str(target2.with_name(f".{target2.name}.{run_id}.1.backup")),
+                    "had_original": False,
+                },
             ],
         }
-        journal_path = tmp_path / f".dm-commit-{__import__('hashlib').sha256(str(target2).encode()).hexdigest()[:20]}.json"
+        digest_target2 = __import__("hashlib").sha256(str(target2).encode()).hexdigest()[:20]
+        journal_path = tmp_path / f".dm-commit-{digest_target2}.json"
         journal_path.write_text(json.dumps(journal_data))
 
         # Recovery should remove target1 (it was published but not committed)
@@ -149,7 +151,8 @@ class TestCrashDuringPublication:
                 "had_original": False,
             }],
         }
-        journal_path = tmp_path / f".dm-commit-{__import__('hashlib').sha256(str(target).encode()).hexdigest()[:20]}.json"
+        digest_target = __import__("hashlib").sha256(str(target).encode()).hexdigest()[:20]
+        journal_path = tmp_path / f".dm-commit-{digest_target}.json"
         journal_path.write_text(json.dumps(journal_data))
 
         # Recovery should clean up backup and journal, keep target
@@ -181,7 +184,8 @@ class TestCrashDuringPublication:
                 "had_original": True,
             }],
         }
-        journal_path = tmp_path / f".dm-commit-{__import__('hashlib').sha256(str(target).encode()).hexdigest()[:20]}.json"
+        digest_target = __import__("hashlib").sha256(str(target).encode()).hexdigest()[:20]
+        journal_path = tmp_path / f".dm-commit-{digest_target}.json"
         journal_path.write_text(json.dumps(journal_data))
 
         recover_publication(target, transaction_root=tmp_path)
@@ -248,7 +252,6 @@ class TestLedgerUnavailable:
         pipeline = DataShellPipeline(contract)
 
         # Make ledger recording fail
-        original_record = pipeline.history_tracker.record_run
         def failing_record(*args, **kwargs):
             raise Exception("Simulated ledger failure")
 

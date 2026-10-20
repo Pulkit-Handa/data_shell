@@ -1,11 +1,18 @@
 """Enterprise Webhook & Event Dispatcher with HMAC Signature Non-Repudiation."""
 
 from __future__ import annotations
-import json
+
 import time
-from typing import Dict, Any, Optional
-import httpx
+from typing import Any
 from urllib.parse import urlsplit
+
+try:
+    import httpx
+except ImportError as _exc:  # pragma: no cover - exercised only outside the extra
+    raise ImportError(
+        "The webhook dispatcher requires the 'billing' extra "
+        "(it reuses the signed HTTP client). Install it with: pip install datashell[billing]"
+    ) from _exc
 
 from datashell.core.crypto import CryptoEngine
 from datashell.core.telemetry import telemetry_logger
@@ -18,8 +25,8 @@ class WebhookDispatcher:
     def dispatch(
         url: str,
         event_type: str,
-        payload: Dict[str, Any],
-        secret_key: Optional[str] = None,
+        payload: dict[str, Any],
+        secret_key: str | None = None,
         timeout_seconds: float = 5.0
     ) -> bool:
         """

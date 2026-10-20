@@ -17,14 +17,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import sqlite3
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 def _sha256_file(path: Path) -> str:
@@ -37,10 +36,10 @@ def _sha256_file(path: Path) -> str:
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
-def create_backup(storage_root: Path, backup_dir: Path) -> Dict[str, Any]:
+def create_backup(storage_root: Path, backup_dir: Path) -> dict[str, Any]:
     """Create a consistent backup of the storage root.
 
     Uses SQLite's online backup API for the ledger to avoid corruption
@@ -51,7 +50,7 @@ def create_backup(storage_root: Path, backup_dir: Path) -> Dict[str, Any]:
     backup_dir = Path(backup_dir).resolve()
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    manifest: Dict[str, Any] = {
+    manifest: dict[str, Any] = {
         "version": 1,
         "created_at": _utcnow(),
         "storage_root": str(storage_root),
@@ -121,7 +120,7 @@ def create_backup(storage_root: Path, backup_dir: Path) -> Dict[str, Any]:
     return manifest
 
 
-def restore_backup(backup_dir: Path, restore_root: Path) -> Dict[str, Any]:
+def restore_backup(backup_dir: Path, restore_root: Path) -> dict[str, Any]:
     """Restore a backup into an isolated environment.
 
     Returns a report with restore metrics and verification results.
@@ -134,7 +133,7 @@ def restore_backup(backup_dir: Path, restore_root: Path) -> Dict[str, Any]:
 
     # Read manifest
     manifest_path = backup_dir / "backup_manifest.json"
-    with open(manifest_path, "r") as f:
+    with open(manifest_path) as f:
         manifest = json.load(f)
 
     # Verify and restore each file
@@ -184,10 +183,10 @@ def restore_backup(backup_dir: Path, restore_root: Path) -> Dict[str, Any]:
     }
 
 
-def verify_restore(restore_root: Path) -> Dict[str, Any]:
+def verify_restore(restore_root: Path) -> dict[str, Any]:
     """Verify restored ledger/artifact consistency and certificate verification."""
     restore_root = Path(restore_root).resolve()
-    report: Dict[str, Any] = {
+    report: dict[str, Any] = {
         "restore_root": str(restore_root),
         "verified_at": _utcnow(),
         "checks": {},

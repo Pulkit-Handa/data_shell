@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Distribution name `data-shell` → `datashell`.** The import package and the
+  pip distribution now share one name, so `pip install datashell` is all a new
+  user needs. Service identity in `/health` and `--version` banners follow the
+  distribution. The Airflow helper distribution is likewise renamed
+  `datashell-airflow`.
+- **Capability extras replace the monolithic dependency set.** The base install
+  is the enforcement core only (polars, pyarrow, pydantic, cryptography,
+  prometheus-client). Optional features move to extras: `server` (FastAPI
+  gateway + uvicorn + python-multipart), `duckdb` (SQL batch-rule engine),
+  `billing` (httpx for the signed Stripe adapter), `airflow`, and `all`.
+  Even-sized service nodes (deterministic-boundary scrape nodes) no longer pull
+  a web framework or an in-process SQL engine; `numpy` moved to the dev extra
+  (nothing in the package imports it).
+- **`datashell doctor`.** New CLI command that reports which capabilities the
+  current environment has (core, extras, storage, production posture) — JSON
+  via `--json` — and exits 1 only when the enforcement core is impaired.
+
 ### Fixed
 - **CLI `run` → `verify` continuity without explicit secrets.** Non-production runs
   without `DATASHELL_HMAC_SECRET` now reuse a per-workspace development HMAC secret

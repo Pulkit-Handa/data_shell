@@ -20,10 +20,9 @@ column names.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Union
+from typing import Any
 
 import polars as pl
-
 
 # Metric-name prefixes produced by this module. The drift engine imports these
 # instead of re-declaring the convention.
@@ -53,9 +52,9 @@ def metric_kind(name: str) -> str:
     return UNKNOWN
 
 
-def _metric_expressions(schema: Dict[str, pl.DataType]) -> List[pl.Expr]:
+def _metric_expressions(schema: dict[str, pl.DataType]) -> list[pl.Expr]:
     """Build the deterministic metric expressions for a column schema."""
-    exprs: List[pl.Expr] = []
+    exprs: list[pl.Expr] = []
     for name, dtype in schema.items():
         # Null rate is meaningful for every column type.
         exprs.append(pl.col(name).is_null().mean().alias(f"null_rate_{name}"))
@@ -65,29 +64,33 @@ def _metric_expressions(schema: Dict[str, pl.DataType]) -> List[pl.Expr]:
     return exprs
 
 
-def _floats_from_row(row: Dict[str, object]) -> Dict[str, float]:
-    metrics: Dict[str, float] = {}
+def _floats_from_row(row: dict[str, object]) -> dict[str, float]:
+    metrics: dict[str, float] = {}
     for name, value in row.items():
         if value is None:
             continue
+        # Polars hands back the named-row values as dynamically typed objects
+        # (scalar wrappers around the column dtype); converting through Any
+        # mirrors their runtime duck-typing without weakening the result type.
+        candidate: Any = value
         try:
-            metrics[name] = float(value)
+            metrics[name] = float(candidate)
         except (TypeError, ValueError):
             continue
     return metrics
 
 
-def compute_metrics(df: pl.DataFrame) -> Dict[str, float]:
+def compute_metrics(df: pl.DataFrame) -> dict[str, float]:
     """Compute feed metrics for an in-memory (admitted) dataframe."""
     if df.height == 0 or not df.columns:
         return {}
-    exprs = _metric_expressions({name: dtype for name, dtype in zip(df.columns, df.dtypes)})
+    exprs = _metric_expressions({name: dtype for name, dtype in zip(df.columns, df.dtypes, strict=True)})
     if not exprs:
         return {}
     return _floats_from_row(df.select(exprs).row(0, named=True))
 
 
-def compute_metrics_from_parquet(path: Union[str, Path]) -> Dict[str, float]:
+def compute_metrics_from_parquet(path: str | Path) -> dict[str, float]:
     """Compute feed metrics out-of-core from a delivered/lined-up Parquet file.
 
     Uses a lazy scan so multi-gigabyte outputs are aggregated in bounded memory,

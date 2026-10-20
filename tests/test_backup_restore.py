@@ -7,15 +7,34 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 
 import pytest
 
 pytest.importorskip("polars")
 
 from scripts.backup_restore import create_backup, restore_backup, verify_restore
-from datashell.core.ledger import BoundaryLedger
 
+
+def _seed_legacy_schema(conn: sqlite3.Connection) -> None:
+    """Create the pre-migration (1.0.0) ledger tables exactly as they shipped."""
+    conn.execute(
+        "CREATE TABLE run_history ("
+        "run_id TEXT PRIMARY KEY, tenant_id TEXT, contract_name TEXT, timestamp TEXT, "
+        "rows_read INTEGER, rows_delivered INTEGER, metrics_json TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE quarantine_index ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, tenant_id TEXT NOT NULL, "
+        "contract_name TEXT, timestamp TEXT NOT NULL, kind TEXT NOT NULL, artifact_path TEXT, "
+        "row_count INTEGER DEFAULT 0, dominant_reason TEXT, reasons_json TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE usage_records ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, tenant_id TEXT NOT NULL, "
+        "timestamp TEXT NOT NULL, status TEXT, execution_mode TEXT, rows_read INTEGER DEFAULT 0, "
+        "rows_delivered INTEGER DEFAULT 0, bytes_processed INTEGER DEFAULT 0, "
+        "billable INTEGER DEFAULT 1, unit TEXT DEFAULT 'row', units INTEGER DEFAULT 0)"
+    )
 
 class TestBackupRestore:
     """Backup and restore produce consistent state."""
@@ -32,7 +51,7 @@ class TestBackupRestore:
         # Create a test ledger
         db_path = output / "datashell_history.db"
         conn = sqlite3.connect(str(db_path))
-        conn.execute("CREATE TABLE run_history (run_id TEXT PRIMARY KEY, tenant_id TEXT, contract_name TEXT, timestamp TEXT, rows_read INTEGER, rows_delivered INTEGER, metrics_json TEXT)")
+        _seed_legacy_schema(conn)
         conn.execute("INSERT INTO run_history VALUES ('run1', 'tenant-a', 'test', '2026-01-01', 100, 90, '{}')")
         conn.commit()
         conn.close()
@@ -60,9 +79,7 @@ class TestBackupRestore:
         # Create a test ledger with all expected tables
         db_path = output / "datashell_history.db"
         conn = sqlite3.connect(str(db_path))
-        conn.execute("CREATE TABLE run_history (run_id TEXT PRIMARY KEY, tenant_id TEXT, contract_name TEXT, timestamp TEXT, rows_read INTEGER, rows_delivered INTEGER, metrics_json TEXT)")
-        conn.execute("CREATE TABLE quarantine_index (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, tenant_id TEXT NOT NULL, contract_name TEXT, timestamp TEXT NOT NULL, kind TEXT NOT NULL, artifact_path TEXT, row_count INTEGER DEFAULT 0, dominant_reason TEXT, reasons_json TEXT)")
-        conn.execute("CREATE TABLE usage_records (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, tenant_id TEXT NOT NULL, contract_name TEXT, timestamp TEXT NOT NULL, status TEXT, execution_mode TEXT, rows_read INTEGER DEFAULT 0, rows_delivered INTEGER DEFAULT 0, bytes_processed INTEGER DEFAULT 0, billable INTEGER DEFAULT 1, unit TEXT DEFAULT 'row', units INTEGER DEFAULT 0)")
+        _seed_legacy_schema(conn)
         conn.execute("INSERT INTO run_history VALUES ('run1', 'tenant-a', 'test', '2026-01-01', 100, 90, '{}')")
         conn.commit()
         conn.close()
@@ -108,9 +125,7 @@ class TestBackupRestore:
         # Create a test ledger with all expected tables
         db_path = output / "datashell_history.db"
         conn = sqlite3.connect(str(db_path))
-        conn.execute("CREATE TABLE run_history (run_id TEXT PRIMARY KEY, tenant_id TEXT, contract_name TEXT, timestamp TEXT, rows_read INTEGER, rows_delivered INTEGER, metrics_json TEXT)")
-        conn.execute("CREATE TABLE quarantine_index (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, tenant_id TEXT NOT NULL, contract_name TEXT, timestamp TEXT NOT NULL, kind TEXT NOT NULL, artifact_path TEXT, row_count INTEGER DEFAULT 0, dominant_reason TEXT, reasons_json TEXT)")
-        conn.execute("CREATE TABLE usage_records (id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, tenant_id TEXT NOT NULL, contract_name TEXT, timestamp TEXT NOT NULL, status TEXT, execution_mode TEXT, rows_read INTEGER DEFAULT 0, rows_delivered INTEGER DEFAULT 0, bytes_processed INTEGER DEFAULT 0, billable INTEGER DEFAULT 1, unit TEXT DEFAULT 'row', units INTEGER DEFAULT 0)")
+        _seed_legacy_schema(conn)
         conn.execute("INSERT INTO run_history VALUES ('run1', 'tenant-a', 'test', '2026-01-01', 100, 90, '{}')")
         conn.commit()
         conn.close()

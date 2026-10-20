@@ -8,9 +8,9 @@ If it does not, delivery REFUSES TO WRITE.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Dict, Optional, List
+from datetime import UTC, datetime
 
 
 class ReconciliationFootingError(Exception):
@@ -32,9 +32,9 @@ class ReconciliationLedger:
     pct_delivered: float
     pct_refused_or_held: float
     is_run_rejected: bool = False
-    rejection_reason: Optional[str] = None
-    rule_breakdown: Dict[str, int] = field(default_factory=dict)
-    structural_reasons: Dict[str, int] = field(default_factory=dict)
+    rejection_reason: str | None = None
+    rule_breakdown: dict[str, int] = field(default_factory=dict)
+    structural_reasons: dict[str, int] = field(default_factory=dict)
 
     def mark_rejected(self, reason: str) -> None:
         """Updates ledger when whole run is rejected by contract gate."""
@@ -64,7 +64,8 @@ class ReconciliationLedger:
             "├─────────────────────────────────────────────────────────────┤",
             f"│ Unaccounted for:                          {status:>17} │",
             "├─────────────────────────────────────────────────────────────┤",
-            f"│ Delivered: {self.pct_delivered:>6.2f}%    |   Refused / Held: {self.pct_refused_or_held:>6.2f}%       │",
+            f"│ Delivered: {self.pct_delivered:>6.2f}%     "
+            f"|   Refused / Held: {self.pct_refused_or_held:>6.2f}%      │",
             "└─────────────────────────────────────────────────────────────┘",
         ]
         return "\n".join(lines)
@@ -83,8 +84,8 @@ class Reconciler:
         refused_structural: int,
         held_quality: int,
         rows_to_deliver: int,
-        rule_breakdown: Optional[Dict[str, int]] = None,
-        structural_reasons: Optional[Dict[str, int]] = None,
+        rule_breakdown: dict[str, int] | None = None,
+        structural_reasons: dict[str, int] | None = None,
     ) -> ReconciliationLedger:
         """
         Calculates balance and determines whether the arithmetic foots.
@@ -98,7 +99,7 @@ class Reconciler:
 
         ledger = ReconciliationLedger(
             run_id=run_id,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             rows_read=rows_read,
             refused_structural=refused_structural,
             held_quality=held_quality,

@@ -12,32 +12,33 @@ Covers:
 9. P2: Disallowing credentials in query parameters (header-only authentication).
 """
 
-import os
-import shutil
-import tempfile
-import pytest
-from datetime import datetime, date
 from pathlib import Path
+
 import polars as pl
-import pyarrow.parquet as pq
+import pytest
 from fastapi.testclient import TestClient
 
-from datashell.core.config import _resolve_secret, EnterpriseSettings, settings
-from datashell.core.security import (
-    authenticate_client, APIKeyMetadata, Role, Capability,
-    register_api_key, API_KEY_STORE, TokenBucketRateLimiter
-)
-from datashell.core.sandbox import FilesystemSandbox, PathSecurityViolation
 from datashell.contract.models import (
-    DataContract, SourceDefinition, SchemaColumn, DeliverySpec, DeliveryTarget,
-    QualitySpec, QualityRule, BatchRule, QualityBehavior, RuleCheckType, BatchRuleCheckType
+    BatchRule,
+    BatchRuleCheckType,
+    DataContract,
+    DeliverySpec,
+    DeliveryTarget,
+    QualityBehavior,
+    QualityRule,
+    QualitySpec,
+    RuleCheckType,
+    SchemaColumn,
+    SourceDefinition,
 )
+from datashell.core.config import EnterpriseSettings, _resolve_secret, settings
+from datashell.core.sandbox import FilesystemSandbox, PathSecurityViolation
+from datashell.core.security import Capability, Role
+from datashell.engines.delivery import TerminalStatus
 from datashell.engines.drift import ContractHistoryTracker, HistoricalDriftEngine
-from datashell.pipeline.runner import DataShellPipeline
 from datashell.pipeline.artifacts import ArtifactGenerator
-from datashell.engines.delivery import safe_json_dumps, TerminalStatus
+from datashell.pipeline.runner import DataShellPipeline
 from datashell.server.app import app
-
 
 # --------------------------------------------------------------------------
 # 1. P0: Production Secret Entropy & Placeholder Validation
@@ -245,7 +246,9 @@ def test_streaming_rejection_serialization_with_dates_and_out_of_core_duckdb(tmp
     )
 
     pipeline = DataShellPipeline(contract=contract)
-    res = pipeline.run_streaming(source_path=input_file, chunk_size=2, audit_output_path=str(tmp_path / "stream_types_audit.json"))
+    res = pipeline.run_streaming(
+        source_path=input_file, chunk_size=2,
+        audit_output_path=str(tmp_path / "stream_types_audit.json"))
 
     # 3 conforming rows should be delivered, 1 structural rejection quarantined
     assert res.status == TerminalStatus.LOADED
@@ -326,7 +329,10 @@ def test_audit_verification_detects_tampered_or_missing_underlying_artifacts(tmp
             "sources": [
                 SourceDefinition(
                     path=str(input_file),
-                    schema=[SchemaColumn(name="id", polars_type="Int64"), SchemaColumn(name="val", polars_type="Float64")]
+                    schema=[
+                        SchemaColumn(name="id", polars_type="Int64"),
+                        SchemaColumn(name="val", polars_type="Float64"),
+                    ]
                 )
             ],
             "delivery": DeliverySpec(targets=[DeliveryTarget(path=str(target_file))])

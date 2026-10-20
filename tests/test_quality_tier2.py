@@ -1,8 +1,13 @@
-import pytest
 import polars as pl
+
 from datashell.contract.models import (
-    DataContract, SourceDefinition, SchemaColumn,
-    QualityRule, BatchRule, RowRuleCheckType, BatchRuleCheckType
+    BatchRule,
+    BatchRuleCheckType,
+    DataContract,
+    QualityRule,
+    RowRuleCheckType,
+    SchemaColumn,
+    SourceDefinition,
 )
 from datashell.engines.quality import SemanticQualityEngine
 

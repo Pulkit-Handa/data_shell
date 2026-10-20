@@ -889,7 +889,7 @@ async def _enforce_upload(
 
 @app.get("/health")
 async def health() -> Dict[str, str]:
-    return {"status": "ok", "service": "data-shell-demo"}
+    return {"status": "ok", "service": "datashell-demo"}
 
 
 @app.get("/")

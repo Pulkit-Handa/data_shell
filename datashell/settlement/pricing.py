@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import List, Optional, Tuple
+from typing import Any
 
 from datashell.settlement.models import (
     PricingModel,
@@ -27,9 +27,9 @@ from datashell.settlement.money import MAX_GROSS_AMOUNT_MINOR, MoneyValidationEr
 @dataclass
 class PricingResult:
     gross_amount_minor: int
-    tiers_applied: List[dict] = field(default_factory=list)
-    proration_ratio: Optional[str] = None
-    notes: List[str] = field(default_factory=list)
+    tiers_applied: list[dict[str, Any]] = field(default_factory=list)
+    proration_ratio: str | None = None
+    notes: list[str] = field(default_factory=list)
 
 
 def _cap(gross: int, pricing: PricingSpec) -> int:
@@ -74,12 +74,12 @@ def price_tiered(pricing: PricingSpec, qualified_units: int) -> PricingResult:
         raise MoneyValidationError("TIERED_PRICING requires tier bands")
     if qualified_units < 0:
         raise MoneyValidationError("qualified_units cannot be negative")
-    tiers: List[TierBand] = sorted(pricing.tiers, key=lambda t: t.min_units)
+    tiers: list[TierBand] = sorted(pricing.tiers, key=lambda t: t.min_units)
     if tiers[0].min_units != 0:
         raise MoneyValidationError("tiered pricing must start at min_units=0")
 
     gross = 0
-    applied: List[dict] = []
+    applied: list[dict[str, Any]] = []
     remaining = qualified_units
     for band in tiers:
         if remaining <= 0:
@@ -123,7 +123,7 @@ def price_tiered(pricing: PricingSpec, qualified_units: int) -> PricingResult:
 def price_prorated_short_delivery(
     pricing: PricingSpec,
     qualified_units: int,
-    expected_units: Optional[int],
+    expected_units: int | None,
     short_delivery: bool,
 ) -> PricingResult:
     """Apply the agreed contractual formula when a batch is incomplete.
@@ -144,7 +144,11 @@ def price_prorated_short_delivery(
     return PricingResult(
         gross_amount_minor=_cap(gross, pricing),
         proration_ratio=f"{pricing.proration_numerator}/{pricing.proration_denominator}",
-        notes=[f"short delivery proration {pricing.proration_numerator}/{pricing.proration_denominator} applied to {base.gross_amount_minor} minor"],
+        notes=[
+            "short delivery proration "
+            f"{pricing.proration_numerator}/{pricing.proration_denominator} "
+            f"applied to {base.gross_amount_minor} minor"
+        ],
     )
 
 
@@ -161,7 +165,7 @@ def price_hold_or_dispute() -> PricingResult:
 def calculate(
     pricing: PricingSpec,
     qualified_units: int,
-    expected_units: Optional[int] = None,
+    expected_units: int | None = None,
     short_delivery: bool = False,
     hold: bool = False,
 ) -> PricingResult:

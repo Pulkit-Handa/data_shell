@@ -5,7 +5,6 @@ and configurations. Uses explicit resource budgets and acceptance thresholds.
 """
 from __future__ import annotations
 
-import os
 import resource
 import time
 from pathlib import Path

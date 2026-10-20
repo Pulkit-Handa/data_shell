@@ -3,30 +3,63 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "data-shell"
+name = "datashell"
 version = "1.0.2"
 description = "Contract-driven boundary enforcement engine: Bad data never lands, and never leaves."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "polars>=2.0.0,<3.0.0",
-    "duckdb>=1.0.0,<2.0.0",
     "pyarrow>=14.0.0,<27.0.0",
     "pydantic>=2.9.0,<3.0.0",
-    "fastapi>=0.110.0,<1.0.0",
-    "uvicorn>=0.28.0,<1.0.0",
-    "python-multipart>=0.0.9,<1.0.0",
-    "prometheus-client>=0.20.0,<1.0.0",
-    "httpx>=0.27.0,<1.0.0",
-    "numpy>=1.26.0,<3.0.0",
-    "cryptography>=42.0.0,<51.0.0"
+    "cryptography>=42.0.0,<51.0.0",
+    "prometheus-client>=0.20.0,<1.0.0"
 ]
 
 [project.optional-dependencies]
+# The enforcement pipeline runs on `pip install datashell`. Features live behind
+# extras so service-critical nodes can install a minimal, auditable dependency
+# set (a purely structural-boundary node never pulls a web framework).
+server = [
+    "fastapi>=0.110.0,<1.0.0",
+    "uvicorn>=0.28.0,<1.0.0",
+    "python-multipart>=0.0.9,<1.0.0"
+]
+# The Stripe adapter speaks the signed REST API via httpx directly (request
+# signature verification, retry, and idempotency are part of our boundaries);
+# the heavyweight stripe SDK is intentionally NOT declared — it would add an
+# unused, network-capable dependency without being imported anywhere.
+billing = [
+    "httpx>=0.27.0,<1.0.0"
+]
+# Batch rules compile to SQL and run against the vectorized DuckDB engine.
+duckdb = [
+    "duckdb>=1.0.0,<2.0.0"
+]
+# Airflow operator integration (integrations/airflow uses the stdlib HTTP
+# client, so this extra is only what gives you a runnable scheduler).
+airflow = [
+    "apache-airflow>=2.7.0,<3.1.0"
+]
 dev = [
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.23.0,<2.0.0",
-    "pyyaml>=6.0.0,<7.0.0"
+    "pyyaml>=6.0.0,<7.0.0",
+    "numpy>=1.26.0,<3.0.0",
+    "ruff>=0.12.0",
+    "mypy>=1.17.0",
+    "pre-commit>=3.8.0"
+]
+# Explicit union (not a self-referential extra) for older-resolver compatibility.
+# `airflow` is deliberately NOT part of `all`: Apache Airflow pins Python
+# interpreter ranges of its own and is deployed as scheduler infrastructure,
+# not as a library extra; opt in via datashell[airflow].
+all = [
+    "fastapi>=0.110.0,<1.0.0",
+    "uvicorn>=0.28.0,<1.0.0",
+    "python-multipart>=0.0.9,<1.0.0",
+    "httpx>=0.27.0,<1.0.0",
+    "duckdb>=1.0.0,<2.0.0"
 ]
 
 [project.scripts]
@@ -36,6 +69,75 @@ datashell = "datashell.cli.main:main"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-ra"
+
+[tool.ruff]
+# Enterprise contributor gate: repository-wide lint must pass with zero warnings.
+# 120 columns keeps the codebase's existing dense, documentation-first lines
+# iterable without a wholesale reformat.
+line-length = 120
+target-version = "py311"
+exclude = [
+    "build",
+    "dist",
+    "output",
+    "web",
+]
+
+[tool.ruff.lint]
+# E/F: correctness; I: import hygiene; UP: py3.11+ modernization;
+# B: real bug patterns (mutable defaults, unreachable code);
+# SIM: simplifications that reduce review load.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+# FastAPI's dependency-injection idiom is a call in a default argument:
+#     client: APIKeyMetadata = Security(require_capability(Capability.AUDIT_READ))
+# `Security(...)`, `Depends(...)` & friends are per-route constants evaluated at
+# import time and cached by the framework, so they are safe defaults. This is a
+# configuration-level exemption (not a suppression) — any *other* mutable call
+# in a default argument is still flagged by B008.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Security",
+    "fastapi.Query",
+    "fastapi.Header",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Body",
+    "fastapi.Path",
+    "fastapi.Cookie",
+    # Cosmetic security (our own layer): returns a closure built from module-level
+    # constants (an enum); routes declare it once per definition and it is a shared
+    # per-route constant, exactly like the FastAPI primitives above.
+    "datashell.core.security.require_capability",
+    "datashell.core.security.authenticate_client",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["datashell"]
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_typed = true
+
+[[tool.mypy.overrides]]
+# Upstream pyarrow (>=14) ships no py.typed marker and no PEP 561 stubs, so
+# strict mode cannot resolve its package structure. This is the documented
+# upstream-stubs exception — no `# type: ignore` comments are used for it.
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# numpy 2.x ships py.typed stubs that use PEP 695 `type` statements, which the
+# 3.11 target version cannot parse (mypy hard-fails before type-checking our
+# code). Skipping the internals keeps numpy accesses typed as Any at our call
+# sites — this is an upstream-stubs limitation, not a suppression of our code.
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+ignore_errors = true
 
 [tool.setuptools.packages.find]
 where = ["."]

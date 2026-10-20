@@ -21,7 +21,7 @@ machine-readable reason code and no billing eligibility.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from datashell.settlement.models import (
     AcceptancePolicy,
@@ -50,7 +50,7 @@ class RunEvidence:
     footing_matched: bool = True
     is_run_rejected: bool = False
     batch_rules_passed: bool = True
-    batch_failures: List[str] = field(default_factory=list)
+    batch_failures: list[str] = field(default_factory=list)
     required_artifacts_present: bool = True
     certificate_valid: bool = True
     certificate_status: str = "AUTHENTIC_AND_UNMODIFIED"
@@ -64,11 +64,11 @@ class RunEvidence:
 @dataclass
 class AcceptanceVerdict:
     status: AcceptanceStatus
-    reason_codes: List[ReasonCode] = field(default_factory=list)
+    reason_codes: list[ReasonCode] = field(default_factory=list)
     explanation: str = ""
     billing_eligible: bool = False
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "acceptance_status": self.status.value,
             "reason_codes": [r.value for r in self.reason_codes],
@@ -94,7 +94,7 @@ def evaluate_acceptance(
 ) -> AcceptanceVerdict:
     """Evaluate whether the delivery satisfied the agreed acceptance criteria."""
     spec = contract.acceptance
-    codes: List[ReasonCode] = []
+    codes: list[ReasonCode] = []
 
     # --- Integrity gates: any failure here is never payable ---------------
     if not evidence.footing_matched or evidence.unaccounted_for != 0:

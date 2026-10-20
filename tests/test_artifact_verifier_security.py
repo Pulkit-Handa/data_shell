@@ -4,9 +4,9 @@ import pytest
 pytest.importorskip("polars")
 
 def test_invalid_certificate_signature_never_dereferences_artifact_paths(monkeypatch):
-    from datashell.pipeline.artifacts import ArtifactGenerator
-    from datashell.core.crypto import CryptoEngine
     from datashell.core.config import settings
+    from datashell.core.crypto import CryptoEngine
+    from datashell.pipeline.artifacts import ArtifactGenerator
 
     monkeypatch.setattr(CryptoEngine, "sha256_file", staticmethod(lambda path: pytest.fail("untrusted path was read")))
     cert = {
@@ -31,9 +31,9 @@ def test_invalid_certificate_signature_never_dereferences_artifact_paths(monkeyp
 
 
 def test_validly_signed_certificate_cannot_direct_verifier_outside_storage_roots(monkeypatch):
-    from datashell.pipeline.artifacts import ArtifactGenerator
-    from datashell.core.crypto import CryptoEngine
     from datashell.core.config import settings
+    from datashell.core.crypto import CryptoEngine
+    from datashell.pipeline.artifacts import ArtifactGenerator
 
     monkeypatch.setattr(CryptoEngine, "sha256_file", staticmethod(lambda path: pytest.fail("unsafe path was read")))
     cert = {
@@ -63,9 +63,10 @@ def test_validly_signed_certificate_cannot_direct_verifier_outside_storage_roots
 
 def test_previous_signing_key_remains_valid_during_rotation(monkeypatch):
     import secrets
-    from datashell.pipeline.artifacts import ArtifactGenerator
-    from datashell.core.crypto import CryptoEngine
+
     from datashell.core.config import settings
+    from datashell.core.crypto import CryptoEngine
+    from datashell.pipeline.artifacts import ArtifactGenerator
 
     old_secret = secrets.token_hex(32)
     legacy_id = "datashell-hmac-legacy"
@@ -97,8 +98,8 @@ def test_previous_signing_key_remains_valid_during_rotation(monkeypatch):
 
 
 def test_key_id_allowlist_without_secret_does_not_fall_back_to_active_key(monkeypatch):
-    from datashell.pipeline.artifacts import ArtifactGenerator
     from datashell.core.config import settings
+    from datashell.pipeline.artifacts import ArtifactGenerator
 
     monkeypatch.setattr(settings, "trusted_hmac_keys", {settings.active_key_id: settings.hmac_secret})
     monkeypatch.setattr(settings, "trusted_key_ids", [settings.active_key_id, "legacy-id-without-secret"])

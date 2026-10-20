@@ -14,7 +14,6 @@ import importlib
 import json
 import os
 import secrets
-import stat
 import threading
 import time
 import uuid
@@ -569,7 +568,9 @@ def test_capacity_exhaustion_returns_503_and_releases_the_slot(demo, monkeypatch
                 client.post(
                     "/api/enforce",
                     files={
-                        "contract": ("contract.json", json.dumps(_contract(batch_min_rows=1)).encode(), "application/json"),
+                        "contract": ("contract.json",
+                                     json.dumps(_contract(batch_min_rows=1)).encode(),
+                                     "application/json"),
                         "source": ("feed.jsonl", _source(3), "application/x-ndjson"),
                     },
                     data={"tenant": TENANT},
@@ -639,7 +640,10 @@ def test_cli_nonzero_exit_is_never_reported_as_success(demo, monkeypatch):
 
 
 def test_cli_exit_two_maps_to_policy_rejection(demo, monkeypatch):
-    payload = json.dumps({"run_id": "dm_run_x", "status": "REJECTED", "held_quality": 4, "refused_structural": 2}).encode()
+    payload = json.dumps({
+        "run_id": "dm_run_x", "status": "REJECTED",
+        "held_quality": 4, "refused_structural": 2,
+    }).encode()
     _patch_cli(monkeypatch, demo.module, returncode=2, stdout=payload)
     with demo.client() as client:
         response = _run_enforce(client, _contract(batch_min_rows=1), _source(3))

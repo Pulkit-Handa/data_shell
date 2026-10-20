@@ -13,7 +13,7 @@ import hashlib
 import hmac
 import json
 import time
-from typing import Any, Dict, Optional, Set
+from typing import Any
 
 
 class WebhookVerificationError(Exception):
@@ -31,7 +31,7 @@ class WebhookDeduplicator:
     """
 
     def __init__(self) -> None:
-        self._seen: Set[str] = set()
+        self._seen: set[str] = set()
 
     def is_duplicate(self, event_id: str) -> bool:
         return event_id in self._seen
@@ -42,7 +42,7 @@ class WebhookDeduplicator:
 
 def verify_stripe_webhook(*, body: bytes, signature_header: str, secret: str,
                            tolerance_seconds: int = 300,
-                           now: Optional[float] = None) -> Dict[str, Any]:
+                           now: float | None = None) -> dict[str, Any]:
     """Verify a Stripe-style webhook signature and return the parsed event.
 
     The header has the form ``t=<timestamp>,v1=<signature>`` (older payloads
@@ -58,8 +58,8 @@ def verify_stripe_webhook(*, body: bytes, signature_header: str, secret: str,
         raise WebhookVerificationError("webhook signing secret is not configured")
 
     parts = signature_header.split(",")
-    timestamp: Optional[str] = None
-    signatures: Dict[str, str] = {}
+    timestamp: str | None = None
+    signatures: dict[str, str] = {}
     for part in parts:
         if "=" not in part:
             raise WebhookVerificationError("malformed signature header")
@@ -81,7 +81,7 @@ def verify_stripe_webhook(*, body: bytes, signature_header: str, secret: str,
     if abs(current - event_time) > tolerance_seconds:
         raise WebhookVerificationError("webhook timestamp outside the replay tolerance window")
 
-    signed_content = f"{timestamp}.".encode("utf-8") + body
+    signed_content = f"{timestamp}.".encode() + body
     expected = hmac.new(secret.encode("utf-8"), signed_content, hashlib.sha256).hexdigest()
     provided = signatures["v1"]
     if not hmac.compare_digest(expected, provided):

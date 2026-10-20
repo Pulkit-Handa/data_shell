@@ -18,7 +18,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 DEFAULT_MAX_UPLOAD_BYTES = 20 * 1024 ** 3  # matches the gateway's 20 GiB default
 
@@ -32,7 +32,7 @@ class DataShellApiError(RuntimeError):
         self.detail = detail
 
 
-def encode_multipart(fields: Dict[str, Any], files: Dict[str, Any]) -> "tuple[str, bytes]":
+def encode_multipart(fields: dict[str, Any], files: dict[str, Any]) -> tuple[str, bytes]:
     """Encode form fields and files as ``multipart/form-data``.
 
     ``files`` maps a field name to ``(filename, content_bytes, content_type)``.
@@ -40,17 +40,17 @@ def encode_multipart(fields: Dict[str, Any], files: Dict[str, Any]) -> "tuple[st
     boundary = "----datashell" + uuid.uuid4().hex
     body = bytearray()
     for name, value in fields.items():
-        body += f"--{boundary}\r\n".encode("utf-8")
-        body += f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("utf-8")
+        body += f"--{boundary}\r\n".encode()
+        body += f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode()
         body += str(value).encode("utf-8") + b"\r\n"
     for name, (filename, content, content_type) in files.items():
-        body += f"--{boundary}\r\n".encode("utf-8")
+        body += f"--{boundary}\r\n".encode()
         body += (
             f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
-        ).encode("utf-8")
-        body += f"Content-Type: {content_type}\r\n\r\n".encode("utf-8")
+        ).encode()
+        body += f"Content-Type: {content_type}\r\n\r\n".encode()
         body += content + b"\r\n"
-    body += f"--{boundary}--\r\n".encode("utf-8")
+    body += f"--{boundary}--\r\n".encode()
     return boundary, bytes(body)
 
 
@@ -84,9 +84,9 @@ class DataShellApiClient:
         method: str,
         path: str,
         *,
-        body: Optional[bytes] = None,
-        headers: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+        body: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         request = urllib.request.Request(
             f"{self.base_url}{path}",
             data=body,
@@ -126,7 +126,7 @@ class DataShellApiClient:
         *,
         streaming: bool = False,
         max_upload_bytes: int = DEFAULT_MAX_UPLOAD_BYTES,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Submit a local file for contract enforcement and return the ledger result."""
         path = Path(file_path)
         if not path.is_file():
@@ -154,34 +154,37 @@ class DataShellApiClient:
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
 
-    def get_certificate(self, run_id: str) -> Dict[str, Any]:
+    def get_certificate(self, run_id: str) -> dict[str, Any]:
         """Fetch and verify the signed certificate for a completed run."""
         return self._request_json("GET", f"/api/v1/runs/{run_id}/certificate")
 
     def list_runs(
         self,
         *,
-        contract_name: Optional[str] = None,
-        status: Optional[str] = None,
-        tenant_id: Optional[str] = None,
+        contract_name: str | None = None,
+        status: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 50,
-    ) -> Dict[str, Any]:
-        query = _query_string({"contract_name": contract_name, "status_filter": status, "tenant_id": tenant_id, "limit": limit})
+    ) -> dict[str, Any]:
+        query = _query_string({
+            "contract_name": contract_name, "status_filter": status,
+            "tenant_id": tenant_id, "limit": limit,
+        })
         return self._request_json("GET", f"/api/v1/runs{query}")
 
-    def run_summary(self, *, contract_name: Optional[str] = None, tenant_id: Optional[str] = None) -> Dict[str, Any]:
+    def run_summary(self, *, contract_name: str | None = None, tenant_id: str | None = None) -> dict[str, Any]:
         query = _query_string({"contract_name": contract_name, "tenant_id": tenant_id})
         return self._request_json("GET", f"/api/v1/runs/summary{query}")
 
     def quarantine(
         self,
         *,
-        contract_name: Optional[str] = None,
-        run_id: Optional[str] = None,
-        reason: Optional[str] = None,
-        tenant_id: Optional[str] = None,
+        contract_name: str | None = None,
+        run_id: str | None = None,
+        reason: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         query = _query_string({
             "contract_name": contract_name, "run_id": run_id, "reason": reason,
             "tenant_id": tenant_id, "limit": limit,
@@ -191,15 +194,15 @@ class DataShellApiClient:
     def usage(
         self,
         *,
-        contract_name: Optional[str] = None,
-        tenant_id: Optional[str] = None,
-        since: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        contract_name: str | None = None,
+        tenant_id: str | None = None,
+        since: str | None = None,
+    ) -> dict[str, Any]:
         query = _query_string({"contract_name": contract_name, "tenant_id": tenant_id, "since": since})
         return self._request_json("GET", f"/api/v1/usage{query}")
 
 
-def _query_string(params: Dict[str, Any]) -> str:
+def _query_string(params: dict[str, Any]) -> str:
     import urllib.parse
     filtered = {k: v for k, v in params.items() if v is not None}
     return ("?" + urllib.parse.urlencode(filtered)) if filtered else ""

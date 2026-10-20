@@ -59,6 +59,7 @@ def check(label: str, condition: str, actual: float, expected: float) -> bool:
 
 
 def main() -> int:
+    from datashell.core.ledger import pending_outbox_path, write_pending_outbox
     from datashell.core.telemetry import (
         HTTP_REQUESTS_TOTAL,
         PENDING_LEDGER_ENTRIES,
@@ -66,7 +67,6 @@ def main() -> int:
         PUBLICATION_RECOVERY_JOURNALS,
         STORAGE_FREE_BYTES,
     )
-    from datashell.core.ledger import pending_outbox_path, write_pending_outbox
     from datashell.pipeline.runner import reconcile_pending_ledger_entries
 
     results: list[bool] = []

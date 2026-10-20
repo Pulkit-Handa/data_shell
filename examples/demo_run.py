@@ -7,10 +7,8 @@ Simulates a vendor feed arriving at the boundary:
 - Asserts strict zero-deficit reconciliation before writing.
 """
 
-import sys
 import json
 from pathlib import Path
-import polars as pl
 
 from datashell.contract.models import DataContract
 from datashell.pipeline.runner import DataShellPipeline
@@ -25,7 +23,7 @@ def run_demo():
     base_dir = Path(__file__).parent.parent
     contract_file = base_dir / "examples" / "vendor_settlements_contract.json"
     
-    with open(contract_file, "r") as f:
+    with open(contract_file) as f:
         contract_data = json.load(f)
     contract = DataContract(**contract_data)
 
@@ -53,7 +51,7 @@ def run_demo():
             "amount": "NOT_A_FLOAT",
             "currency": "USD"
         })
-    for i in range(21, 41):
+    for _ in range(21, 41):
         records.append({
             "settlement_id": None, # Non-nullable field violation
             "amount": 250.0,
@@ -109,7 +107,8 @@ def run_demo():
     for reason, count in result.ledger.structural_reasons.items():
         print(f"    - {reason:<20}: {count:>4} refused")
 
-    print("\n✓ SUCCESS: Arithmetic matched to 0 unaccounted records. Target and lineage artifacts published with crash recovery.")
+    print("\n✓ SUCCESS: Arithmetic matched to 0 unaccounted records. "
+          "Target and lineage artifacts published with crash recovery.")
 
 
 if __name__ == "__main__":

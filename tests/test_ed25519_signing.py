@@ -12,10 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import polars as pl
-import pytest
 
-from datashell.core.config import EnterpriseSettings, settings
-from datashell.core.crypto import CryptoEngine
 from datashell.contract.models import (
     DataContract,
     DeliverySpec,
@@ -25,6 +22,8 @@ from datashell.contract.models import (
     SchemaColumn,
     SourceDefinition,
 )
+from datashell.core.config import EnterpriseSettings, settings
+from datashell.core.crypto import CryptoEngine
 from datashell.engines.delivery import TerminalStatus
 from datashell.pipeline.artifacts import ArtifactGenerator
 from datashell.pipeline.runner import DataShellPipeline

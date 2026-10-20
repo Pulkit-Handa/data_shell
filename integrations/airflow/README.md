@@ -18,7 +18,7 @@ paths), so a DAG can branch on the outcome.
 ```bash
 pip install ".[tests]"        # from integrations/airflow
 # or, once published:
-pip install data-shell-airflow
+pip install datashell-airflow
 ```
 
 The package depends only on `apache-airflow`. The HTTP client itself uses the

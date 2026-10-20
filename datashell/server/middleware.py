@@ -7,11 +7,12 @@ Content-Length values early and also counts chunked bodies as they are received.
 """
 from __future__ import annotations
 
-import json
 import asyncio
-from typing import Any, Awaitable, Callable
+import json
+from collections.abc import Callable
+from typing import Any
 
-ASGIApp = Callable[[dict[str, Any], Callable[..., Awaitable[dict[str, Any]]], Callable[..., Awaitable[None]]], Awaitable[None]]
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
 class _BodyTooLarge(Exception):
@@ -19,7 +20,15 @@ class _BodyTooLarge(Exception):
 
 
 class RequestBodyLimitMiddleware:
-    def __init__(self, app: ASGIApp, *, max_body_bytes: int, max_concurrent_requests: int = 2, max_control_body_bytes: int | None = None, preflight_auth=None) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        max_body_bytes: int,
+        max_concurrent_requests: int = 2,
+        max_control_body_bytes: int | None = None,
+        preflight_auth: Callable[..., tuple[int | None, Any | None, str | None]] | None = None,
+    ) -> None:
         if max_body_bytes <= 0:
             raise ValueError("max_body_bytes must be positive")
         if max_concurrent_requests <= 0:
@@ -34,7 +43,7 @@ class RequestBodyLimitMiddleware:
         self._request_slots = asyncio.Semaphore(max_concurrent_requests)
         self.preflight_auth = preflight_auth
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope.get("type") != "http" or scope.get("method", "GET").upper() not in {"POST", "PUT", "PATCH", "DELETE"}:
             await self.app(scope, receive, send)
             return
@@ -61,7 +70,7 @@ class RequestBodyLimitMiddleware:
         if self.preflight_auth is not None:
             auth_status, metadata, auth_detail = self.preflight_auth(scope)
             if auth_status is not None:
-                await self._reject(send, auth_status, auth_detail)
+                await self._reject(send, auth_status, auth_detail or "Request rejected")
                 return
             if metadata is not None:
                 scope.setdefault("state", {})["preauthenticated_client"] = metadata
@@ -73,7 +82,7 @@ class RequestBodyLimitMiddleware:
         total = 0
         response_started = False
 
-        async def counted_receive():
+        async def counted_receive() -> Message:
             nonlocal total
             message = await receive()
             if message.get("type") == "http.request":
@@ -82,7 +91,7 @@ class RequestBodyLimitMiddleware:
                     raise _BodyTooLarge
             return message
 
-        async def tracked_send(message):
+        async def tracked_send(message: Message) -> None:
             nonlocal response_started
             if message.get("type") == "http.response.start":
                 response_started = True
@@ -99,7 +108,7 @@ class RequestBodyLimitMiddleware:
                 await self._reject(send, 413, "Request body exceeds the configured size limit")
 
     @staticmethod
-    async def _reject(send, status_code: int, detail: str) -> None:
+    async def _reject(send: Send, status_code: int, detail: str) -> None:
         body = json.dumps({"detail": detail}).encode("utf-8")
         await send({
             "type": "http.response.start",

@@ -29,6 +29,8 @@ from datashell.core.keys import generate_keypair_pem
 from datashell.core.ledger import BoundaryLedger
 from datashell.core.security import APIKeyMetadata, Role, register_api_key
 from datashell.pipeline.runner import DataShellPipeline
+from datashell.server import app as app_module
+from datashell.server.app import app
 from datashell.settlement.certificate import (
     build_settlement_receipt,
     certificate_digest,
@@ -39,15 +41,12 @@ from datashell.settlement.models import (
     CommercialContract,
     DisputeResolution,
     SettlementStatement,
-    SettlementStatus,
 )
 from datashell.settlement.registry import (
     CommercialContractRegistry,
     CommercialContractRegistryError,
 )
 from datashell.settlement.service import SettlementService, SettlementServiceError
-from datashell.server import app as app_module
-from datashell.server.app import app
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_CONTRACT_PATH = REPO_ROOT / "examples" / "vendor_settlements_contract.json"

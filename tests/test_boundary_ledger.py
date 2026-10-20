@@ -7,7 +7,7 @@ filtering, aggregation, rolling baselines, retention, and integrity checking.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from datashell.core.ledger import BoundaryLedger
 
@@ -63,7 +63,9 @@ def test_history_summary_aggregates(tmp_path):
 
 def test_quarantine_index_and_filters(tmp_path):
     ledger = _ledger(tmp_path)
-    ledger.record_quarantine("r1", "alpha", "c", "held_quality", "/q/held.parquet", 7, {"amount-positive": 5, "currency": 2})
+    ledger.record_quarantine(
+        "r1", "alpha", "c", "held_quality", "/q/held.parquet", 7,
+        {"amount-positive": 5, "currency": 2})
     ledger.record_quarantine("r2", "alpha", "c", "structural_refused", "/q/refused.parquet", 3, {"amount:Float64": 3})
     ledger.record_quarantine("r3", "beta", "c", "held_quality", None, 1, {"x": 1})
 
@@ -88,7 +90,7 @@ def test_usage_summary_and_since_filter(tmp_path):
     assert summary["billable_runs"] == 1
     assert summary["bytes_processed"] == 3072
 
-    future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
     assert ledger.usage_summary("alpha", since=future)["total_runs"] == 0
 
 
@@ -115,7 +117,9 @@ def test_rolling_baseline_averages_last_window(tmp_path):
 def test_rejected_runs_are_excluded_from_baseline(tmp_path):
     ledger = _ledger(tmp_path)
     ledger.record_run("good", "c", 10, 10, {"avg_amount": 2.0}, tenant_id="alpha", status="LOADED")
-    ledger.record_run("bad", "c", 10, 0, {"avg_amount": 999.0}, tenant_id="alpha", status="REJECTED", is_run_rejected=True)
+    ledger.record_run(
+        "bad", "c", 10, 0, {"avg_amount": 999.0}, tenant_id="alpha",
+        status="REJECTED", is_run_rejected=True)
     baseline = ledger.get_baseline("c", "alpha")
     assert baseline["sample_count"] == 1
     assert baseline["rows_delivered"] == 10.0
@@ -125,7 +129,7 @@ def test_prune_respects_retention_window(tmp_path):
     ledger = _ledger(tmp_path)
     ledger.record_run("recent", "c", 1, 1, {}, tenant_id="alpha", status="LOADED")
     ledger.record_run("ancient", "c", 1, 1, {}, tenant_id="alpha", status="LOADED")
-    old_ts = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    old_ts = (datetime.now(UTC) - timedelta(days=90)).isoformat()
     with ledger._connect() as conn:
         conn.execute("UPDATE run_history SET timestamp = ? WHERE run_id = 'ancient'", (old_ts,))
 

@@ -27,11 +27,16 @@ Scope limits, stated plainly:
 
 from __future__ import annotations
 
-import time
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any
 
-import httpx
+try:
+    import httpx
+except ImportError as _exc:  # pragma: no cover - exercised only outside the extra
+    raise ImportError(
+        "The Stripe billing adapter requires the 'billing' extra. "
+        "Install it with: pip install datashell[billing]"
+    ) from _exc
 
 from datashell.billing.base import (
     BillingProviderName,
@@ -47,7 +52,6 @@ from datashell.core.config import settings
 from datashell.settlement.ledger import SettlementLedger
 from datashell.settlement.models import BillingProviderStatus
 
-
 STRIPE_API_BASE = "https://api.stripe.com/v1"
 
 
@@ -56,12 +60,12 @@ class StripeBillingProvider:
 
     name = BillingProviderName.STRIPE
 
-    def __init__(self, ledger: SettlementLedger, *, secret_key: Optional[str] = None,
-                 webhook_secret: Optional[str] = None,
+    def __init__(self, ledger: SettlementLedger, *, secret_key: str | None = None,
+                 webhook_secret: str | None = None,
                  test_mode: bool = True,
-                 customer_id: Optional[str] = None,
+                 customer_id: str | None = None,
                  timeout_seconds: float = 10.0,
-                 transport: Optional[httpx.Client] = None):
+                 transport: httpx.Client | None = None):
         self.ledger = ledger
         self.secret_key = secret_key or (getattr(settings, "billing_stripe_secret_key", "") or "")
         self.webhook_secret = webhook_secret or (getattr(settings, "billing_stripe_webhook_secret", "") or "")
@@ -157,7 +161,7 @@ class StripeBillingProvider:
                 error_message="an open dispute blocks automatic billing actions")
 
         instruction_id = f"bil_{uuid.uuid4().hex[:16]}"
-        meta: Dict[str, Any] = {
+        meta: dict[str, Any] = {
             "instruction_id": instruction_id,
             "payload": payload.as_dict(),
             "test_mode": self.test_mode,
@@ -340,7 +344,7 @@ class StripeBillingProvider:
     # -------------------------------------------------------------- webhooks
 
     def verify_webhook(self, *, body: bytes, signature_header: str, secret: str = "",
-                       tolerance_seconds: int = 300) -> Dict[str, Any]:
+                       tolerance_seconds: int = 300) -> dict[str, Any]:
         if not self.webhook_secret and not secret:
             raise WebhookVerificationError("stripe webhook signing secret is not configured")
         event = verify_stripe_webhook(

@@ -1,22 +1,31 @@
 """Tier 3: Outside — Delivery Engine with Zero-Deficit Footing Verification and Atomic Staged Commits."""
 
 from __future__ import annotations
-import os
+
+import contextlib
+import datetime
+import decimal
 import json
+import os
+import uuid
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any
+
 import polars as pl
 
-from datashell.contract.models import DataContract, QualityBehavior
+from datashell.contract.models import DataContract
+from datashell.core.commit import publish_transactionally, recover_publication
 from datashell.core.config import settings
+from datashell.core.crypto import CryptoEngine
+from datashell.core.fileops import materialize_artifact_copy, parquet_compression_codec
 from datashell.core.sandbox import FilesystemSandbox
-from datashell.engines.reconciler import ReconciliationLedger, Reconciler, ReconciliationFootingError
 from datashell.engines.ingestion import StructuralRejection
+from datashell.engines.reconciler import ReconciliationFootingError, ReconciliationLedger
 
 
-class TerminalStatus(str, Enum):
+class TerminalStatus(StrEnum):
     LOADED = "LOADED"          # Statement of fact that surviving records were safely committed
     REJECTED = "REJECTED"      # Whole run rejected by declared stop condition or policy
     FAILED = "FAILED"          # Reserved strictly for engine or infrastructure errors
@@ -27,15 +36,8 @@ class DeliveryGateError(Exception):
     pass
 
 
-from datashell.core.crypto import CryptoEngine
-from datashell.core.commit import publish_transactionally, recover_publication
-from datashell.core.fileops import materialize_artifact_copy
-import datetime
-import decimal
-import uuid
 
-
-def safe_json_default(obj):
+def safe_json_default(obj: Any) -> Any:
     """Encodes non-JSON primitive types (datetime, Decimal, UUID, bytes, Enum) gracefully."""
     if isinstance(obj, (datetime.date, datetime.datetime, datetime.time)):
         return obj.isoformat()
@@ -52,7 +54,7 @@ def safe_json_default(obj):
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
-def safe_json_dumps(obj) -> str:
+def safe_json_dumps(obj: Any) -> str:
     """Serializes objects to JSON using safe encoder for dates/timestamps and primitives."""
     return json.dumps(obj, default=safe_json_default)
 
@@ -61,15 +63,15 @@ def safe_json_dumps(obj) -> str:
 class DeliveryOutcome:
     status: TerminalStatus
     rows_delivered: int
-    target_path: Optional[str]
-    quarantine_path: Optional[str]
+    target_path: str | None
+    quarantine_path: str | None
     ledger: ReconciliationLedger
-    quarantine_files: List[str] = field(default_factory=list)
-    details: Optional[str] = None
-    delivered_sha256: Optional[str] = None
-    run_artifact_path: Optional[str] = None
-    staged_target_path: Optional[str] = None
-    staged_run_artifact_path: Optional[str] = None
+    quarantine_files: list[str] = field(default_factory=list)
+    details: str | None = None
+    delivered_sha256: str | None = None
+    run_artifact_path: str | None = None
+    staged_target_path: str | None = None
+    staged_run_artifact_path: str | None = None
 
 
 class DeliveryEngine:
@@ -89,12 +91,12 @@ class DeliveryEngine:
         self,
         admitted_df: pl.DataFrame,
         held_df: pl.DataFrame,
-        structural_rejections: List[StructuralRejection],
+        structural_rejections: list[StructuralRejection],
         ledger: ReconciliationLedger,
         all_batch_rules_passed: bool,
         should_reject_run: bool = False,
         defer_publish: bool = False,
-        rejection_reason: Optional[str] = None,
+        rejection_reason: str | None = None,
     ) -> DeliveryOutcome:
         """
         Executes atomic staged delivery, sandboxing checks, and quarantine artifact generation.
@@ -117,16 +119,20 @@ class DeliveryEngine:
         quarantine_dir.mkdir(parents=True, exist_ok=True)
 
         # Track staged files for atomic cleanup in case of failure
-        staged_files: List[Path] = []
-        created_quarantine_files: List[Path] = []
+        staged_files: list[Path] = []
+        created_quarantine_files: list[Path] = []
 
         try:
             # 1. ALWAYS persist quarantine artifacts (even if the run is later rejected!)
-            published_quarantine_path: Optional[Path] = None
+            published_quarantine_path: Path | None = None
             if held_df.height > 0:
                 staged_held = quarantine_dir / f".staged_{ledger.run_id}_held_records.parquet"
                 final_held = quarantine_dir / f"{ledger.run_id}_held_records.parquet"
-                held_df.write_parquet(staged_held)
+                held_codec = parquet_compression_codec()
+                if held_codec is None:
+                    held_df.write_parquet(staged_held)
+                else:
+                    held_df.write_parquet(staged_held, compression=held_codec)
                 staged_files.append(staged_held)
                 os.replace(staged_held, final_held)
                 created_quarantine_files.append(final_held)
@@ -178,7 +184,11 @@ class DeliveryEngine:
             staged_files.append(staged_target)
 
             # Write to staging path
-            admitted_df.write_parquet(staged_target)
+            admitted_codec = parquet_compression_codec()
+            if admitted_codec is None:
+                admitted_df.write_parquet(staged_target)
+            else:
+                admitted_df.write_parquet(staged_target, compression=admitted_codec)
 
             # Compute cryptographic hash of the exact staged file BEFORE publication
             # Guarantees concurrent runs cannot tamper with or replace the hash binding!
@@ -220,12 +230,10 @@ class DeliveryEngine:
             )
 
 
-        except Exception as e:
+        except Exception:
             # Clean up any uncommitted staged files
             for sf in staged_files:
                 if sf.exists():
-                    try:
+                    with contextlib.suppress(OSError):
                         sf.unlink()
-                    except OSError:
-                        pass
             raise

@@ -26,9 +26,9 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -39,11 +39,10 @@ from datashell.settlement.money import (
     parse_unit_price_minor,
 )
 
-
 # --------------------------------------------------------------------------- enums
 
 
-class PricingModel(str, Enum):
+class PricingModel(StrEnum):
     PER_ACCEPTED_UNIT = "PER_ACCEPTED_UNIT"
     FIXED_BATCH_FEE = "FIXED_BATCH_FEE"
     TIERED_PRICING = "TIERED_PRICING"
@@ -51,7 +50,7 @@ class PricingModel(str, Enum):
     HOLD_OR_DISPUTE = "HOLD_OR_DISPUTE"
 
 
-class AcceptanceStatus(str, Enum):
+class AcceptanceStatus(StrEnum):
     """Commercial acceptance of a delivery run (distinct from pipeline status)."""
 
     ACCEPTED = "ACCEPTED"
@@ -61,7 +60,7 @@ class AcceptanceStatus(str, Enum):
     PENDING_REVIEW = "PENDING_REVIEW"
 
 
-class SettlementStatus(str, Enum):
+class SettlementStatus(StrEnum):
     """Settlement lifecycle. Deliberately separate from payment-provider states."""
 
     CALCULATED = "CALCULATED"
@@ -72,7 +71,7 @@ class SettlementStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
-class ReasonCode(str, Enum):
+class ReasonCode(StrEnum):
     """Machine-readable explanations attached to settlement outcomes."""
 
     NONE = "NONE"
@@ -89,14 +88,14 @@ class ReasonCode(str, Enum):
     MAXIMUM_QUANTITY_EXCEEDED = "MAXIMUM_QUANTITY_EXCEEDED"
 
 
-class DisputeStatus(str, Enum):
+class DisputeStatus(StrEnum):
     OPEN = "OPEN"
     UNDER_REVIEW = "UNDER_REVIEW"
     RESOLVED = "RESOLVED"
     WITHDRAWN = "WITHDRAWN"
 
 
-class DisputeResolution(str, Enum):
+class DisputeResolution(StrEnum):
     """Outcome a reviewer may record when resolving a dispute."""
 
     ACCEPT_AS_IS = "ACCEPT_AS_IS"
@@ -105,7 +104,7 @@ class DisputeResolution(str, Enum):
     REPLACE_WITH_NEW_SETTLEMENT = "REPLACE_WITH_NEW_SETTLEMENT"
 
 
-class QualificationUnit(str, Enum):
+class QualificationUnit(StrEnum):
     """What the contract bills against, derived from run evidence."""
 
     DELIVERED_ROWS = "DELIVERED_ROWS"          # rows published to the target
@@ -114,7 +113,7 @@ class QualificationUnit(str, Enum):
     SOURCE_ROWS_READ = "SOURCE_ROWS_READ"      # every row read (use with care)
 
 
-class AcceptancePolicy(str, Enum):
+class AcceptancePolicy(StrEnum):
     """How the acceptance evaluator treats quantity shortfalls."""
 
     FULL_ACCEPTANCE = "FULL_ACCEPTANCE"                  # any successful delivery is payable
@@ -124,7 +123,7 @@ class AcceptancePolicy(str, Enum):
     STRICT_QUANTITY = "STRICT_QUANTITY"                  # delivered != expected -> review
 
 
-class PenaltyModel(str, Enum):
+class PenaltyModel(StrEnum):
     """Explicitly contracted penalty shapes. No implicit SLA penalties exist."""
 
     NONE = "NONE"
@@ -132,7 +131,7 @@ class PenaltyModel(str, Enum):
     PERCENT_OF_GROSS = "PERCENT_OF_GROSS"    # explicit percentage of the gross amount
 
 
-class BillingProviderStatus(str, Enum):
+class BillingProviderStatus(StrEnum):
     """Internal lifecycle of an external billing instruction.
 
     These states are independent of any provider's own invoice states; a
@@ -160,14 +159,14 @@ class QualificationSpec(BaseModel):
 
     billable_unit: QualificationUnit = QualificationUnit.DELIVERED_ROWS
     # For UNIQUE_ENTITIES: column(s) whose distinct delivered count is billed.
-    unique_key_columns: List[str] = Field(default_factory=list)
+    unique_key_columns: list[str] = Field(default_factory=list)
     # Never count held/refused/duplicated/unpublished rows as billable unless
     # an explicit rule permits it; only COMPLETED_BATCH/SOURCE_ROWS_READ opt
     # into counting those categories, and even then never held rows.
     include_refused_in_count: bool = False
 
     @model_validator(mode="after")
-    def validate_unique_key(self) -> "QualificationSpec":
+    def validate_unique_key(self) -> QualificationSpec:
         if self.billable_unit == QualificationUnit.UNIQUE_ENTITIES and not self.unique_key_columns:
             raise ValueError("UNIQUE_ENTITIES qualification requires unique_key_columns")
         if self.unique_key_columns and len(set(self.unique_key_columns)) != len(self.unique_key_columns):
@@ -184,11 +183,11 @@ class TierBand(BaseModel):
     """
 
     min_units: int = Field(ge=0)
-    max_units: Optional[int] = Field(default=None, ge=1)
+    max_units: int | None = Field(default=None, ge=1)
     unit_price_minor: int = Field(ge=0)
 
     @model_validator(mode="after")
-    def validate_bounds(self) -> "TierBand":
+    def validate_bounds(self) -> TierBand:
         if self.max_units is not None and self.max_units <= self.min_units:
             raise ValueError("tier max_units must be greater than min_units")
         return self
@@ -197,21 +196,22 @@ class TierBand(BaseModel):
 class PricingSpec(BaseModel):
     model: PricingModel = PricingModel.PER_ACCEPTED_UNIT
     currency: str = "USD"
-    unit_price_minor: Optional[int] = Field(default=None, ge=0)
-    fixed_fee_minor: Optional[int] = Field(default=None, ge=0)
-    tiers: List[TierBand] = Field(default_factory=list)
+    unit_price_minor: int | None = Field(default=None, ge=0)
+    fixed_fee_minor: int | None = Field(default=None, ge=0)
+    tiers: list[TierBand] = Field(default_factory=list)
     # PRORATED_SHORT_DELIVERY: agreed rational factor = numerator/denominator
     # applied to the full-delivery amount when the batch is short.
     proration_numerator: int = Field(default=1, ge=0)
     proration_denominator: int = Field(default=1, ge=1)
     # Optional cap on the payable gross amount for this contract version.
-    max_payable_minor: Optional[int] = Field(default=None, ge=0)
+    max_payable_minor: int | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
-    def validate_pricing(self) -> "PricingSpec":
-        if self.model in (PricingModel.PER_ACCEPTED_UNIT, PricingModel.PRORATED_SHORT_DELIVERY):
-            if self.unit_price_minor is None:
-                raise ValueError(f"pricing model {self.model.value} requires unit_price_minor")
+    def validate_pricing(self) -> PricingSpec:
+        if self.model in (PricingModel.PER_ACCEPTED_UNIT, PricingModel.PRORATED_SHORT_DELIVERY) and (
+            self.unit_price_minor is None
+        ):
+            raise ValueError(f"pricing model {self.model.value} requires unit_price_minor")
         if self.model == PricingModel.FIXED_BATCH_FEE and self.fixed_fee_minor is None:
             raise ValueError("pricing model FIXED_BATCH_FEE requires fixed_fee_minor")
         if self.model == PricingModel.TIERED_PRICING:
@@ -220,7 +220,7 @@ class PricingSpec(BaseModel):
             ordered = sorted(self.tiers, key=lambda t: t.min_units)
             if ordered[0].min_units != 0:
                 raise ValueError("tiered pricing must start at min_units=0")
-            for prev, nxt in zip(ordered, ordered[1:]):
+            for prev, nxt in zip(ordered, ordered[1:], strict=False):
                 if prev.max_units != nxt.min_units:
                     raise ValueError("tier bands must be contiguous (each max_units must equal the next min_units)")
             self.tiers = ordered
@@ -234,12 +234,12 @@ class AcceptanceSpec(BaseModel):
 
     policy: AcceptancePolicy = AcceptancePolicy.PARTIAL_WITH_MINIMUM
     minimum_accepted_units: int = Field(default=0, ge=0)
-    expected_units: Optional[int] = Field(default=None, ge=0)
-    maximum_units: Optional[int] = Field(default=None, ge=0)
+    expected_units: int | None = Field(default=None, ge=0)
+    maximum_units: int | None = Field(default=None, ge=0)
     # Fraction of delivered rows that may be refused/held before the quality
     # threshold forces review, expressed as basis points (10000 = 100%).
     allowed_failure_tolerance_bps: int = Field(default=10000, ge=0, le=10000)
-    required_validation_rules: List[str] = Field(default_factory=list)
+    required_validation_rules: list[str] = Field(default_factory=list)
     # Whether an open dispute makes the settlement ineligible for billing.
     block_billing_during_dispute: bool = True
 
@@ -249,10 +249,10 @@ class PenaltySpec(BaseModel):
     flat_penalty_minor: int = Field(default=0, ge=0)
     penalty_percent_bps: int = Field(default=0, ge=0, le=10000)
     # When the penalty applies: on rejection, on short delivery, or both.
-    applies_to: List[str] = Field(default_factory=lambda: ["REJECTED", "SHORT_DELIVERY"])
+    applies_to: list[str] = Field(default_factory=lambda: ["REJECTED", "SHORT_DELIVERY"])
 
     @model_validator(mode="after")
-    def validate_penalty(self) -> "PenaltySpec":
+    def validate_penalty(self) -> PenaltySpec:
         if self.model == PenaltyModel.FLAT_FEE and self.flat_penalty_minor <= 0:
             raise ValueError("FLAT_FEE penalty requires flat_penalty_minor > 0")
         if self.model == PenaltyModel.PERCENT_OF_GROSS and not (0 < self.penalty_percent_bps <= 10000):
@@ -280,10 +280,10 @@ class CommercialContract(BaseModel):
     acceptance: AcceptanceSpec = Field(default_factory=AcceptanceSpec)
     penalty: PenaltySpec = Field(default_factory=PenaltySpec)
     effective_at: str
-    expires_at: Optional[str] = None
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    approved_by: List[str] = Field(default_factory=list)
-    description: Optional[str] = None
+    expires_at: str | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    approved_by: list[str] = Field(default_factory=list)
+    description: str | None = None
 
     @field_validator("contract_id", "buyer_id", "seller_id", "feed_id")
     @classmethod
@@ -300,11 +300,12 @@ class CommercialContract(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_cross_field(self) -> "CommercialContract":
+    def validate_cross_field(self) -> CommercialContract:
         self.pricing.currency = self.currency
-        if self.acceptance.maximum_units is not None and self.acceptance.expected_units is not None:
-            if self.acceptance.maximum_units < self.acceptance.expected_units:
-                raise ValueError("maximum_units cannot be less than expected_units")
+        maximum = self.acceptance.maximum_units
+        expected = self.acceptance.expected_units
+        if maximum is not None and expected is not None and maximum < expected:
+            raise ValueError("maximum_units cannot be less than expected_units")
         # ISO-8601 bounds
         try:
             datetime.fromisoformat(self.effective_at.replace("Z", "+00:00"))
@@ -314,7 +315,7 @@ class CommercialContract(BaseModel):
             raise ValueError(f"effective_at/expires_at must be ISO-8601 timestamps: {exc}") from exc
         return self
 
-    def canonical_payload(self) -> Dict[str, Any]:
+    def canonical_payload(self) -> dict[str, Any]:
         """Canonical dict used for the digest.
 
         ``created_at`` is registration metadata, not a commercial term: two
@@ -344,12 +345,12 @@ class SettlementCalculation(BaseModel):
     calculation_version: str = "1"
     pricing_model: PricingModel
     qualified_units: int = Field(ge=0)
-    unit_price_minor: Optional[int] = None
-    tiers_applied: List[Dict[str, Any]] = Field(default_factory=list)
-    proration_ratio: Optional[str] = None   # "num/den" when short-delivery proration used
+    unit_price_minor: int | None = None
+    tiers_applied: list[dict[str, Any]] = Field(default_factory=list)
+    proration_ratio: str | None = None   # "num/den" when short-delivery proration used
     gross_amount_minor: int = Field(ge=0)
     penalty_minor: int = Field(default=0, ge=0)
-    penalty_reason: Optional[str] = None
+    penalty_reason: str | None = None
     rounding_mode: str = "ROUND_HALF_UP"
     currency_precision: int = 2
 
@@ -368,16 +369,16 @@ class SettlementStatement(BaseModel):
     currency: str
     acceptance_status: AcceptanceStatus
     settlement_status: SettlementStatus
-    reason_codes: List[ReasonCode] = Field(default_factory=list)
+    reason_codes: list[ReasonCode] = Field(default_factory=list)
     explanation: str = ""
     actor: str
-    idempotency_key: Optional[str] = None
-    superseding_settlement_id: Optional[str] = None
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    idempotency_key: str | None = None
+    superseding_settlement_id: str | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     # External billing reference: a *proposal*, never money moved.
-    billing_instruction_id: Optional[str] = None
+    billing_instruction_id: str | None = None
 
-    def explain_lines(self) -> List[str]:
+    def explain_lines(self) -> list[str]:
         """Human-readable, deterministic explanation of the calculation."""
         c = self.calculation
         lines = [
@@ -391,7 +392,8 @@ class SettlementStatement(BaseModel):
         ]
         if c.unit_price_minor is not None:
             from datashell.settlement.money import format_minor_units
-            lines.append(f"  Unit price:         {format_minor_units(c.unit_price_minor, self.currency)} {self.currency}")
+            unit = format_minor_units(c.unit_price_minor, self.currency)
+            lines.append(f"  Unit price:         {unit} {self.currency}")
         for tier in c.tiers_applied:
             lines.append(
                 f"  Tier: {tier['units']:,} units x {tier['unit_price_minor']} minor "
@@ -418,16 +420,16 @@ class Dispute(BaseModel):
     tenant_id: str
     disputing_party: str
     reason: str
-    evidence_references: List[str] = Field(default_factory=list)
+    evidence_references: list[str] = Field(default_factory=list)
     supporting_explanation: str = ""
     status: DisputeStatus = DisputeStatus.OPEN
-    resolution: Optional[DisputeResolution] = None
-    resolution_actor: Optional[str] = None
-    resolution_reason: Optional[str] = None
-    resolution_timestamp: Optional[str] = None
-    adjustment_settlement_id: Optional[str] = None
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    resolution: DisputeResolution | None = None
+    resolution_actor: str | None = None
+    resolution_reason: str | None = None
+    resolution_timestamp: str | None = None
+    adjustment_settlement_id: str | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
 # --------------------------------------------------------------------------- helpers
@@ -438,7 +440,7 @@ def settlement_id_for(run_id: str, contract_id: str, contract_version: int) -> s
     return f"stl_{run_id}_{contract_id}_v{contract_version}"
 
 
-def canonical_json(payload: Dict[str, Any]) -> str:
+def canonical_json(payload: dict[str, Any]) -> str:
     """Stable canonical JSON used for digests and evidence binding."""
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
 

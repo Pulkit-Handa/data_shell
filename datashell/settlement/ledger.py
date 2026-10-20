@@ -27,10 +27,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from datashell.core.config import settings
 from datashell.settlement.models import (
@@ -44,7 +43,7 @@ from datashell.settlement.models import (
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _json(value: Any) -> str:
@@ -58,7 +57,7 @@ class SettlementLedgerError(RuntimeError):
 class SettlementLedger:
     """Tenant-scoped SQLite store for settlement statements and billing actions."""
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Path | None = None):
         self.db_path = Path(db_path or settings.history_db_path)
         self._init_db()
 
@@ -237,7 +236,7 @@ class SettlementLedger:
                 ),
             )
 
-    def get_contract_version(self, contract_id: str, contract_version: int, tenant_id: str) -> Optional[Dict[str, Any]]:
+    def get_contract_version(self, contract_id: str, contract_version: int, tenant_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM contract_versions "
@@ -256,7 +255,7 @@ class SettlementLedger:
             "created_by": row["created_by"],
         }
 
-    def list_contract_versions(self, contract_id: str, tenant_id: str) -> List[Dict[str, Any]]:
+    def list_contract_versions(self, contract_id: str, tenant_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT contract_id, contract_version, digest, created_at, created_by "
@@ -277,7 +276,7 @@ class SettlementLedger:
             ).fetchone()
         return row is not None
 
-    def find_by_idempotency_key(self, tenant_id: str, idempotency_key: str) -> Optional[Dict[str, Any]]:
+    def find_by_idempotency_key(self, tenant_id: str, idempotency_key: str) -> dict[str, Any] | None:
         """Replay detection: the same key returns the original statement."""
         with self._connect() as conn:
             row = conn.execute(
@@ -342,12 +341,13 @@ class SettlementLedger:
             )
             self._insert_event(conn, statement.settlement_id, statement.tenant_id,
                                "CREATED", None, statement.settlement_status.value, statement.actor,
-                               f"settlement calculated: {statement.calculation.gross_amount_minor} minor {statement.currency}")
+                               f"settlement calculated: "
+                               f"{statement.calculation.gross_amount_minor} minor {statement.currency}")
         return True
 
     def _insert_event(self, conn: sqlite3.Connection, settlement_id: str, tenant_id: str,
-                      event_type: str, from_status: Optional[str], to_status: Optional[str],
-                      actor: str, reason: str, payload: Optional[Dict[str, Any]] = None) -> None:
+                      event_type: str, from_status: str | None, to_status: str | None,
+                      actor: str, reason: str, payload: dict[str, Any] | None = None) -> None:
         conn.execute(
             "INSERT INTO settlement_events "
             "(settlement_id, tenant_id, event_type, from_status, to_status, actor, reason, payload_json, created_at) "
@@ -356,7 +356,7 @@ class SettlementLedger:
              _json(payload or {}), _utcnow()),
         )
 
-    def get_settlement(self, settlement_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    def get_settlement(self, settlement_id: str, tenant_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM settlements WHERE settlement_id = ? AND tenant_id = ?",
@@ -364,11 +364,11 @@ class SettlementLedger:
             ).fetchone()
         return self._settlement_dict(row) if row else None
 
-    def list_settlements(self, tenant_id: str, status: Optional[str] = None,
-                         contract_id: Optional[str] = None, limit: int = 50, offset: int = 0
-                         ) -> List[Dict[str, Any]]:
+    def list_settlements(self, tenant_id: str, status: str | None = None,
+                         contract_id: str | None = None, limit: int = 50, offset: int = 0
+                         ) -> list[dict[str, Any]]:
         clauses = ["tenant_id = ?"]
-        params: List[Any] = [tenant_id]
+        params: list[Any] = [tenant_id]
         if status:
             clauses.append("settlement_status = ?")
             params.append(status)
@@ -384,7 +384,7 @@ class SettlementLedger:
 
     def transition_status(self, settlement_id: str, tenant_id: str, to_status: SettlementStatus,
                           actor: str, reason: str, *, event_type: str = "STATUS_TRANSITION",
-                          payload: Optional[Dict[str, Any]] = None) -> bool:
+                          payload: dict[str, Any] | None = None) -> bool:
         """Record a lifecycle transition as an append-only event.
 
         Historical rows are not rewritten: the event log carries the
@@ -408,7 +408,7 @@ class SettlementLedger:
                                to_status.value, actor, reason, payload)
         return True
 
-    def get_events(self, settlement_id: str, tenant_id: str) -> List[Dict[str, Any]]:
+    def get_events(self, settlement_id: str, tenant_id: str) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT * FROM settlement_events WHERE settlement_id = ? AND tenant_id = ? "
@@ -445,7 +445,7 @@ class SettlementLedger:
     def update_dispute_resolution(self, dispute_id: str, tenant_id: str, *,
                                   status: DisputeStatus, resolution: DisputeResolution,
                                   resolution_actor: str, resolution_reason: str,
-                                  adjustment_settlement_id: Optional[str] = None) -> bool:
+                                  adjustment_settlement_id: str | None = None) -> bool:
         with self._connect() as conn:
             cur = conn.execute(
                 "UPDATE disputes SET status = ?, resolution = ?, resolution_actor = ?, "
@@ -456,7 +456,7 @@ class SettlementLedger:
             )
             return cur.rowcount > 0
 
-    def get_dispute(self, dispute_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    def get_dispute(self, dispute_id: str, tenant_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM disputes WHERE dispute_id = ? AND tenant_id = ?",
@@ -464,10 +464,10 @@ class SettlementLedger:
             ).fetchone()
         return self._dispute_dict(row) if row else None
 
-    def list_disputes(self, tenant_id: str, settlement_id: Optional[str] = None,
-                      status: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_disputes(self, tenant_id: str, settlement_id: str | None = None,
+                      status: str | None = None) -> list[dict[str, Any]]:
         clauses = ["tenant_id = ?"]
-        params: List[Any] = [tenant_id]
+        params: list[Any] = [tenant_id]
         if settlement_id:
             clauses.append("settlement_id = ?")
             params.append(settlement_id)
@@ -486,8 +486,8 @@ class SettlementLedger:
     def save_billing_instruction(self, *, billing_instruction_id: str, settlement_id: str,
                                  tenant_id: str, provider: str, currency: str,
                                  amount_minor: int, idempotency_key: str,
-                                 provider_invoice_id: Optional[str] = None,
-                                 status: str = "DRAFT", request_meta: Optional[Dict[str, Any]] = None) -> None:
+                                 provider_invoice_id: str | None = None,
+                                 status: str = "DRAFT", request_meta: dict[str, Any] | None = None) -> None:
         """Persist a proposed external billing action.
 
         Uniqueness on (tenant, provider, provider_invoice_id) prevents a
@@ -509,7 +509,7 @@ class SettlementLedger:
             )
 
     def find_billing_instruction(self, tenant_id: str, provider: str,
-                                 provider_invoice_id: str) -> Optional[Dict[str, Any]]:
+                                 provider_invoice_id: str) -> dict[str, Any] | None:
         """Locate an instruction by its provider reference (dedup/reconciliation)."""
         with self._connect() as conn:
             row = conn.execute(
@@ -519,7 +519,7 @@ class SettlementLedger:
             ).fetchone()
         return dict(row) if row else None
 
-    def find_billing_by_idempotency(self, tenant_id: str, idempotency_key: str) -> Optional[Dict[str, Any]]:
+    def find_billing_by_idempotency(self, tenant_id: str, idempotency_key: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM billing_instructions WHERE tenant_id = ? AND idempotency_key = ?",
@@ -542,7 +542,7 @@ class SettlementLedger:
             )
             return cur.rowcount > 0
 
-    def get_billing_instruction(self, billing_instruction_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    def get_billing_instruction(self, billing_instruction_id: str, tenant_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM billing_instructions WHERE billing_instruction_id = ? AND tenant_id = ?",
@@ -550,9 +550,9 @@ class SettlementLedger:
             ).fetchone()
         return dict(row) if row else None
 
-    def list_billing_instructions(self, tenant_id: str, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_billing_instructions(self, tenant_id: str, status: str | None = None) -> list[dict[str, Any]]:
         clauses = ["tenant_id = ?"]
-        params: List[Any] = [tenant_id]
+        params: list[Any] = [tenant_id]
         if status:
             clauses.append("status = ?")
             params.append(status)
@@ -567,7 +567,7 @@ class SettlementLedger:
     # ------------------------------------------------------------- dict mapping
 
     @staticmethod
-    def _settlement_dict(row: sqlite3.Row) -> Dict[str, Any]:
+    def _settlement_dict(row: sqlite3.Row) -> dict[str, Any]:
         return {
             "settlement_id": row["settlement_id"],
             "tenant_id": row["tenant_id"],
@@ -594,7 +594,7 @@ class SettlementLedger:
         }
 
     @staticmethod
-    def _dispute_dict(row: sqlite3.Row) -> Dict[str, Any]:
+    def _dispute_dict(row: sqlite3.Row) -> dict[str, Any]:
         return {
             "dispute_id": row["dispute_id"],
             "settlement_id": row["settlement_id"],

@@ -22,7 +22,6 @@ import json
 import os
 import platform
 import shutil
-import statistics
 import sys
 import time
 import tracemalloc
@@ -62,12 +61,12 @@ def _generate_feed(storage: Path, total: int) -> Path:
     amounts = [f"{100 + (i % 900)}.{i % 100:02d}" for i in range(1000)]
     with open(source, "w", encoding="utf-8") as handle:
         for i in range(delivered):
-            handle.write('{"settlement_id": "SET-%09d", "amount": %s, "currency": "USD"}\n'
-                         % (i, amounts[i % len(amounts)]))
+            handle.write(
+                f'{{"settlement_id": "SET-{i:09d}", "amount": {amounts[i % len(amounts)]}, "currency": "USD"}}\n')
         for i in range(held):
-            handle.write('{"settlement_id": "HOLD-%09d", "amount": -12.50, "currency": "USD"}\n' % i)
+            handle.write(f'{{"settlement_id": "HOLD-{i:09d}", "amount": -12.50, "currency": "USD"}}\n')
         for i in range(refused):
-            handle.write('{"settlement_id": "REJ-%09d", "amount": "NOT_A_FLOAT", "currency": "USD"}\n' % i)
+            handle.write(f'{{"settlement_id": "REJ-{i:09d}", "amount": "NOT_A_FLOAT", "currency": "USD"}}\n')
     return source
 
 
@@ -91,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         verify_settlement_receipt,
     )
     from datashell.settlement.engine import calculate_settlement
-    from datashell.settlement.models import CommercialContract, SettlementStatement
+    from datashell.settlement.models import CommercialContract
 
     source = _generate_feed(storage, args.rows)
     audit = storage / "output" / "audits" / "bench_audit.json"
@@ -112,7 +111,7 @@ def main(argv: list[str] | None = None) -> int:
     ingest_seconds = time.perf_counter() - started
     ledger = result.ledger
     print()
-    print(f"  Pipeline (ingest+quality+reconcile+certificate+deliver):")
+    print("  Pipeline (ingest+quality+reconcile+certificate+deliver):")
     print(f"    rows={ledger.rows_read:,} delivered={ledger.actual_delivered:,} "
           f"held={ledger.held_quality:,} refused={ledger.refused_structural:,}")
     print(f"    wall time: {ingest_seconds:.2f}s "

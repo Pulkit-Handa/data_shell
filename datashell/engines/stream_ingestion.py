@@ -5,19 +5,18 @@ by streaming RecordBatches through Tier 1 and Tier 2 gates with incremental Parq
 """
 
 from __future__ import annotations
+
 import uuid
-import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
-import pyarrow as pa
-import pyarrow.parquet as pq
+
 import polars as pl
+import pyarrow.parquet as pq
 
 from datashell.contract.models import DataContract
-from datashell.engines.quality import SemanticQualityEngine, QualityResult
+from datashell.core.fileops import parquet_compression_codec
+from datashell.engines.delivery import DeliveryOutcome, TerminalStatus
+from datashell.engines.quality import QualityResult, SemanticQualityEngine
 from datashell.engines.reconciler import Reconciler, ReconciliationLedger
-from datashell.engines.delivery import TerminalStatus, DeliveryOutcome
-from datashell.core.telemetry import telemetry_logger
 
 
 class StreamingBoundaryRunner:
@@ -37,8 +36,8 @@ class StreamingBoundaryRunner:
         source_path: Path,
         target_path: Path,
         quarantine_path: Path,
-        run_id: Optional[str] = None
-    ) -> Tuple[ReconciliationLedger, DeliveryOutcome]:
+        run_id: str | None = None
+    ) -> tuple[ReconciliationLedger, DeliveryOutcome]:
         """
         Processes a massive Parquet file in chunks with constant memory.
         """
@@ -53,15 +52,16 @@ class StreamingBoundaryRunner:
         total_structural_refused = 0
         total_held_quality = 0
         total_delivered = 0
-        rule_breakdowns: Dict[str, int] = {}
+        rule_breakdowns: dict[str, int] = {}
 
-        target_writer: Optional[pq.ParquetWriter] = None
-        held_writer: Optional[pq.ParquetWriter] = None
+        target_writer: pq.ParquetWriter | None = None
+        held_writer: pq.ParquetWriter | None = None
 
         try:
             # Stream RecordBatches from Parquet
             for batch in pq_file.iter_batches(batch_size=self.chunk_size):
-                chunk_df = pl.from_arrow(batch)
+                from_arrow = pl.from_arrow(batch)
+                chunk_df = from_arrow if isinstance(from_arrow, pl.DataFrame) else from_arrow.to_frame()
                 chunk_len = chunk_df.height
                 total_rows_read += chunk_len
 
@@ -76,7 +76,8 @@ class StreamingBoundaryRunner:
                 if chunk_quality.admitted_df.height > 0:
                     admitted_arrow = chunk_quality.admitted_df.to_arrow()
                     if target_writer is None:
-                        target_writer = pq.ParquetWriter(target_path, admitted_arrow.schema)
+                        target_writer = pq.ParquetWriter(
+                            target_path, admitted_arrow.schema, compression=parquet_compression_codec())
                     target_writer.write_table(admitted_arrow)
                     total_delivered += chunk_quality.admitted_df.height
 
@@ -84,7 +85,8 @@ class StreamingBoundaryRunner:
                 if chunk_quality.held_df.height > 0:
                     held_arrow = chunk_quality.held_df.to_arrow()
                     if held_writer is None:
-                        held_writer = pq.ParquetWriter(held_target, held_arrow.schema)
+                        held_writer = pq.ParquetWriter(
+                            held_target, held_arrow.schema, compression=parquet_compression_codec())
                     held_writer.write_table(held_arrow)
                     total_held_quality += chunk_quality.held_df.height
 

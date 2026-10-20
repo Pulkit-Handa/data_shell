@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from datashell.contract.models import DataContract
 from datashell.core.config import (
     DEFAULT_MAX_UPLOAD_SIZE_BYTES,
     MULTIPART_OVERHEAD_BYTES,
@@ -11,7 +12,6 @@ from datashell.core.config import (
     settings,
 )
 from datashell.core.fileops import InsufficientStorageError, ensure_disk_headroom
-from datashell.contract.models import DataContract
 from datashell.pipeline.artifacts import ArtifactGenerator
 from datashell.pipeline.runner import DataShellPipeline
 
@@ -27,7 +27,7 @@ def test_default_body_limit_tracks_upload_limit():
 
 
 def test_enterprise_settings_reject_nonpositive_headroom_multiplier():
-    with pytest.raises(Exception):
+    with pytest.raises(RuntimeError):
         EnterpriseSettings(disk_headroom_multiplier=0)
 
 
@@ -48,7 +48,10 @@ def test_ensure_disk_headroom_ignores_empty_source(monkeypatch, tmp_path):
 
 
 def _contract(source_path, target_path, quarantine_path=None):
-    delivery = {"targets": [{"type": "PARQUET", "connectionRef": "local", "path": str(target_path), "mode": "overwrite"}]}
+    delivery = {"targets": [{
+        "type": "PARQUET", "connectionRef": "local",
+        "path": str(target_path), "mode": "overwrite",
+    }]}
     if quarantine_path is not None:
         delivery["quarantinePath"] = str(quarantine_path)
     return DataContract(

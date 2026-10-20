@@ -22,12 +22,12 @@ import json
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone, timedelta
+from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any
 
 from datashell.core.config import settings
-
 
 # Size cap for pending-outbox records (same bound as commit journals: a
 # ledger payload is small structured metadata, never bulk data).
@@ -40,7 +40,7 @@ PENDING_OUTBOX_SUFFIX = ".ledger-pending.json"
 # Columns added to ``run_history`` after its original two-field-per-run form.
 # Declared as an ordered list so migration is an idempotent ALTER TABLE loop;
 # this keeps databases written by earlier releases readable.
-_RUN_HISTORY_MIGRATIONS: List[tuple[str, str]] = [
+_RUN_HISTORY_MIGRATIONS: list[tuple[str, str]] = [
     ("contract_version", "TEXT"),
     ("status", "TEXT"),
     ("rows_refused", "INTEGER DEFAULT 0"),
@@ -69,14 +69,14 @@ _DELIVERED_FILTER = "(status IS NULL OR status = 'LOADED')"
 
 
 def _utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _json(value: Any) -> str:
     return json.dumps(value if value is not None else {})
 
 
-def _unjson(value: Any) -> Dict[str, Any]:
+def _unjson(value: Any) -> dict[str, Any]:
     if not value:
         return {}
     try:
@@ -93,7 +93,7 @@ class BoundaryLedger:
     drift baselines, so existing deployments migrate in place.
     """
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Path | None = None):
         self.db_path = Path(db_path or settings.history_db_path)
         self._init_db_failed = False
         try:
@@ -244,7 +244,7 @@ class BoundaryLedger:
         conn.execute(statement)
 
     @staticmethod
-    def pending_outbox_path(audit_dest: Path, run_id: Optional[str] = None) -> Path:
+    def pending_outbox_path(audit_dest: Path, run_id: str | None = None) -> Path:
         """Durable outbox record for one run's ledger payload (LEDGER-001).
 
         Written atomically *before* artifacts are published and removed only
@@ -265,7 +265,7 @@ class BoundaryLedger:
         return dest.with_name(dest.name + PENDING_OUTBOX_SUFFIX)
 
     @staticmethod
-    def write_pending_outbox(outbox_path: Path, payload: dict) -> Path:
+    def write_pending_outbox(outbox_path: Path, payload: dict[str, Any]) -> Path:
         """Atomically persist the ledger payload ahead of publication."""
         outbox_path = Path(outbox_path)
         outbox_path.parent.mkdir(parents=True, exist_ok=True)
@@ -292,7 +292,7 @@ class BoundaryLedger:
         Path(outbox_path).unlink(missing_ok=True)
 
     @staticmethod
-    def iter_pending_outboxes(root: Path) -> Iterator[Tuple[Path, dict]]:
+    def iter_pending_outboxes(root: Path) -> Iterator[tuple[Path, dict[str, Any]]]:
         """Yield pending-outbox records beneath a storage root (oldest first)."""
         root = Path(root)
         if not root.is_dir():
@@ -303,7 +303,7 @@ class BoundaryLedger:
             try:
                 if outbox.stat().st_size > MAX_OUTBOX_BYTES:
                     continue
-                with open(outbox, "r", encoding="utf-8") as handle:
+                with open(outbox, encoding="utf-8") as handle:
                     payload = json.load(handle)
             except (OSError, ValueError):
                 continue
@@ -319,30 +319,30 @@ class BoundaryLedger:
         contract_name: str,
         rows_read: int,
         rows_delivered: int,
-        metrics: Dict[str, float],
+        metrics: dict[str, float],
         tenant_id: str = "default-tenant",
         *,
-        contract_version: Optional[str] = None,
-        status: Optional[str] = None,
+        contract_version: str | None = None,
+        status: str | None = None,
         rows_refused: int = 0,
         rows_held: int = 0,
         unaccounted_for: int = 0,
         footing_matched: bool = True,
         is_run_rejected: bool = False,
-        rejection_reason: Optional[str] = None,
-        duration_seconds: Optional[float] = None,
-        execution_mode: Optional[str] = None,
-        source_name: Optional[str] = None,
-        source_bytes: Optional[int] = None,
-        target_path: Optional[str] = None,
-        audit_path: Optional[str] = None,
-        quarantine_path: Optional[str] = None,
-        merkle_root: Optional[str] = None,
-        signature_key_id: Optional[str] = None,
-        rule_breakdown: Optional[Dict[str, int]] = None,
-        structural_reasons: Optional[Dict[str, int]] = None,
-        certificate_digest: Optional[str] = None,
-        ledger_status: Optional[str] = None,
+        rejection_reason: str | None = None,
+        duration_seconds: float | None = None,
+        execution_mode: str | None = None,
+        source_name: str | None = None,
+        source_bytes: int | None = None,
+        target_path: str | None = None,
+        audit_path: str | None = None,
+        quarantine_path: str | None = None,
+        merkle_root: str | None = None,
+        signature_key_id: str | None = None,
+        rule_breakdown: dict[str, int] | None = None,
+        structural_reasons: dict[str, int] | None = None,
+        certificate_digest: str | None = None,
+        ledger_status: str | None = None,
     ) -> None:
         """Persist one forensic ledger row for an enforcement run.
 
@@ -410,31 +410,31 @@ class BoundaryLedger:
         contract_name: str,
         rows_read: int,
         rows_delivered: int,
-        metrics: Optional[Dict[str, Any]] = None,
-        contract_version: Optional[str] = None,
-        status: Optional[str] = None,
+        metrics: dict[str, Any] | None = None,
+        contract_version: str | None = None,
+        status: str | None = None,
         rows_refused: int = 0,
         rows_held: int = 0,
         unaccounted_for: int = 0,
         footing_matched: bool = True,
         is_run_rejected: bool = False,
-        rejection_reason: Optional[str] = None,
-        duration_seconds: Optional[float] = None,
-        execution_mode: Optional[str] = None,
-        source_name: Optional[str] = None,
-        source_bytes: Optional[int] = None,
-        target_path: Optional[str] = None,
-        audit_path: Optional[str] = None,
-        quarantine_path: Optional[str] = None,
-        merkle_root: Optional[str] = None,
-        signature_key_id: Optional[str] = None,
-        certificate_digest: Optional[str] = None,
-        rule_breakdown: Optional[Dict[str, int]] = None,
-        structural_reasons: Optional[Dict[str, int]] = None,
-        quarantine_rows: Optional[List[Dict[str, Any]]] = None,
+        rejection_reason: str | None = None,
+        duration_seconds: float | None = None,
+        execution_mode: str | None = None,
+        source_name: str | None = None,
+        source_bytes: int | None = None,
+        target_path: str | None = None,
+        audit_path: str | None = None,
+        quarantine_path: str | None = None,
+        merkle_root: str | None = None,
+        signature_key_id: str | None = None,
+        certificate_digest: str | None = None,
+        rule_breakdown: dict[str, int] | None = None,
+        structural_reasons: dict[str, int] | None = None,
+        quarantine_rows: list[dict[str, Any]] | None = None,
         billable: bool = True,
         unit: str = "row",
-        units: Optional[int] = None,
+        units: int | None = None,
     ) -> None:
         """Apply a complete run outcome to history, quarantine index, and usage.
 
@@ -499,8 +499,8 @@ class BoundaryLedger:
                 ),
             )
             for row in quarantine_rows or []:
-                reasons = row.get("reasons") or {}
-                dominant = max(reasons, key=reasons.get) if reasons else None
+                reasons: dict[str, Any] = dict(row.get("reasons") or {})
+                dominant = max(reasons, key=reasons.__getitem__) if reasons else None
                 conn.execute(
                     """
                     INSERT OR REPLACE INTO quarantine_index (
@@ -548,19 +548,19 @@ class BoundaryLedger:
         self,
         run_id: str,
         tenant_id: str,
-        contract_name: Optional[str],
+        contract_name: str | None,
         kind: str,
-        artifact_path: Optional[str],
+        artifact_path: str | None,
         row_count: int,
-        reasons: Optional[Dict[str, int]] = None,
+        reasons: dict[str, int] | None = None,
     ) -> None:
         """Index one quarantine artifact (held rows or structural refusals).
 
         Idempotent on the (tenant, run, kind, artifact) identity so replaying a
         pending ledger entry replaces the row instead of duplicating it.
         """
-        reason_map = reasons or {}
-        dominant = max(reason_map, key=reason_map.get) if reason_map else None
+        reason_map: dict[str, Any] = dict(reasons or {})
+        dominant = max(reason_map, key=reason_map.__getitem__) if reason_map else None
         with self._connect() as conn:
             conn.execute(
                 """
@@ -586,15 +586,15 @@ class BoundaryLedger:
         self,
         run_id: str,
         tenant_id: str,
-        contract_name: Optional[str],
-        status: Optional[str],
-        execution_mode: Optional[str],
+        contract_name: str | None,
+        status: str | None,
+        execution_mode: str | None,
         rows_read: int,
         rows_delivered: int,
         bytes_processed: int = 0,
         billable: bool = True,
         unit: str = "row",
-        units: Optional[int] = None,
+        units: int | None = None,
     ) -> None:
         """Record a metering row for outcome-as-a-service accounting."""
         with self._connect() as conn:
@@ -626,7 +626,7 @@ class BoundaryLedger:
 
     def get_last_run(
         self, contract_name: str, tenant_id: str = "default-tenant"
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Most recent *delivered* run for a contract (drift baseline source)."""
         with self._connect() as conn:
             row = conn.execute(
@@ -651,7 +651,7 @@ class BoundaryLedger:
         contract_name: str,
         tenant_id: str = "default-tenant",
         window: int = 1,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Rolling delivered-row and metric baseline over the last ``window`` runs.
 
         ``window=1`` reproduces the historical "compare against the previous run"
@@ -678,7 +678,7 @@ class BoundaryLedger:
             return None
 
         delivered = [float(r["rows_delivered"] or 0) for r in rows]
-        metric_samples: Dict[str, List[float]] = {}
+        metric_samples: dict[str, list[float]] = {}
         for r in rows:
             for name, value in _unjson(r["metrics_json"]).items():
                 try:
@@ -710,7 +710,7 @@ class BoundaryLedger:
                 (tenant_id, contract_name, _utcnow()),
             )
 
-    def get_run(self, run_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    def get_run(self, run_id: str, tenant_id: str) -> dict[str, Any] | None:
         """Full ledger record for a run, scoped to its tenant."""
         with self._connect() as conn:
             row = conn.execute(
@@ -722,14 +722,14 @@ class BoundaryLedger:
     def list_runs(
         self,
         tenant_id: str,
-        contract_name: Optional[str] = None,
-        status: Optional[str] = None,
+        contract_name: str | None = None,
+        status: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Newest-first run records for a tenant with optional filters."""
         clauses = ["tenant_id = ?"]
-        params: List[Any] = [tenant_id]
+        params: list[Any] = [tenant_id]
         if contract_name:
             clauses.append("contract_name = ?")
             params.append(contract_name)
@@ -748,12 +748,12 @@ class BoundaryLedger:
     def count_runs(
         self,
         tenant_id: str,
-        contract_name: Optional[str] = None,
-        status: Optional[str] = None,
+        contract_name: str | None = None,
+        status: str | None = None,
     ) -> int:
         """Total runs matching the same filters accepted by :meth:`list_runs`."""
         clauses = ["tenant_id = ?"]
-        params: List[Any] = [tenant_id]
+        params: list[Any] = [tenant_id]
         if contract_name:
             clauses.append("contract_name = ?")
             params.append(contract_name)
@@ -768,11 +768,11 @@ class BoundaryLedger:
         return int(row["n"]) if row else 0
 
     def history_summary(
-        self, tenant_id: str, contract_name: Optional[str] = None
-    ) -> Dict[str, Any]:
+        self, tenant_id: str, contract_name: str | None = None
+    ) -> dict[str, Any]:
         """Aggregate delivery health for a tenant (optionally one contract)."""
         clauses = ["tenant_id = ?"]
-        params: List[Any] = [tenant_id]
+        params: list[Any] = [tenant_id]
         if contract_name:
             clauses.append("contract_name = ?")
             params.append(contract_name)
@@ -812,12 +812,12 @@ class BoundaryLedger:
     def volume_trend(
         self,
         tenant_id: str,
-        contract_name: Optional[str] = None,
+        contract_name: str | None = None,
         limit: int = 30,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Chronological (oldest-first) slice of recent runs for trend charts."""
         clauses = ["tenant_id = ?"]
-        params: List[Any] = [tenant_id]
+        params: list[Any] = [tenant_id]
         if contract_name:
             clauses.append("contract_name = ?")
             params.append(contract_name)
@@ -851,15 +851,15 @@ class BoundaryLedger:
     def list_quarantine(
         self,
         tenant_id: str,
-        contract_name: Optional[str] = None,
-        run_id: Optional[str] = None,
-        kind: Optional[str] = None,
-        reason: Optional[str] = None,
+        contract_name: str | None = None,
+        run_id: str | None = None,
+        kind: str | None = None,
+        reason: str | None = None,
         limit: int = 100,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Search the quarantine index by contract, run, kind, or dominant reason."""
         clauses = ["tenant_id = ?"]
-        params: List[Any] = [tenant_id]
+        params: list[Any] = [tenant_id]
         if contract_name:
             clauses.append("contract_name = ?")
             params.append(contract_name)
@@ -899,12 +899,12 @@ class BoundaryLedger:
     def usage_summary(
         self,
         tenant_id: str,
-        contract_name: Optional[str] = None,
-        since: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        contract_name: str | None = None,
+        since: str | None = None,
+    ) -> dict[str, Any]:
         """Metering totals for a tenant, optionally since an ISO-8601 timestamp."""
         clauses = ["tenant_id = ?"]
-        params: List[Any] = [tenant_id]
+        params: list[Any] = [tenant_id]
         if contract_name:
             clauses.append("contract_name = ?")
             params.append(contract_name)
@@ -962,7 +962,7 @@ class BoundaryLedger:
         except sqlite3.Error:
             return False
 
-    def prune(self, retention_days: Optional[int] = None) -> Dict[str, int]:
+    def prune(self, retention_days: int | None = None) -> dict[str, int]:
         """Delete ledger rows older than the retention window.
 
         A non-positive ``retention_days`` (the default) keeps history forever;
@@ -971,8 +971,8 @@ class BoundaryLedger:
         days = settings.history_retention_days if retention_days is None else int(retention_days)
         if days <= 0:
             return {"run_history": 0, "quarantine_index": 0, "usage_records": 0}
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-        removed: Dict[str, int] = {}
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat()
+        removed: dict[str, int] = {}
         with self._connect() as conn:
             for table in ("run_history", "quarantine_index", "usage_records"):
                 cursor = conn.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))
@@ -982,7 +982,7 @@ class BoundaryLedger:
     # ----------------------------------------------------------------- internal
 
     @staticmethod
-    def _run_dict(row: sqlite3.Row) -> Dict[str, Any]:
+    def _run_dict(row: sqlite3.Row) -> dict[str, Any]:
         keys = row.keys()
         return {
             "run_id": row["run_id"],
@@ -1018,8 +1018,8 @@ class BoundaryLedger:
     # ------------------------------------------------------- pending outbox
 
     def list_pending_runs(
-        self, tenant_id: Optional[str] = None, limit: int = 500
-    ) -> List[Dict[str, Any]]:
+        self, tenant_id: str | None = None, limit: int = 500
+    ) -> list[dict[str, Any]]:
         """Runs published but not yet fully ledger-recorded (LEDGER-001).
 
         A ``PENDING`` row means artifacts reached durable storage while the
@@ -1027,7 +1027,7 @@ class BoundaryLedger:
         carries the payload needed for idempotent replay.
         """
         clauses = ["(ledger_status = 'PENDING')"]
-        params: List[Any] = []
+        params: list[Any] = []
         if tenant_id is not None:
             clauses.append("tenant_id = ?")
             params.append(tenant_id)
@@ -1058,11 +1058,11 @@ class BoundaryLedger:
 # -------------------------------------------------------------------
 # Module-level compatibility wrappers so callers can import the durable
 # outbox helpers without constructing a BoundaryLedger instance.
-def pending_outbox_path(audit_dest: Path, run_id: Optional[str] = None) -> Path:
+def pending_outbox_path(audit_dest: Path, run_id: str | None = None) -> Path:
     return BoundaryLedger.pending_outbox_path(audit_dest, run_id)
 
 
-def write_pending_outbox(outbox_path: Path, payload: dict) -> Path:
+def write_pending_outbox(outbox_path: Path, payload: dict[str, Any]) -> Path:
     return BoundaryLedger.write_pending_outbox(outbox_path, payload)
 
 
@@ -1070,5 +1070,5 @@ def clear_pending_outbox(outbox_path: Path) -> None:
     BoundaryLedger.clear_pending_outbox(outbox_path)
 
 
-def iter_pending_outboxes(root: Path):
+def iter_pending_outboxes(root: Path) -> Iterator[tuple[Path, dict[str, Any]]]:
     return BoundaryLedger.iter_pending_outboxes(root)

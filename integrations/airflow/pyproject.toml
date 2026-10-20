@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "data-shell-airflow"
+name = "datashell-airflow"
 version = "1.0.2"
 description = "Apache Airflow provider that gates DAGs on Data Shell boundary enforcement."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Data Shell" }]
-keywords = ["airflow", "data-quality", "data-contracts", "data-shell", "boundary"]
+keywords = ["airflow", "data-quality", "data-contracts", "datashell", "boundary"]
 classifiers = [
     "Framework :: Apache Airflow",
     "License :: OSI Approved :: Apache Software License",

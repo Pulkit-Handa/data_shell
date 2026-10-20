@@ -6,10 +6,9 @@ configurable parser options, and explicit schema-compatibility policies.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import polars as pl
 import pytest
+from pydantic import ValidationError
 
 from datashell.contract.models import (
     BatchRule,
@@ -21,8 +20,8 @@ from datashell.contract.models import (
     QualityRule,
     QualitySpec,
     RuleCheckType,
-    SchemaCompatibilityPolicy,
     SchemaColumn,
+    SchemaCompatibilityPolicy,
     SourceDefinition,
     SourceParserOptions,
 )
@@ -40,7 +39,10 @@ def _schema(*cols):
     ]
 
 
-def _contract(name, batch_rules=None, schema=None, parser=None, schema_compatibility=None, behavior=QualityBehavior.DROP_ROW):
+def _contract(
+    name, batch_rules=None, schema=None, parser=None,
+    schema_compatibility=None, behavior=QualityBehavior.DROP_ROW,
+):
     return DataContract(
         metadata={"name": name, "version": "1.0.0"},
         spec={
@@ -55,7 +57,10 @@ def _contract(name, batch_rules=None, schema=None, parser=None, schema_compatibi
             ],
             "quality": QualitySpec(
                 behavior=behavior,
-                rules=[QualityRule(rule_id="amount-positive", column="amount", check=RuleCheckType.GREATER_THAN, value=0.0)],
+                rules=[
+                    QualityRule(rule_id="amount-positive", column="amount",
+                                check=RuleCheckType.GREATER_THAN, value=0.0)
+                ],
                 batch_rules=batch_rules or [],
             ),
             "delivery": DeliverySpec(targets=[DeliveryTarget(path="/tmp/feed_control_out.parquet")]),
@@ -101,7 +106,9 @@ def test_composite_unique_allows_repeated_single_column(tmp_path, monkeypatch):
     contract = _contract(
         "composite-contract",
         batch_rules=[
-            BatchRule(rule_id="account-day-unique", check=BatchRuleCheckType.COMPOSITE_UNIQUE, columns=["account", "currency"]),
+            BatchRule(rule_id="account-day-unique",
+                      check=BatchRuleCheckType.COMPOSITE_UNIQUE,
+                      columns=["account", "currency"]),
         ],
     )
     records = [
@@ -127,11 +134,11 @@ def test_composite_unique_allows_repeated_single_column(tmp_path, monkeypatch):
 
 
 def test_batch_rule_rejects_bad_uniqueness_declarations():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BatchRule(rule_id="bad-unique", check=BatchRuleCheckType.UNIQUE)  # missing column
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BatchRule(rule_id="bad-composite", check=BatchRuleCheckType.COMPOSITE_UNIQUE, columns=["only-one"])
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BatchRule(rule_id="both", check=BatchRuleCheckType.UNIQUE, column="id", columns=["id", "account"])
 
 
@@ -194,11 +201,11 @@ def test_sum_between_control_total(tmp_path, monkeypatch):
 
 
 def test_sum_rule_declarations_validated():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BatchRule(rule_id="bad", check=BatchRuleCheckType.SUM_EQUALS, column="amount", value="total")
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BatchRule(rule_id="bad-tol", check=BatchRuleCheckType.SUM_EQUALS, column="amount", value=1.0, tolerance=-1)
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         BatchRule(rule_id="bad-band", check=BatchRuleCheckType.SUM_BETWEEN, column="amount", value=[10.0, 1.0])
 
 
@@ -405,7 +412,12 @@ def test_strict_schema_compatibility_refuses_missing_column(tmp_path):
 
     strict = StructuralIngestionEngine(
         DataContract(metadata={"name": "s1", "version": "1.0.0"}, spec={
-            "sources": [SourceDefinition(path=str(src), schema=schema, schema_compatibility=SchemaCompatibilityPolicy.STRICT)],
+            "sources": [
+                SourceDefinition(
+                    path=str(src), schema=schema,
+                    schema_compatibility=SchemaCompatibilityPolicy.STRICT,
+                )
+            ],
             "quality": QualitySpec(), "delivery": DeliverySpec(),
         })
     )
@@ -427,7 +439,7 @@ def test_strict_schema_compatibility_refuses_missing_column(tmp_path):
 
 
 def test_schema_compatibility_invalid_policy_rejected():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         DataContract(metadata={"name": "bad", "version": "1.0.0"}, spec={
             "sources": [SourceDefinition(path="x", schema=_schema(), schema_compatibility="NOPE")],
             "quality": QualitySpec(), "delivery": DeliverySpec(),
