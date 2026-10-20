@@ -11,6 +11,25 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from datashell.core.sandbox import FilesystemSandbox
 
 
+def known_row_check_names() -> set[str]:
+    """Built-in + plugin + in-process check names (deferred to avoid cycles)."""
+    from datashell.contract import rule_registry
+
+    return set(rule_registry.available_row_checks()) | set(rule_registry.available_batch_checks())
+
+
+def rule_registry_row_group() -> str:
+    from datashell.contract import rule_registry
+
+    return rule_registry.ROW_CHECK_GROUP
+
+
+def rule_registry_batch_group() -> str:
+    from datashell.contract import rule_registry
+
+    return rule_registry.BATCH_CHECK_GROUP
+
+
 class QualityBehavior(StrEnum):
     DROP_ROW = "DROP_ROW"      # Held rows quarantined; valid rows delivered unless batch check fails
     REJECT_RUN = "REJECT_RUN"  # Whole run rejected if any row rule OR batch rule fails
@@ -141,8 +160,19 @@ class SourceDefinition(BaseModel):
 
 
 class QualityRule(BaseModel):
+    """One vectorized row rule.
+
+    ``check`` is a built-in ``RowRuleCheckType`` member, ``CUSTOM_EXPR``, or an
+    extended check name provided by a plugin (the
+    ``datashell.rule_checks.row`` entry-point group; see
+    ``datashell.contract.rule_registry``). Names are UPPER_SNAKE_CASE; built-ins
+    cannot be shadowed, and unknown names are rejected here so invalid
+    contracts fail at validation, not at 2 a.m. enforcement.
+    """
     rule_id: str = Field(description="Stable identifier kept across contract versions")
-    check: RowRuleCheckType
+    check: str = Field(
+        pattern=r"^[A-Z][A-Z0-9_]{1,63}$",
+        description="Built-in check member, CUSTOM_EXPR, or a registered plugin check name")
     column: str | None = None
     value: Any | None = None
     expression: str | None = None
@@ -163,20 +193,29 @@ class QualityRule(BaseModel):
             RowRuleCheckType.ALLOWED_VALUES, RowRuleCheckType.REGEX_MATCH
         ):
             if not self.column:
-                raise ValueError(f"Rule '{self.rule_id}' with check {self.check.value} must supply 'column'")
+                raise ValueError(f"Rule '{self.rule_id}' with check {self.check} must supply 'column'")
             if self.value is None:
-                raise ValueError(f"Rule '{self.rule_id}' with check {self.check.value} must supply 'value'")
+                raise ValueError(f"Rule '{self.rule_id}' with check {self.check} must supply 'value'")
         elif self.check == RowRuleCheckType.BETWEEN:
             if not self.column:
                 raise ValueError(f"Rule '{self.rule_id}' with check BETWEEN must supply 'column'")
             if not isinstance(self.value, (list, tuple)) or len(self.value) != 2:
                 raise ValueError(f"Rule '{self.rule_id}' with check BETWEEN requires a [min, max] list value")
+        elif self.check not in known_row_check_names():
+            raise ValueError(
+                f"Rule '{self.rule_id}' has unknown check '{self.check}'. Built-ins are "
+                f"fixed; extended checks come from the "
+                f"'{rule_registry_row_group()}' entry-point group (see 'datashell rules')")
         return self
 
 
 class BatchRule(BaseModel):
+    """One whole-run batch rule (same naming rules as ``QualityRule.check``)."""
+
     rule_id: str = Field(description="Stable identifier kept across contract versions")
-    check: BatchRuleCheckType
+    check: str = Field(
+        pattern=r"^[A-Z][A-Z0-9_]{1,63}$",
+        description="Built-in check member, SQL_ASSERTION, or a registered plugin check name")
     column: str | None = None
     columns: list[str] | None = None
     value: Any | None = None
@@ -191,7 +230,7 @@ class BatchRule(BaseModel):
                 raise ValueError(f"Batch rule '{self.rule_id}' with check SQL_ASSERTION must supply 'sql'")
         elif self.check in (BatchRuleCheckType.MIN_ROW_COUNT, BatchRuleCheckType.MAX_ROW_COUNT):
             if self.value is None or not isinstance(self.value, (int, float)):
-                raise ValueError(f"Batch rule '{self.rule_id}' with check {self.check.value} requires numeric 'value'")
+                raise ValueError(f"Batch rule '{self.rule_id}' with check {self.check} requires numeric 'value'")
         elif self.check == BatchRuleCheckType.MAX_NULL_RATE:
             if not self.column:
                 raise ValueError(f"Batch rule '{self.rule_id}' with check MAX_NULL_RATE must supply 'column'")
@@ -225,6 +264,11 @@ class BatchRule(BaseModel):
             low, high = self.value
             if float(low) > float(high):
                 raise ValueError(f"Batch rule '{self.rule_id}' SUM_BETWEEN requires min <= max")
+        if self.check not in known_row_check_names():
+            raise ValueError(
+                f"Batch rule '{self.rule_id}' has unknown check '{self.check}'. Built-ins are "
+                f"fixed; extended checks come from the "
+                f"'{rule_registry_batch_group()}' entry-point group (see 'datashell rules')")
         if self.column and self.columns:
             raise ValueError(f"Batch rule '{self.rule_id}' cannot set both 'column' and 'columns'")
         return self

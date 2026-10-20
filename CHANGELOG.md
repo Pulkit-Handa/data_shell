@@ -56,6 +56,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconciliation counts, zero-deficit status, and peak RSS (JSON with
   `--json`). Minimum-row-count batch rules make small runs work; no invented
   numbers ship in the docs.
+- **Extension points for quality rules.** New row/batch check types can arrive
+  as plugins: a package registers compilers through the
+  `datashell.rule_checks.row` / `datashell.rule_checks.batch` entry-point
+  groups, and `datashell rules` lists every check type with its provenance.
+  Built-in checks cannot be shadowed (a plugin named after a built-in is
+  rejected and reported), unknown check names are rejected at contract
+  validation with the group name spelled out, and broken plugins are logged
+  instead of taking enforcement down.
 
 ### Changed
 - **Distribution name `data-shell` → `datashell`.** The import package and the

@@ -125,6 +125,11 @@ def build_parser() -> argparse.ArgumentParser:
     demo_parser = subparsers.add_parser("demo", help="Run a self-contained refusal/tamper/verify walkthrough")
     demo_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
+    # rules command (check-type catalog)
+    rules_parser = subparsers.add_parser(
+        "rules", help="List quality-rule check types: built-ins plus any installed plugins")
+    rules_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
     # benchmark command (throughput measurement on a synthetic feed)
     benchmark_parser = subparsers.add_parser(
         "benchmark", help="Measure boundary throughput on a deterministic synthetic feed")
@@ -981,6 +986,30 @@ _BENCHMARK_CONTRACT: dict[str, Any] = {
 }
 
 
+# --------------------------------------------------------------------------- rules
+
+
+def command_rules(args: argparse.Namespace) -> int:
+    """List every quality-rule check type: built-ins first, then plugins."""
+    from datashell.contract import rule_registry
+
+    rows = [(name, "row", source) for name, source in rule_registry.available_row_checks().items()]
+    rows += [(name, "batch", source) for name, source in rule_registry.available_batch_checks().items()]
+
+    errors = rule_registry.plugin_load_errors()
+    if args.json:
+        print(json.dumps({"checks": rows, "plugin_errors": errors}, indent=2))
+        return 0
+
+    width = max((len(name) for name, _, _ in rows), default=4)
+    for name, kind, source in sorted(rows, key=lambda r: (r[1] != "row", r[2] != "builtin", r[0])):
+        marker = "" if source == "builtin" else f"  ({source})"
+        print(f"{name:<{width}}  {kind:<5}{marker}")
+    for error in errors:
+        print(f"PLUGIN ERROR: {error}", file=sys.stderr)
+    return 0
+
+
 def command_benchmark(args: argparse.Namespace) -> int:
     """Measure boundary throughput on a deterministic synthetic feed.
 
@@ -1209,6 +1238,9 @@ def main(argv: list[str] | None = None) -> None:
 
         if args.command == "benchmark":
             sys.exit(command_benchmark(args))
+
+        if args.command == "rules":
+            sys.exit(command_rules(args))
 
         if args.command == "doctor":
             sys.exit(command_doctor(args))

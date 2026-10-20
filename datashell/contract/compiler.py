@@ -4,6 +4,7 @@ from typing import Any
 
 import polars as pl
 
+from datashell.contract import rule_registry
 from datashell.contract.models import BatchRule, BatchRuleCheckType, QualityRule, RowRuleCheckType
 
 
@@ -104,7 +105,13 @@ class RuleCompiler:
             return pl.sql_expr(rule.expression)
 
         else:
-            raise ValueError(f"Unsupported row check type: {rule.check}")
+            plugin = rule_registry.resolve_row_check(str(rule.check))
+            if plugin is None:
+                raise ValueError(
+                    f"Unsupported row check type: {rule.check} "
+                    f"(built-ins are fixed; add checks via the "
+                    f"'{rule_registry.ROW_CHECK_GROUP}' entry-point group)")
+            return plugin(rule)
 
 
 class BatchRuleCompiler:
@@ -241,5 +248,11 @@ class BatchRuleCompiler:
                 """
 
         else:
-            raise ValueError(f"Unsupported batch check type: {rule.check}")
+            plugin = rule_registry.resolve_batch_check(str(rule.check))
+            if plugin is None:
+                raise ValueError(
+                    f"Unsupported batch check type: {rule.check} "
+                    f"(built-ins are fixed; add checks via the "
+                    f"'{rule_registry.BATCH_CHECK_GROUP}' entry-point group)")
+            return plugin(rule, table_name)
 
