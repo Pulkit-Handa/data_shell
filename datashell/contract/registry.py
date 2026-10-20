@@ -224,7 +224,7 @@ class ContractRegistry:
                     v_dt = datetime.strptime(ts_str, "%Y%m%dT%H%M%S_%fZ").replace(tzinfo=UTC)
                     if v_dt <= target_dt:
                         active_version_file = v_file
-                except Exception:
+                except Exception:  # nosec B112 — point-in-time parser skips unparseable historical files by design
                     continue
 
         if active_version_file:

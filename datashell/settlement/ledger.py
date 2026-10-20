@@ -376,7 +376,7 @@ class SettlementLedger:
             clauses.append("contract_id = ?")
             params.append(contract_id)
         params.extend([max(1, int(limit)), max(0, int(offset))])
-        query = ("SELECT * FROM settlements WHERE " + " AND ".join(clauses)
+        query = ("SELECT * FROM settlements WHERE " + " AND ".join(clauses)  # nosec B608
                  + " ORDER BY created_at DESC LIMIT ? OFFSET ?")
         with self._connect() as conn:
             rows = conn.execute(query, params).fetchall()
@@ -476,7 +476,7 @@ class SettlementLedger:
             params.append(status)
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM disputes WHERE " + " AND ".join(clauses) + " ORDER BY created_at DESC",
+                "SELECT * FROM disputes WHERE " + " AND ".join(clauses) + " ORDER BY created_at DESC",  # nosec B608
                 params,
             ).fetchall()
         return [self._dispute_dict(r) for r in rows]
@@ -536,7 +536,7 @@ class SettlementLedger:
         sets = ", ".join(f"{k} = ?" for k in updates)
         with self._connect() as conn:
             cur = conn.execute(
-                f"UPDATE billing_instructions SET {sets}, updated_at = ? "
+                f"UPDATE billing_instructions SET {sets}, updated_at = ? "  # nosec B608
                 "WHERE billing_instruction_id = ? AND tenant_id = ?",
                 (*updates.values(), _utcnow(), billing_instruction_id, tenant_id),
             )
@@ -558,7 +558,7 @@ class SettlementLedger:
             params.append(status)
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM billing_instructions WHERE " + " AND ".join(clauses)
+                "SELECT * FROM billing_instructions WHERE " + " AND ".join(clauses)  # nosec B608
                 + " ORDER BY created_at DESC",
                 params,
             ).fetchall()

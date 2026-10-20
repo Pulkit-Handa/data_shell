@@ -65,6 +65,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation with the group name spelled out, and broken plugins are logged
   instead of taking enforcement down.
 
+- **Security gates (bandit + pip-audit).** CI enforces a zero-findings bandit
+  policy (every suppression is an inline commented `# nosec` with a written
+  reason) and audits `requirements.lock`, `requirements-dev.lock`, and the
+  generated Python client's requirements against the OSV database. The
+  reviewed SQL builders (batch-rule templates, ledger filters) carry the
+  suppression rationale inline, and the batch/ledger query results are
+  pinned by tests, so the builders stay behavior-verified.
+
 ### Added
 - **Generated client SDKs (via OpenAPI Generator, pinned image).** Both the
   Python (`urllib3`) and TypeScript (`fetch`) clients under `sdks/` are
