@@ -58,7 +58,7 @@
             <a class="btn" href="#engineers">See the interface</a>
           </div>
           <div class="hero__meta">
-            <span><b>CLI</b> + HTTP gateway</span>
+            <span><b>CLI · HTTP · SDKs</b></span>
             <span><b>Airflow</b> provider</span>
             <span><b>CSV</b> · JSONL · Parquet</span>
             <span><b>20 GiB</b> ceiling</span>
@@ -70,7 +70,7 @@
             <div class="console__lights"><i></i><i></i><i></i></div>
             <span class="console__title">bash — datashell</span>
             <span class="spacer"></span>
-            <span class="console__title">v1.0.2</span>
+            <span class="console__title">v2.0.0</span>
           </div>
           <div class="console__body">
 <pre class="term"><span class="t-p">$</span> datashell run <span class="t-dim">\</span>
@@ -79,7 +79,7 @@
 
 <span class="t-dim">▶</span> Enforcing boundary on <span class="t-dim">'/mnt/landing/settlements.jsonl'</span>
   against contract <span class="t-dim">'vendor-settlements'</span>...
-  Mode: out-of-core streaming <span class="t-dim">(chunk 250,000 rows)</span>
+  Mode: out-of-core streaming <span class="t-dim">(chunk 100,000 rows)</span>
 
   rows read      <span class="t-num">1,000</span>
   refused            <span class="t-warn">40</span>   structural
@@ -98,10 +98,11 @@
       <div class="shell specstrip__inner">
         <span>License <b>Apache-2.0</b></span>
         <span>Runtime <b>Python 3.11–3.13</b></span>
-        <span>Tests <b>182 passing</b></span>
+        <span>Tests <b>519 passing</b></span>
         <span>Formats <b>CSV · JSONL · Parquet</b></span>
-        <span>Deploy <b>Docker · Kubernetes · Render</b></span>
         <span>Orchestrate <b>CLI · HTTP · Airflow</b></span>
+        <span>Security <b>bandit 0 · OSV 0</b></span>
+        <span>SDKs <b>Python · TypeScript</b></span>
       </div>
     </div>
 
@@ -133,10 +134,24 @@
             <p>
               The active target, an immutable lineage artifact, and a certificate commit together.
               The certificate binds the contract, source bytes, delivered bytes, and every quarantine
-              file by content hash and path, then signs the result with HMAC-SHA256.
+              file by content hash and path, then signs the result with HMAC-SHA256 — or Ed25519, so
+              third parties can verify from a public key alone.
             </p>
           </div>
         </div>
+
+        <div class="sec-head reveal" style="margin-top:48px">
+          <h2 class="sec-title" style="font-size:1.4rem">Why not Great Expectations?</h2>
+        </div>
+        <table class="table reveal">
+          <thead><tr><th>Great Expectations</th><th>Data Shell</th></tr></thead>
+          <tbody>
+            <tr><td class="how">Executes expectations and hands you a report to act on.</td><td class="how">The gate itself refuses: held/refused accounting, zero-deficit reconciliation, atomic delivery — enforcement is the engine, not your code.</td></tr>
+            <tr><td class="how">Reports are plain artifacts; nothing binds a run to its delivered bytes.</td><td class="how">Every delivery is bound to a Merkle-rooted, signed certificate plus a durable forensic ledger; a flipped byte fails <code>datashell verify</code>.</td></tr>
+            <tr><td class="how">A library you wire into a pipeline you build, secure, and audit.</td><td class="how">The boundary ships as a system: API gateway with key-based roles and capabilities, upload refusals, metrics, console — the same engine as a library and pluggable rule checks.</td></tr>
+            <tr><td class="how">Vast expectation ecosystem, profiling, data docs.</td><td class="how">Deliberately narrower: 19 built-in checks plus your own. If you want a data catalog/observability stack, GX is a reasonable choice — this is for controlled perimeters with inputs you have reason not to trust.</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
@@ -213,6 +228,7 @@
               <li><span class="facts__k">Reproducible</span> A versioned artifact your team reviews, diffs, and rolls back — not application logic buried in a service.</li>
               <li><span class="facts__k">Portable</span> The same contract runs from the CLI, the HTTP gateway, or an Airflow task. Identical verdict.</li>
               <li><span class="facts__k">Auditable</span> Every held row names its rule; every refused row names its structural reason.</li>
+              <li><span class="facts__k">Extensible</span> Ship your own row/batch check types as plugins — built-ins stay closed and cannot be shadowed.</li>
               <li><span class="facts__k">Fail-closed</span> If the feed cannot be accounted for, nothing is delivered.</li>
             </ul>
           </div>
@@ -227,8 +243,8 @@
           <p class="sec-label">For engineers</p>
           <h2 class="sec-title">Built to live where your pipelines live.</h2>
           <p class="sec-desc">
-            One engine, four surfaces. Drive it from a shell, a scheduler, a service, or a DAG —
-            and get the same terminal record back, with the same exit semantics.
+            One engine, five surfaces. Drive it from a shell, a scheduler, a service, an SDK, or a
+            DAG — and get the same terminal record back, with the same exit semantics.
           </p>
         </div>
 
@@ -237,6 +253,7 @@
             <button class="tabs__btn is-active" data-tab="cli">CLI</button>
             <button class="tabs__btn" data-tab="airflow">Airflow</button>
             <button class="tabs__btn" data-tab="http">HTTP API</button>
+            <button class="tabs__btn" data-tab="sdk">Python SDK</button>
             <button class="tabs__btn" data-tab="verify">Verify</button>
           </div>
 
@@ -249,6 +266,12 @@ datashell run <span class="k">--contract</span> vendor_settlements.json \
 
 <span class="c"># fail fast in CI before a contract ever reaches production</span>
 datashell validate-contract <span class="k">--contract</span> vendor_settlements.json
+
+<span class="c"># every rule check type, built-in plus any installed plugins</span>
+datashell rules <span class="k">--json</span>
+
+<span class="c"># honest throughput on your own hardware, through the real delivery gate</span>
+datashell benchmark <span class="k">--rows</span> 1000000 <span class="k">--json</span>
 
 <span class="c"># query the durable boundary ledger for a tenant</span>
 datashell ledger summary <span class="k">--tenant</span> finance
@@ -273,9 +296,10 @@ enforce = DataShellLocalEnforceOperator(
 </div>
 
 <div class="tabs__panel" data-panel="http" hidden>
-<pre class="code"><span class="c"># the hardened gateway: multi-tenant, RBAC, rate-limited, 20 GiB ceiling</span>
+<pre class="code"><span class="c"># the hardened gateway: multi-tenant, RBAC, rate-limited, 20 GiB ceiling,</span>
+<span class="c"># optional OTel spans when datashell[otel] + OTEL_EXPORTER_OTLP_ENDPOINT are set</span>
 curl -X POST https://datashell.internal/api/v1/enforce \
-  -H <span class="t-str">"Authorization: Bearer $DATASHELL_API_KEY"</span> \
+  -H <span class="t-str">"X-API-Key: $DATASHELL_API_KEY"</span> \
   -F contract_name=vendor-settlements \
   -F file=@settlements.jsonl \
   -F streaming=<span class="k">true</span>
@@ -284,7 +308,22 @@ curl -X POST https://datashell.internal/api/v1/enforce \
 
 <span class="c"># fetch and re-verify the immutable certificate for that run</span>
 curl https://datashell.internal/api/v1/runs/$RUN_ID/certificate \
-  -H <span class="t-str">"Authorization: Bearer $DATASHELL_API_KEY"</span></pre>
+  -H <span class="t-str">"X-API-Key: $DATASHELL_API_KEY"</span></pre>
+</div>
+
+<div class="tabs__panel" data-panel="sdk" hidden>
+<pre class="code"><span class="c"># generated from the CI-synced docs/openapi.yaml — cannot drift from the gateway</span>
+<span class="c"># (sdks/python-client; TypeScript client in sdks/typescript-client)</span>
+<span class="k">from</span> datashell_client <span class="k">import</span> ApiClient, Configuration
+<span class="k">from</span> datashell_client.api.default_api <span class="k">import</span> DefaultApi
+
+configuration = Configuration(host=<span class="t-str">"https://datashell.internal"</span>)
+configuration.api_key[<span class="t-str">"X-API-Key"</span>] = <span class="t-str">"dm_live_..."</span>
+api = DefaultApi(ApiClient(configuration=configuration))
+
+<span class="c"># every one of the 28 gateway operations, fully typed (py.typed included)</span>
+runs = api.list_ledger_runs_api_v1_runs_get(limit=10)
+certificate = api.get_run_certificate_api_v1_runs_run_id_certificate_get(run_id)</pre>
 </div>
 
 <div class="tabs__panel" data-panel="verify" hidden>
@@ -336,19 +375,28 @@ datashell verify run_9f3c7a21_audit.json
             <tr><th>Metric</th><th>Value</th><th>How it is verified</th></tr>
           </thead>
           <tbody>
-            <tr><td class="metric">Automated tests</td><td class="num">182</td><td class="how"><code>pytest</code> on the main suite, plus 9 for the Airflow provider</td></tr>
-            <tr><td class="metric">Upload ceiling</td><td class="num">20 GiB</td><td class="how">Derived request-body limit — 21,474,836,480 bytes</td></tr>
-            <tr><td class="metric">Peak RSS at 20M rows</td><td class="num">~369 MB</td><td class="how"><code>tests/test_large_file_streaming.py</code>, streamed CSV</td></tr>
+            <tr><td class="metric">Automated tests</td><td class="num">519</td><td class="how"><code>pytest</code> on the main suite, plus 14 for the Airflow provider</td></tr>
             <tr><td class="metric">Rows published on a footing mismatch</td><td class="num">0</td><td class="how">Reconciliation is a hard gate, not a warning</td></tr>
-            <tr><td class="metric">Access model</td><td class="num">4 × 6</td><td class="how">RBAC roles × capabilities, enforced at every endpoint</td></tr>
+            <tr><td class="metric">Boundary throughput, 1M-row feed</td><td class="num">3.3M rows/s</td><td class="how"><code>python benchmarks/volumetric_stress_test.py</code> — measured on a single node; delivered counts, file contents, and footing asserted at every scale</td></tr>
+            <tr><td class="metric">Zero-deficit accounting, 1M-row feed</td><td class="num">960,000 + 40,000</td><td class="how">960,000 delivered + 40,000 held or refused = 1,000,000 read; footing matched at every benchmarked scale</td></tr>
+            <tr><td class="metric">Peak RSS, 1M-row run</td><td class="num">782 MB</td><td class="how">Sampled process high-water mark in the same benchmark (includes native Polars/Arrow)</td></tr>
+            <tr><td class="metric">Upload ceiling</td><td class="num">20 GiB</td><td class="how">Derived request-body limit — 21,474,836,480 bytes</td></tr>
+            <tr><td class="metric">Access model</td><td class="num">4 × 9</td><td class="how">RBAC roles × capabilities, enforced at every endpoint</td></tr>
+            <tr><td class="metric">API surface</td><td class="num">28 operations</td><td class="how">Every route scope-checked at startup; CI keeps <code>docs/openapi.yaml</code> (27 paths) in sync</td></tr>
+            <tr><td class="metric">Built-in rule checks</td><td class="num">19</td><td class="how">11 row + 8 batch — <code>datashell rules</code>; extend more via entry-point plugins</td></tr>
+            <tr><td class="metric">Static security + dependency audit</td><td class="num">0 + 0</td><td class="how">bandit zero-findings policy; OSV audit on every push</td></tr>
             <tr><td class="metric">Streaming formats</td><td class="num">3</td><td class="how">CSV, JSONL/NDJSON, Parquet — bounded memory</td></tr>
             <tr><td class="metric">Python versions in CI</td><td class="num">3.11–3.13</td><td class="how">Test, wheel build, and container jobs</td></tr>
           </tbody>
         </table>
         <p class="table__note reveal">
-          Benchmarks assert expected delivered counts and inspect the output files, so a run that
-          silently drops rows <em>fails</em> instead of reporting a flattering number.
-          Reproduce with <code>python benchmarks/volumetric_stress_test.py</code>.
+          The throughput and memory figures above were measured on development hardware (single
+          node, in-memory path) by the repository's own harnesses —
+          <code>python benchmarks/volumetric_stress_test.py</code> and
+          <code>datashell benchmark --rows 1000000 --json</code> — which assert expected delivered
+          counts and inspect the output files, so a run that silently drops rows <em>fails</em>
+          instead of reporting a flattering number. Measure on your own hardware before capacity
+          planning.
         </p>
       </div>
     </section>
@@ -400,18 +448,19 @@ datashell verify run_9f3c7a21_audit.json
         <table class="table reveal">
           <thead><tr><th>Area</th><th>Status</th></tr></thead>
           <tbody>
-            <tr><td class="metric">Security posture</td><td class="how">Hardened — startup rejects weak/seeded secrets, RBAC on every route, rate limiting, non-root read-only container, artifact paths validated before use.</td></tr>
+            <tr><td class="metric">Security posture</td><td class="how">Hardened — startup rejects weak/seeded secrets, RBAC on every route, rate limiting, non-root read-only container, artifact paths validated before use. CI enforces a zero-findings bandit policy and an OSV dependency audit on every push.</td></tr>
             <tr><td class="metric">Reference topology</td><td class="how">Single replica and single worker. The credential registry and rate limiter are process-local by design.</td></tr>
+            <tr><td class="metric">Scaling surfaces</td><td class="how">Five documented, environment-tunable surfaces — ingest backend (auto/memory/stream), batch size, SQL threads, delivery codec, concurrency/disk — in <code>docs/SCALING.md</code> with worked profiles.</td></tr>
             <tr><td class="metric">Certification</td><td class="how">None claimed. Code-level checks are not a substitute for a deployment-specific threat model and independent review.</td></tr>
-            <tr><td class="metric">Horizontal scale</td><td class="how">Out of scope for this revision — requires shared credential/rate-limit stores and a dependency lockfile first.</td></tr>
+            <tr><td class="metric">Horizontal scale</td><td class="how">Beyond the reference topology — requires shared credential/rate-limit stores before running multiple replicas.</td></tr>
             <tr><td class="metric">Certificate semantics</td><td class="how">Proves integrity and authorship; it does not prove sender identity. Pair it with your own trust anchor.</td></tr>
           </tbody>
         </table>
 
         <div class="hero__actions reveal" style="margin-top:26px">
-          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/PRODUCTION_READINESS.md" target="_blank" rel="noopener">Production-readiness gate</a>
+          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/production/RELEASE_CHECKLIST.md" target="_blank" rel="noopener">Release checklist</a>
           <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/THREAT_MODEL.md" target="_blank" rel="noopener">Threat model</a>
-          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/OPERATIONS.md" target="_blank" rel="noopener">Operations runbook</a>
+          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/production/OPERATIONS_RUNBOOK.md" target="_blank" rel="noopener">Operations runbook</a>
         </div>
       </div>
     </section>
@@ -456,7 +505,7 @@ datashell run <span class="k">--contract</span> examples/vendor_settlements_cont
         <a href="/playground">Playground</a>
         <a href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
-        <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/OPERATIONS.md" target="_blank" rel="noopener">Operations</a>
+        <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/production/OPERATIONS_RUNBOOK.md" target="_blank" rel="noopener">Operations</a>
         <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
       </nav>
       <p class="site-footer__note">each and everywhere</p>
