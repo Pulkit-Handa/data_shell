@@ -1,6 +1,6 @@
 # Data Shell — Enterprise Perimeter Gateway
 
-[![Tests](https://img.shields.io/badge/tests-387%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-445%20passing-brightgreen.svg)]()
 [![Security](https://img.shields.io/badge/security-hardened%20RBAC%20%2B%20sandboxed-blueviolet.svg)]()
 [![Cryptography](https://img.shields.io/badge/crypto-Ed25519%20%2B%20HMAC--SHA256-blue.svg)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-Prometheus%20metrics-orange.svg)]()
@@ -230,15 +230,14 @@ refuses blind retries. Read more in
 
 ## Local Quickstart
 
-### 1. Run the test suite (387 tests)
+### 1. Run the test suite
 ```bash
 pip install --require-hashes -r requirements-dev.lock   # hash-pinned dependency set
 pip install -e .                                        # the package itself
 pytest -q
 ```
 The lockfiles are the reproducible dependency sets used by CI and the container images.
-Regenerate them on the lowest supported interpreter (3.11), not the developer's — see
-[docs/OPERATIONS.md](docs/OPERATIONS.md) § "Regenerating the dependency lockfiles".
+Regenerate them on the lowest supported interpreter (3.11), not the developer's.
 
 ### 2. See the boundary do its job
 ```bash
@@ -297,8 +296,9 @@ trusted proxy IPs/CIDRs (never `*`), plus `MAX_UPLOAD_SIZE_BYTES`,
 `MAX_CONCURRENT_RUNS`, `DUCKDB_MEMORY_LIMIT`, and `MIN_FREE_DISK_BYTES` for your
 deployment and resource budget. For large-file workloads, also set
 `STREAM_AUTO_THRESHOLD_BYTES` and `STREAM_CHUNK_ROWS`, and point
-`TMPDIR`/`DATASHELL_TMP_DIR` at the durable storage volume. See `docs/OPERATIONS.md`
-for the operational runbook and `docs/THREAT_MODEL.md` for the trust boundaries.
+`TMPDIR`/`DATASHELL_TMP_DIR` at the durable storage volume. See
+`docs/production/OPERATIONS_RUNBOOK.md` for the operational runbook and
+`docs/THREAT_MODEL.md` for the trust boundaries.
 
 ---
 
@@ -323,12 +323,13 @@ memory stays bounded by the streaming batch size rather than the input size.
 ## Documentation
 
 * `docs/FIRST_RUN.md` — a five-minute guided first run using the sample dataset.
-* `docs/PRODUCTION_READINESS.md` — what is hardened and what is deliberately out of scope.
-* `docs/OPERATIONS.md` — runbook: secrets, sizing, retention, webhooks, backup.
+* `docs/production/RELEASE_CHECKLIST.md` — pilot release gates, acceptance evidence, and remaining blockers.
+* `docs/production/OPERATIONS_RUNBOOK.md` — runbook: startup, health checks, backup/restore, monitoring, rollback.
+* `docs/production/CONFIGURATION_REFERENCE.md` — every environment variable, CLI option, API endpoint, role, and certificate field.
 * `docs/THREAT_MODEL.md` — assets, trust boundaries, and mitigations.
 * `docs/SETTLEMENT.md` — settlement architecture, schemas, acceptance/pricing semantics, invariants, and limitations.
 * `docs/SETTLEMENT_OPERATIONS.md` — settlement CLI/API reference, billing configuration, disputes, threat model, and production checklist.
-* `docs/product-validation/` — product audit, usability findings, roadmap, and claim verification.
+* `docs/archive/PRODUCT_VALIDATION.md` — prior product-validation findings (historical reference).
 
 ---
 

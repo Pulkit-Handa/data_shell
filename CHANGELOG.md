@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **CLI `run` → `verify` continuity without explicit secrets.** Non-production runs
+  without `DATASHELL_HMAC_SECRET` now reuse a per-workspace development HMAC secret
+  (`<output>/.datashell-dev-hmac`, created `0600`), so a certificate produced by
+  `datashell run` verifies in a separate `datashell verify` process. Previously each
+  process generated an ephemeral key and cross-process `verify` always reported
+  `TAMPERED_OR_INVALID_SIGNATURE`. Explicit `DATASHELL_HMAC_SECRET` always wins;
+  production never uses the persisted file (explicit high-entropy secret required).
+- **Production placeholder bypass.** The secret gate rejected placeholder values only
+  when shorter than 40 characters, so the long documented `.env.example` placeholders
+  booted production. Any value containing a placeholder keyword or example marker
+  (`replace_with_`, `__min_32_chars`, `example`, …) is now refused regardless of length.
+- **Baseline HTTP hardening headers.** The gateway now emits `X-Content-Type-Options:
+  nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and a default
+  `Cache-Control: no-store` (handlers that set their own policy keep it); the public
+  demo emits `nosniff` / `SAMEORIGIN` / `no-referrer` plus `no-store` on `/api/*` JSON.
+- **Broken documentation references.** `README.md`, `TUTORIAL.md`, `docs/FIRST_RUN.md`,
+  `docs/THREAT_MODEL.md`, and `docs/DESIGN_RECORD.md` pointed at `docs/OPERATIONS.md`,
+  `docs/PRODUCTION_READINESS.md`, `docs/product-validation/`, and a Colab notebook that
+  do not exist; all links now resolve to the real `docs/production/*` runbook, checklist,
+  verification report, configuration reference, and `docs/archive/PRODUCT_VALIDATION.md`.
+
+### Added
+- **`.env.example`** with placeholders only: every supported environment variable,
+  secret-generation guidance, and production requirements. The published placeholder
+  values are rejected by the production secret gate.
+- **Regression tests** (`tests/test_cli_verify_roundtrip.py`): cross-process
+  run→verify continuity, per-workspace dev-secret persistence (0600, env-override
+  precedence), production rejection of the published placeholders, and security-header
+  assertions for both HTTP surfaces.
+
 ### Added
 - **Verifiable data delivery & settlement**: versioned commercial contracts (`datashell contract validate|create|show|versions`), a deterministic exact-arithmetic settlement engine (integer minor units, single `ROUND_HALF_UP` stage, tiers, caps, overflow refusal, no binary floats), contractual acceptance verdicts with machine-readable reason codes, and settlement statements bound to exactly one immutable contract version. New CLI surface `datashell settlement calculate|show|list|explain|verify|invoice-preview|invoice-export|dispute-open|dispute-resolve|billing-preview` with a dedicated refusal exit code `4`.
 - **Signed settlement receipts**: a versioned extension of the audit-certificate signature envelope binding the delivery-certificate digest, contract id/version/digest, and the full calculation. Ed25519 when provisioned (third-party verifiable); HMAC-SHA256 otherwise, never mislabelled as third-party verifiable. Tampering with any settlement-critical field fails verification.

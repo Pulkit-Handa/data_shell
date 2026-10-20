@@ -129,6 +129,33 @@ app.state.cli_slots = asyncio.Semaphore(settings.max_concurrent_runs)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
 
+_DEMO_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+@app.middleware("http")
+async def _demo_security_headers(request: Request, call_next):
+    """Baseline hardening headers for the public demo.
+
+    ``SAMEORIGIN`` (rather than ``DENY``) keeps the first-party playground
+    usable when framed by the operator's own console, while still refusing
+    third-party framing. ``Cache-Control: no-store`` applies to API JSON
+    responses only; static assets and HTML pages keep framework defaults so
+    browsers can cache them normally.
+    """
+    response = await call_next(request)
+    for header, value in _DEMO_SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    if request.url.path.startswith("/api/") and "cache-control" not in {
+        key.lower() for key in response.headers.keys()
+    }:
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 # ----------------------------------------------------------------- demo policy
 
 
