@@ -15,7 +15,7 @@ pytest.importorskip("polars")
 
 def _read_pointer(path: Path):
     pointer = path.with_name(path.name + ".generation.json")
-    with open(pointer, "r", encoding="utf-8") as handle:
+    with open(pointer, encoding="utf-8") as handle:
         return json.load(handle)
 
 
@@ -31,7 +31,6 @@ def test_pointer_is_atomic_commit_point_and_readers_never_see_mixed_generation(
 ):
     """PUB-001: the generation pointer is the single reader-visible switch."""
     from datashell.core.commit import (
-    _write_generation_pointer_atomically,
     publish_transactionally,
     read_generation_pointer,
 )
@@ -175,7 +174,6 @@ def test_recovery_repairs_stale_generation_pointer(tmp_path: Path, monkeypatch):
     generation so readers converge on the new files.
     """
     from datashell.core.commit import (
-        generation_pointer_path,
         publish_transactionally,
         recover_publication,
     )
@@ -231,9 +229,9 @@ def test_recovery_repairs_stale_generation_pointer(tmp_path: Path, monkeypatch):
 def test_resolve_committed_generation_reader_contract(tmp_path: Path):
     """PUB-001: resolve_committed_generation is the reader entry point."""
     from datashell.core.commit import (
-        resolve_committed_generation,
         _write_generation_pointer_atomically,
         generation_pointer_path,
+        resolve_committed_generation,
     )
 
     target = tmp_path / "delivered.parquet"
@@ -349,9 +347,7 @@ def test_serial_publication_converges_to_one_generation(tmp_path: Path):
     audit = tmp_path / "dm_run_x_audit_certificate.json"
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    for index, (run_id, content) in enumerate(
-        [("dm_run_a", b"gen-a"), ("dm_run_b", b"gen-b")]
-    ):
+    for run_id, content in [("dm_run_a", b"gen-a"), ("dm_run_b", b"gen-b")]:
         staged_target = target.with_name(f".staged_{run_id}_delivered.parquet")
         staged_lineage = lineage.with_name(f".staged_{run_id}_lineage_delivered.parquet")
         staged_audit = audit.with_name(f".staged_{run_id}_dm_run_x_audit_certificate.json")

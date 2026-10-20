@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Tuple
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -49,7 +48,7 @@ def load_ed25519_private_key(material: str) -> Ed25519PrivateKey:
             if len(raw) == 32:
                 key = Ed25519PrivateKey.from_private_bytes(raw)
             else:
-                raise ValueError("Unsupported Ed25519 private key encoding")
+                raise ValueError("Unsupported Ed25519 private key encoding") from None
     if not isinstance(key, Ed25519PrivateKey):
         raise ValueError("Provided private key is not an Ed25519 key")
     return key
@@ -69,7 +68,7 @@ def load_ed25519_public_key(material: str) -> Ed25519PublicKey:
             if len(raw) == 32:
                 key = Ed25519PublicKey.from_public_bytes(raw)
             else:
-                raise ValueError("Unsupported Ed25519 public key encoding")
+                raise ValueError("Unsupported Ed25519 public key encoding") from None
     if not isinstance(key, Ed25519PublicKey):
         raise ValueError("Provided public key is not an Ed25519 key")
     return key
@@ -94,7 +93,7 @@ def derive_public_key_material(private_key_material: str) -> str:
     return public_key_pem(load_ed25519_private_key(private_key_material).public_key())
 
 
-def generate_keypair_pem() -> Tuple[str, str]:
+def generate_keypair_pem() -> tuple[str, str]:
     """Generate a fresh Ed25519 keypair as ``(private_pem, public_pem)``."""
     private_key = Ed25519PrivateKey.generate()
     return private_key_pem(private_key), public_key_pem(private_key.public_key())

@@ -11,9 +11,9 @@ import pytest
 
 pytest.importorskip("polars")
 
+from datashell.contract.models import DataContract
 from datashell.core.config import EnterpriseSettings
 from datashell.pipeline.runner import DataShellPipeline, reconcile_pending_ledger_entries
-from datashell.contract.models import DataContract
 
 
 def _isolate_settings(monkeypatch, tmp_path: Path) -> None:
@@ -198,6 +198,7 @@ def test_legacy_duplicate_quarantine_rows_are_collapsed(tmp_path: Path):
     """LEDGER-001 migration: pre-existing duplicate quarantine rows are collapsed
     so the new unique constraint can be applied."""
     import sqlite3
+
     from datashell.core.ledger import BoundaryLedger
 
     db_path = tmp_path / "history.db"
@@ -223,7 +224,7 @@ def test_legacy_duplicate_quarantine_rows_are_collapsed(tmp_path: Path):
     assert count == 1, count
 
 
-def test_concurrent_runs_do_not_overwrite_each_others_outbox(tmp_path: Path, monkeypatch):
+def test_shared_audit_path_runs_keep_distinct_outbox_records(tmp_path: Path, monkeypatch):
     """LEDGER-001: two runs pointed at the SAME audit path still own separate
     pending records; neither can overwrite or lose the other's payload."""
     _isolate_settings(monkeypatch, tmp_path)
@@ -246,11 +247,8 @@ def test_two_pending_runs_replay_independently(tmp_path: Path, monkeypatch):
     """LEDGER-001: two pending runs replay to two distinct ledger rows with no
     duplicated or lost accounting."""
     _isolate_settings(monkeypatch, tmp_path)
-    from datashell.core import ledger as ledmod
-    from datashell.core.ledger import pending_outbox_path, write_pending_outbox
-
-    tracker = p = None
     from datashell.contract.models import DataContract
+    from datashell.core.ledger import pending_outbox_path, write_pending_outbox
     from datashell.pipeline.runner import DataShellPipeline
 
     contract = DataContract(
@@ -295,7 +293,6 @@ def test_failed_publication_leaves_no_pending_outbox(tmp_path: Path, monkeypatch
     """LEDGER-001: a publication that never committed must not leave a pending
     record behind claiming a delivery that did not happen."""
     _isolate_settings(monkeypatch, tmp_path)
-    from datashell.core import ledger as ledmod
     from datashell.contract.models import DataContract
     from datashell.pipeline import runner as runner_mod
 

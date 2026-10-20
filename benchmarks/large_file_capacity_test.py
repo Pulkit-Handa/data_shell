@@ -31,13 +31,10 @@ import threading
 import time
 from pathlib import Path
 
-import polars as pl
-
 from datashell.contract.models import (
     BatchRule,
     BatchRuleCheckType,
     DataContract,
-    DeliverySpec,
     DeliveryTarget,
     QualityRule,
     RowRuleCheckType,
@@ -51,7 +48,7 @@ from datashell.pipeline.runner import DataShellPipeline
 
 def _rss_bytes() -> int:
     try:
-        with open("/proc/self/statm", "r", encoding="utf-8") as handle:
+        with open("/proc/self/statm", encoding="utf-8") as handle:
             pages = int(handle.read().split()[1])
         return pages * os.sysconf("SC_PAGE_SIZE")
     except (OSError, ValueError, IndexError):
@@ -67,7 +64,7 @@ class _PeakRSS:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
-    def __enter__(self) -> "_PeakRSS":
+    def __enter__(self) -> _PeakRSS:
         def _sample() -> None:
             while not self._stop.is_set():
                 self.peak = max(self.peak, _rss_bytes())

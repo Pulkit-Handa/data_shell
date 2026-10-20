@@ -16,7 +16,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from datashell.core import config as config_module
 from datashell.core.config import EnterpriseSettings
 
 
@@ -68,7 +67,7 @@ def test_run_then_verify_across_processes_without_explicit_secrets(tmp_path: Pat
     assert verify_proc.returncode == 0, verify_proc.stdout[-2000:] + verify_proc.stderr[-2000:]
     assert "AUTHENTIC_AND_UNMODIFIED" in verify_proc.stdout
 
-    with open(audit, "r", encoding="utf-8") as handle:
+    with open(audit, encoding="utf-8") as handle:
         cert = json.load(handle)
     assert cert["digital_signature"]["algorithm"] == "HMAC-SHA256"
 

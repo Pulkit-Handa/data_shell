@@ -1,16 +1,17 @@
 """Enterprise configuration management."""
 
-import os
-import secrets
-import re
+import contextlib
 import json
+import os
+import re
+import secrets
 import tempfile
 from pathlib import Path
-from typing import List, Optional, Dict
+
 from pydantic import BaseModel, Field
 
 
-def normalize_environment(env: Optional[str]) -> str:
+def normalize_environment(env: str | None) -> str:
     """
     Normalizes environment name into lowercase canonical representation.
     Treats aliases like 'prod', 'production', and 'live' as 'production'.
@@ -27,7 +28,7 @@ def normalize_environment(env: Optional[str]) -> str:
     return cleaned
 
 
-def is_production(env: Optional[str]) -> bool:
+def is_production(env: str | None) -> bool:
     """Returns True if the environment represents a production deployment."""
     return normalize_environment(env) == "production"
 
@@ -49,7 +50,7 @@ MULTIPART_OVERHEAD_BYTES = 1024 * 1024
 DEFAULT_DISK_HEADROOM_MULTIPLIER = 2.0
 
 
-def _load_hmac_keyring() -> Dict[str, str]:
+def _load_hmac_keyring() -> dict[str, str]:
     raw = os.getenv("DATASHELL_HMAC_KEYRING", "{}").strip()
     if not raw:
         return {}
@@ -59,7 +60,7 @@ def _load_hmac_keyring() -> Dict[str, str]:
     return parsed
 
 
-def _load_ed25519_keyring() -> Dict[str, str]:
+def _load_ed25519_keyring() -> dict[str, str]:
     """Trusted Ed25519 public keys, mapped key_id -> public key material (PEM or base64)."""
     raw = os.getenv("DATASHELL_ED25519_KEYRING", "{}").strip()
     if not raw:
@@ -75,7 +76,7 @@ def _calculate_shannon_entropy(s: str) -> float:
     import math
     if not s:
         return 0.0
-    freq = {}
+    freq: dict[str, int] = {}
     for c in s:
         freq[c] = freq.get(c, 0) + 1
     entropy = 0.0
@@ -85,7 +86,7 @@ def _calculate_shannon_entropy(s: str) -> float:
     return entropy
 
 
-def _dev_hmac_secret_path() -> Optional[Path]:
+def _dev_hmac_secret_path() -> Path | None:
     """Location of the persisted development HMAC secret, if applicable.
 
     Separate CLI invocations in the same workspace must sign and verify with
@@ -106,7 +107,7 @@ def _dev_hmac_secret_path() -> Optional[Path]:
         return None
 
 
-def _load_or_create_dev_secret(path: Path) -> Optional[str]:
+def _load_or_create_dev_secret(path: Path) -> str | None:
     """Read the persisted dev secret, creating it once with 0600 perms."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,19 +126,15 @@ def _load_or_create_dev_secret(path: Path) -> Optional[str]:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(secret)
                 handle.flush()
-                try:
+                with contextlib.suppress(OSError):
                     os.fsync(handle.fileno())
-                except OSError:
-                    pass
-            try:
+            with contextlib.suppress(OSError):
                 os.chmod(path, 0o600)
-            except OSError:
-                pass
             return secret
         except OSError:
             return None
     try:
-        with open(path, "r", encoding="utf-8") as handle:
+        with open(path, encoding="utf-8") as handle:
             secret = handle.read().strip()
     except OSError:
         return None
@@ -148,7 +145,7 @@ def _load_or_create_dev_secret(path: Path) -> Optional[str]:
     return secret
 
 
-def _resolve_secret(env_var: str, purpose: str, env_mode: str, value_override: Optional[str] = None) -> str:
+def _resolve_secret(env_var: str, purpose: str, env_mode: str, value_override: str | None = None) -> str:
     """
     Resolves a security secret strictly:
     - In production: refuses to start without explicitly provided, high-entropy secret.
@@ -260,7 +257,8 @@ class EnterpriseSettings(BaseModel):
     )
     contracts_dir: Path = Field(
         default_factory=lambda: Path(
-            os.getenv("DATASHELL_CONTRACTS_DIR", str(Path(os.getenv("DATASHELL_STORAGE_ROOT", ".")) / "contracts_registry"))
+            os.getenv("DATASHELL_CONTRACTS_DIR",
+                      str(Path(os.getenv("DATASHELL_STORAGE_ROOT", ".")) / "contracts_registry"))
         ).resolve()
     )
     output_dir: Path = Field(
@@ -275,7 +273,8 @@ class EnterpriseSettings(BaseModel):
     )
     quarantine_dir: Path = Field(
         default_factory=lambda: Path(
-            os.getenv("DATASHELL_QUARANTINE_DIR", str(Path(os.getenv("DATASHELL_STORAGE_ROOT", ".")) / "output" / "quarantine"))
+            os.getenv("DATASHELL_QUARANTINE_DIR",
+                      str(Path(os.getenv("DATASHELL_STORAGE_ROOT", ".")) / "output" / "quarantine"))
         ).resolve()
     )
     # Scratch space for spooled uploads and out-of-core database spills. Point
@@ -300,33 +299,40 @@ class EnterpriseSettings(BaseModel):
         )
     )
     active_key_id: str = Field(default_factory=lambda: os.getenv("DATASHELL_KEY_ID", "datashell-hmac-v1"))
-    trusted_hmac_keys: Dict[str, str] = Field(default_factory=_load_hmac_keyring)
-    trusted_key_ids: List[str] = Field(
+    trusted_hmac_keys: dict[str, str] = Field(default_factory=_load_hmac_keyring)
+    trusted_key_ids: list[str] = Field(
         default_factory=lambda: [
-            k.strip() for k in os.getenv("DATASHELL_TRUSTED_KEYS", "datashell-hmac-v1,dm-hmac-v1,dm-hmac-master").split(",") if k.strip()
+            k.strip()
+            for k in os.getenv(  # noqa: SIM118 - env default is a comma string, not a mapping
+                "DATASHELL_TRUSTED_KEYS", "datashell-hmac-v1,dm-hmac-v1,dm-hmac-master").split(",")
+            if k.strip()
         ]
     )
     # Optional asymmetric signing. When a private key is provisioned, audit
     # certificates are signed with Ed25519 so any holder of the published public
     # key can verify them without a shared secret. HMAC is retained for internal
     # (symmetric) webhook signing.
-    ed25519_private_key: Optional[str] = Field(
+    ed25519_private_key: str | None = Field(
         default_factory=lambda: (os.getenv("DATASHELL_ED25519_PRIVATE_KEY") or "").strip() or None
     )
     ed25519_active_key_id: str = Field(
         default_factory=lambda: os.getenv("DATASHELL_ED25519_KEY_ID", "datashell-ed25519-v1")
     )
-    ed25519_trusted_keys: Dict[str, str] = Field(default_factory=_load_ed25519_keyring)
+    ed25519_trusted_keys: dict[str, str] = Field(default_factory=_load_ed25519_keyring)
     # Wildcard is convenient for local development only. Production must name
     # browser origins explicitly; an empty value intentionally fails closed.
-    allowed_origins: List[str] = Field(
+    allowed_origins: list[str] = Field(
         default_factory=lambda: os.getenv(
             "ALLOWED_ORIGINS",
             "" if is_production(os.getenv("ENVIRONMENT", "development")) else "*",
         ).split(",")
     )
-    trusted_proxy_ips: List[str] = Field(
-        default_factory=lambda: [item.strip() for item in os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1").split(",") if item.strip()]
+    trusted_proxy_ips: list[str] = Field(
+        default_factory=lambda: [
+            item.strip()
+            for item in os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1").split(",")
+            if item.strip()
+        ]
     )
     
     # Engine Tuning
@@ -340,21 +346,26 @@ class EnterpriseSettings(BaseModel):
     # Files at or above this size are processed out-of-core even when a caller
     # does not explicitly request streaming, so large inputs never materialize
     # fully in application memory.
-    stream_auto_threshold_bytes: int = Field(default_factory=lambda: int(os.getenv("STREAM_AUTO_THRESHOLD_BYTES", str(64 * 1024 * 1024))))  # 64 MB
+    stream_auto_threshold_bytes: int = Field(
+        default_factory=lambda: int(os.getenv("STREAM_AUTO_THRESHOLD_BYTES", str(64 * 1024 * 1024))))  # 64 MB
     duckdb_memory_limit: str = Field(default_factory=lambda: os.getenv("DUCKDB_MEMORY_LIMIT", "1GB"))
-    rate_limit_requests_per_minute: int = Field(default_factory=lambda: int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "120")))
+    rate_limit_requests_per_minute: int = Field(
+        default_factory=lambda: int(os.getenv("RATE_LIMIT_REQUESTS_PER_MINUTE", "120")))
     max_concurrent_runs: int = Field(default_factory=lambda: int(os.getenv("MAX_CONCURRENT_RUNS", "2")))
     max_request_body_bytes: int = Field(
         default_factory=lambda: int(
             os.getenv(
                 "MAX_REQUEST_BODY_BYTES",
-                str(int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(DEFAULT_MAX_UPLOAD_SIZE_BYTES))) + MULTIPART_OVERHEAD_BYTES),
+                str(int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(DEFAULT_MAX_UPLOAD_SIZE_BYTES)))
+                    + MULTIPART_OVERHEAD_BYTES),
             )
         )
     )
     max_concurrent_requests: int = Field(default_factory=lambda: int(os.getenv("MAX_CONCURRENT_REQUESTS", "2")))
-    max_control_body_bytes: int = Field(default_factory=lambda: int(os.getenv("MAX_CONTROL_BODY_BYTES", str(1024 * 1024))))
-    min_free_disk_bytes: int = Field(default_factory=lambda: int(os.getenv("MIN_FREE_DISK_BYTES", str(1024 * 1024 * 1024))))
+    max_control_body_bytes: int = Field(
+        default_factory=lambda: int(os.getenv("MAX_CONTROL_BODY_BYTES", str(1024 * 1024))))
+    min_free_disk_bytes: int = Field(
+        default_factory=lambda: int(os.getenv("MIN_FREE_DISK_BYTES", str(1024 * 1024 * 1024))))
     # A run refuses to start when the storage volume cannot transiently hold
     # ``source_bytes * disk_headroom_multiplier`` (staged target plus worst-case
     # quarantine). Raise it for pipelines that hold nearly every input row.
@@ -405,10 +416,11 @@ class EnterpriseSettings(BaseModel):
     )
     # Optional push integration: HMAC-signed run.completed events to an operator
     # endpoint so runbooks/SLAs can react without polling the ledger.
-    run_webhook_url: Optional[str] = Field(
+    run_webhook_url: str | None = Field(
         default_factory=lambda: (os.getenv("DATASHELL_RUN_WEBHOOK_URL", "") or "").strip() or None
     )
-    webhook_timeout_seconds: float = Field(default_factory=lambda: float(os.getenv("DATASHELL_WEBHOOK_TIMEOUT_SECONDS", "5")))
+    webhook_timeout_seconds: float = Field(
+        default_factory=lambda: float(os.getenv("DATASHELL_WEBHOOK_TIMEOUT_SECONDS", "5")))
 
     # Settlement billing adapter. Dry-run (offline, deterministic) is the
     # default so no deployment can move money by accident. Stripe is opt-in:
@@ -498,7 +510,7 @@ class EnterpriseSettings(BaseModel):
         p.mkdir(mode=0o700, parents=True, exist_ok=True)
         return p.resolve()
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, __context: object) -> None:
         self.environment = normalize_environment(self.environment)
         # Validate secrets against the resolved model environment, not merely the
         # process ENVIRONMENT variable used by default factories. This prevents
@@ -524,7 +536,8 @@ class EnterpriseSettings(BaseModel):
             raise RuntimeError("DATASHELL_HMAC_KEYRING must be a JSON object mapping safe key IDs to secrets")
         if self.is_production_mode:
             for key_id, secret in self.trusted_hmac_keys.items():
-                _resolve_secret("DATASHELL_HMAC_KEYRING", f"trusted signing key '{key_id}'", self.environment, value_override=secret)
+                _resolve_secret("DATASHELL_HMAC_KEYRING", f"trusted signing key '{key_id}'",
+                                self.environment, value_override=secret)
                 if secrets.compare_digest(secret, self.master_api_key):
                     raise RuntimeError("Production API authentication and artifact-signing secrets must be distinct")
         self.trusted_hmac_keys = dict(self.trusted_hmac_keys)
@@ -535,7 +548,8 @@ class EnterpriseSettings(BaseModel):
                 "use a new key ID when rotating signing keys"
             )
         self.trusted_hmac_keys[self.active_key_id] = self.hmac_secret
-        self.trusted_key_ids = list(dict.fromkeys([*self.trusted_key_ids, *self.trusted_hmac_keys.keys(), self.active_key_id]))
+        self.trusted_key_ids = list(dict.fromkeys(
+            [*self.trusted_key_ids, *self.trusted_hmac_keys.keys(), self.active_key_id]))
 
         # Optional Ed25519 certificate signing: validate key material and bind the
         # derived public key into the trusted keyring so the engine can verify the
@@ -563,7 +577,8 @@ class EnterpriseSettings(BaseModel):
             self.ed25519_trusted_keys[self.ed25519_active_key_id] = derived_public
         if self.is_production_mode and not self.auth_enabled:
             raise RuntimeError(
-                f"FATAL: Production security violation. AUTH_ENABLED cannot be False when ENVIRONMENT='{self.environment}'. "
+                f"FATAL: Production security violation. AUTH_ENABLED cannot be False "
+                f"when ENVIRONMENT='{self.environment}'. "
                 "Refusing to disable authentication in production."
             )
         if self.max_upload_size_bytes < 1:
@@ -616,7 +631,9 @@ class EnterpriseSettings(BaseModel):
             if self.is_production_mode and parsed_webhook.scheme != "https":
                 raise RuntimeError("DATASHELL_RUN_WEBHOOK_URL must use https in production")
         if self.max_request_body_bytes < self.max_upload_size_bytes + MULTIPART_OVERHEAD_BYTES:
-            raise RuntimeError("MAX_REQUEST_BODY_BYTES must allow MAX_UPLOAD_SIZE_BYTES plus multipart overhead (at least 1 MiB)")
+            raise RuntimeError(
+                "MAX_REQUEST_BODY_BYTES must allow MAX_UPLOAD_SIZE_BYTES plus "
+                "multipart overhead (at least 1 MiB)")
         memory_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)", self.duckdb_memory_limit, re.IGNORECASE)
         if not memory_match or float(memory_match.group(1)) <= 0:
             raise RuntimeError("DUCKDB_MEMORY_LIMIT must be a positive size such as 512MB or 1GB")
@@ -629,7 +646,9 @@ class EnterpriseSettings(BaseModel):
         if self.is_production_mode:
             import ipaddress
             if not self.trusted_proxy_ips or "*" in self.trusted_proxy_ips:
-                raise RuntimeError("FORWARDED_ALLOW_IPS must contain explicit trusted proxy IPs/CIDRs; wildcard trust is forbidden")
+                raise RuntimeError(
+                    "FORWARDED_ALLOW_IPS must contain explicit trusted proxy IPs/CIDRs; "
+                    "wildcard trust is forbidden")
             for proxy in self.trusted_proxy_ips:
                 try:
                     ipaddress.ip_network(proxy, strict=False)
@@ -653,20 +672,16 @@ class EnterpriseSettings(BaseModel):
         os.umask(0o077)
         for path in [self.data_dir, self.contracts_dir, self.output_dir, self.audit_dir, self.quarantine_dir]:
             path.mkdir(mode=0o700, parents=True, exist_ok=True)
-            try:
+            # Startup/readiness checks will fail if required paths are not writable.
+            with contextlib.suppress(OSError):
                 path.chmod(0o700)
-            except OSError:
-                # Startup/readiness checks will fail if required paths are not writable.
-                pass
         # Ensure the scratch directory exists so large uploads and out-of-core
         # database spills land on it. Never chmod an operator-supplied system
         # temp directory (for example /tmp) that we do not own.
         self.temp_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.temp_dir.is_relative_to(self.storage_root):
-            try:
+            with contextlib.suppress(OSError):
                 self.temp_dir.chmod(0o700)
-            except OSError:
-                pass
 
 
 settings = EnterpriseSettings()

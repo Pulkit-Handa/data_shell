@@ -9,58 +9,66 @@ Features:
 """
 
 from __future__ import annotations
-import json
-import uuid
-import time
+
 import asyncio
+import hashlib
+import json
 import os
 import re
 import secrets
-import hashlib
+import time
+import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any
+
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, Security, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field, ValidationError
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Security, Request, Response, status
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from fastapi.middleware.cors import CORSMiddleware
-from datashell.server.middleware import RequestBodyLimitMiddleware
-from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-
-from datashell.core.config import settings
-from datashell.core.commit import committed_generation_status
-from datashell.pipeline.runner import recover_pending_publications_and_ledger
 from datashell import __version__
-from datashell.core.security import (
-    authenticate_client, require_capability, verify_tenant_access, Capability, APIKeyMetadata,
-    API_KEY_STORE, Role, register_api_key, revoke_api_key_id, security_registry_ready,
-    preflight_authenticate_scope,
-)
-from datashell.core.crypto import CryptoEngine
-from datashell.core.ledger import BoundaryLedger
-from datashell.core.telemetry import (
-    telemetry_logger, HTTP_REQUESTS_TOTAL, HTTP_REQUEST_DURATION_SECONDS, HTTP_IN_FLIGHT_REQUESTS,
-    STORAGE_FREE_BYTES, STORAGE_TOTAL_BYTES,
-    PENDING_LEDGER_ENTRIES, PUBLICATION_RECOVERY_ERRORS, PUBLICATION_RECOVERY_JOURNALS,
-)
 from datashell.contract.models import DataContract
 from datashell.contract.registry import ContractRegistry
-from datashell.pipeline.runner import DataShellPipeline
+from datashell.core.commit import committed_generation_status
+from datashell.core.config import settings
+from datashell.core.ledger import BoundaryLedger
+from datashell.core.security import (
+    APIKeyMetadata,
+    Capability,
+    Role,
+    preflight_authenticate_scope,
+    register_api_key,
+    require_capability,
+    revoke_api_key_id,
+    security_registry_ready,
+    verify_tenant_access,
+)
+from datashell.core.telemetry import (
+    HTTP_IN_FLIGHT_REQUESTS,
+    HTTP_REQUEST_DURATION_SECONDS,
+    HTTP_REQUESTS_TOTAL,
+    PENDING_LEDGER_ENTRIES,
+    PUBLICATION_RECOVERY_ERRORS,
+    PUBLICATION_RECOVERY_JOURNALS,
+    STORAGE_FREE_BYTES,
+    STORAGE_TOTAL_BYTES,
+    telemetry_logger,
+)
 from datashell.pipeline.artifacts import ArtifactGenerator
-from datashell.settlement.ledger import SettlementLedger, SettlementLedgerError
+from datashell.pipeline.runner import DataShellPipeline, recover_pending_publications_and_ledger
+from datashell.server.middleware import RequestBodyLimitMiddleware
+from datashell.settlement.ledger import SettlementLedgerError
 from datashell.settlement.models import (
     CommercialContract,
-    DisputeResolution,
-    DisputeStatus,
     SettlementStatus,
 )
 from datashell.settlement.registry import (
-    CommercialContractRegistry,
     CommercialContractRegistryError,
 )
 from datashell.settlement.service import SettlementService, SettlementServiceError
-
 
 registry = ContractRegistry(settings.contracts_dir)
 WORKSPACE_DATA = settings.data_dir
@@ -77,7 +85,7 @@ def seed_default_contracts(reg: ContractRegistry) -> None:
     if examples_dir is not None:
         for contract_file in examples_dir.glob("*_contract.json"):
             try:
-                with open(contract_file, "r", encoding="utf-8") as f:
+                with open(contract_file, encoding="utf-8") as f:
                     data = json.load(f)
                 # The examples directory also ships settlement commercial
                 # contracts, which share the *_contract.json suffix but are a
@@ -102,14 +110,17 @@ def seed_default_contracts(reg: ContractRegistry) -> None:
                 if existing.model_dump(by_alias=True) == c.model_dump(by_alias=True):
                     reg.mark_shared_contract(c.metadata.name)
             except Exception as e:
-                telemetry_logger.warning("Failed to auto-seed example contract", file=contract_file.name, error_type=type(e).__name__)
+                telemetry_logger.warning(
+                    "Failed to auto-seed example contract",
+                    file=contract_file.name, error_type=type(e).__name__,
+                )
                 if settings.is_production_mode:
                     # A production deployment must not silently become ready
                     # with a partially initialized shared contract catalog.
                     raise RuntimeError("Production contract catalog initialization failed") from e
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Recovery is a startup gate: do not mutate contract state, accept requests,
     # or report readiness until every interrupted publication has been examined
     # AND every published-but-unrecorded run has been reconciled into the ledger.
@@ -206,7 +217,7 @@ SECURITY_RESPONSE_HEADERS = {
 
 
 @app.middleware("http")
-async def security_headers(request: Request, call_next):
+async def security_headers(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """Attach baseline hardening headers to every gateway response.
 
     ``Cache-Control: no-store`` is set only when the handler did not already
@@ -216,13 +227,13 @@ async def security_headers(request: Request, call_next):
     response: Response = await call_next(request)
     for header, value in SECURITY_RESPONSE_HEADERS.items():
         response.headers.setdefault(header, value)
-    if "cache-control" not in {key.lower() for key in response.headers.keys()}:
+    if "cache-control" not in {key.lower() for key in response.headers}:
         response.headers["Cache-Control"] = "no-store"
     return response
 
 
 @app.middleware("http")
-async def correlation_id_and_tracing(request: Request, call_next):
+async def correlation_id_and_tracing(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
     """Assign correlation IDs and emit bounded-cardinality request telemetry."""
     supplied_id = request.headers.get("X-Request-ID", "")
     corr_id = supplied_id if re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", supplied_id) else f"trace_{uuid.uuid4().hex}"
@@ -264,13 +275,13 @@ async def correlation_id_and_tracing(request: Request, call_next):
 # ----------------- Core Observability Endpoints -----------------
 
 @app.get("/health")
-def healthcheck():
+def healthcheck() -> dict[str, Any]:
     """Liveness probe for orchestrators, load balancers, and Kubernetes."""
     return {"status": "healthy", "service": "data-shell"}
 
 
 @app.get("/ready")
-def readinesscheck():
+def readinesscheck() -> dict[str, Any]:
     """Readiness probe: fail closed when required persistent directories are unavailable."""
     required_dirs = (
         settings.data_dir, settings.contracts_dir, settings.output_dir,
@@ -287,7 +298,9 @@ def readinesscheck():
     except OSError as exc:
         raise HTTPException(status_code=503, detail="Persistent storage capacity cannot be checked") from exc
     if available_bytes < settings.min_free_disk_bytes:
-        raise HTTPException(status_code=503, detail="Persistent storage is below the configured free-space safety threshold")
+        raise HTTPException(
+            status_code=503,
+            detail="Persistent storage is below the configured free-space safety threshold")
     if not security_registry_ready():
         raise HTTPException(status_code=503, detail="Credential registry is not ready")
     if not BoundaryLedger().check_integrity():
@@ -298,7 +311,7 @@ def readinesscheck():
 @app.get("/metrics")
 def prometheus_metrics(
     client: APIKeyMetadata = Security(require_capability(Capability.METRICS_READ))
-):
+) -> Response:
     """Prometheus telemetry scrape endpoint (authenticated)."""
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
@@ -307,13 +320,13 @@ def prometheus_metrics(
 
 @app.post("/api/v1/contracts")
 def register_contract(
-    contract_payload: Dict[str, Any],
+    contract_payload: dict[str, Any],
     client: APIKeyMetadata = Security(require_capability(Capability.CONTRACTS_WRITE))
-):
+) -> dict[str, Any]:
     """Registers and versions a Data Contract immutably, scoped to tenant catalog."""
     try:
         contract = DataContract(**contract_payload)
-        saved_path = registry.save_contract(contract, tenant_id=client.tenant_id)
+        registry.save_contract(contract, tenant_id=client.tenant_id)
         telemetry_logger.info(
             "Contract registered",
             tenant=client.tenant_id,
@@ -328,18 +341,22 @@ def register_contract(
         }
     except (ValidationError, ValueError) as e:
         telemetry_logger.warning("Contract registration rejected", tenant=client.tenant_id, error_type=type(e).__name__)
-        raise HTTPException(status_code=400, detail="Contract validation failed; check the submitted contract schema") from e
+        raise HTTPException(
+            status_code=400,
+            detail="Contract validation failed; check the submitted contract schema") from e
     except Exception as e:
         telemetry_logger.error("Contract registration failed", tenant=client.tenant_id, error_type=type(e).__name__)
-        raise HTTPException(status_code=500, detail="Contract registration failed; use the request ID when contacting an operator") from e
+        raise HTTPException(
+            status_code=500,
+            detail="Contract registration failed; use the request ID when contacting an operator") from e
 
 
 @app.get("/api/v1/contracts/{name}")
 def get_contract(
     name: str,
-    version: Optional[str] = None,
+    version: str | None = None,
     client: APIKeyMetadata = Security(require_capability(Capability.CONTRACTS_READ))
-):
+) -> dict[str, Any]:
     """Retrieves contract specification by name and optional point-in-time version within tenant scope."""
     try:
         if version:
@@ -367,7 +384,7 @@ async def enforce_boundary(
     file: UploadFile = File(...),
     streaming: bool = Form(False),
     client: APIKeyMetadata = Security(require_capability(Capability.PIPELINE_ENFORCE))
-):
+) -> dict[str, Any]:
     """
     Submits a data payload across the boundary for contract enforcement.
     Returns the reconciliation ledger and cryptographically signed audit certificate.
@@ -387,7 +404,9 @@ async def enforce_boundary(
         raise HTTPException(status_code=400, detail="Invalid contract identifier") from e
 
     if not contract:
-        raise HTTPException(status_code=404, detail=f"Active contract '{contract_name}' not registered for tenant '{client.tenant_id}'")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Active contract '{contract_name}' not registered for tenant '{client.tenant_id}'")
 
     file_id = f"upload_{uuid.uuid4().hex[:12]}{ext}"
     temp_path = WORKSPACE_DATA / file_id
@@ -435,7 +454,11 @@ async def enforce_boundary(
             else:
                 res = await asyncio.to_thread(pipeline.run_file, source_path=temp_path)
         
-        with open(res.audit_artifact_path, "r", encoding="utf-8") as f:
+        if res.audit_artifact_path is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Enforcement completed without a persisted certificate") from None
+        with open(res.audit_artifact_path, encoding="utf-8") as f:
             certificate_data = json.load(f)
 
         return {
@@ -472,7 +495,9 @@ async def enforce_boundary(
             correlation_id=getattr(request.state, "correlation_id", None),
             error_type=type(e).__name__,
         )
-        raise HTTPException(status_code=500, detail="Boundary enforcement failed; use the request ID when contacting an operator") from e
+        raise HTTPException(
+            status_code=500,
+            detail="Boundary enforcement failed; use the request ID when contacting an operator") from e
     finally:
         if temp_path.exists():
             temp_path.unlink()
@@ -483,8 +508,9 @@ async def enforce_boundary(
 def get_run_certificate(
     run_id: str,
     client: APIKeyMetadata = Security(require_capability(Capability.AUDIT_READ))
-):
-    """Retrieves the immutable cryptographic audit certificate for a specific run, with strict tenant ownership validation."""
+) -> dict[str, Any]:
+    """Retrieves the immutable cryptographic audit certificate for a specific
+    run, with strict tenant ownership validation."""
     # Run IDs are generated by the service. Validate before using the identifier
     # in a filesystem path to prevent traversal via a caller-controlled URL.
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", run_id):
@@ -499,7 +525,7 @@ def get_run_certificate(
     if cert_path.stat().st_size > 10 * 1024 * 1024:
         raise HTTPException(status_code=500, detail="Audit certificate exceeds the permitted size")
 
-    with open(cert_path, "r", encoding="utf-8") as f:
+    with open(cert_path, encoding="utf-8") as f:
         cert_data = json.load(f)
     if not isinstance(cert_data, dict):
         raise HTTPException(status_code=500, detail="Audit certificate is malformed")
@@ -537,7 +563,7 @@ def get_run_certificate(
 _RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,80}")
 
 
-def _resolve_ledger_tenant(client: APIKeyMetadata, tenant_id: Optional[str]) -> str:
+def _resolve_ledger_tenant(client: APIKeyMetadata, tenant_id: str | None) -> str:
     """Resolve the tenant to query, enforcing cross-tenant isolation.
 
     Administrators may target any tenant for oversight; every other role is
@@ -557,10 +583,10 @@ def _bounded_limit(limit: int, default: int = 50, maximum: int = 500) -> int:
 
 @app.get("/api/v1/runs/summary")
 def ledger_run_summary(
-    contract_name: Optional[str] = None,
-    tenant_id: Optional[str] = None,
+    contract_name: str | None = None,
+    tenant_id: str | None = None,
     client: APIKeyMetadata = Security(require_capability(Capability.AUDIT_READ)),
-):
+) -> dict[str, Any]:
     """Aggregate delivery health for a tenant, optionally scoped to one contract."""
     scoped_tenant = _resolve_ledger_tenant(client, tenant_id)
     summary = BoundaryLedger().history_summary(scoped_tenant, contract_name=contract_name)
@@ -569,13 +595,13 @@ def ledger_run_summary(
 
 @app.get("/api/v1/runs")
 def list_ledger_runs(
-    contract_name: Optional[str] = None,
-    status_filter: Optional[str] = None,
-    tenant_id: Optional[str] = None,
+    contract_name: str | None = None,
+    status_filter: str | None = None,
+    tenant_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
     client: APIKeyMetadata = Security(require_capability(Capability.AUDIT_READ)),
-):
+) -> dict[str, Any]:
     """Newest-first forensic run records for a tenant with optional filters."""
     scoped_tenant = _resolve_ledger_tenant(client, tenant_id)
     ledger = BoundaryLedger()
@@ -593,9 +619,9 @@ def list_ledger_runs(
 @app.get("/api/v1/runs/{run_id}")
 def get_ledger_run(
     run_id: str,
-    tenant_id: Optional[str] = None,
+    tenant_id: str | None = None,
     client: APIKeyMetadata = Security(require_capability(Capability.AUDIT_READ)),
-):
+) -> dict[str, Any]:
     """Full forensic ledger record for a single run, tenant-scoped.
 
     Administrators may target any tenant with ``tenant_id`` for oversight; every
@@ -612,14 +638,14 @@ def get_ledger_run(
 
 @app.get("/api/v1/quarantine")
 def list_ledger_quarantine(
-    contract_name: Optional[str] = None,
-    run_id: Optional[str] = None,
-    kind: Optional[str] = None,
-    reason: Optional[str] = None,
-    tenant_id: Optional[str] = None,
+    contract_name: str | None = None,
+    run_id: str | None = None,
+    kind: str | None = None,
+    reason: str | None = None,
+    tenant_id: str | None = None,
     limit: int = 100,
     client: APIKeyMetadata = Security(require_capability(Capability.AUDIT_READ)),
-):
+) -> dict[str, Any]:
     """Search the quarantine index by contract, run, kind, or dominant reason."""
     if run_id is not None and not _RUN_ID_PATTERN.fullmatch(run_id):
         raise HTTPException(status_code=400, detail="Invalid run ID")
@@ -637,11 +663,11 @@ def list_ledger_quarantine(
 
 @app.get("/api/v1/usage")
 def ledger_usage(
-    contract_name: Optional[str] = None,
-    since: Optional[str] = None,
-    tenant_id: Optional[str] = None,
+    contract_name: str | None = None,
+    since: str | None = None,
+    tenant_id: str | None = None,
     client: APIKeyMetadata = Security(require_capability(Capability.METRICS_READ)),
-):
+) -> dict[str, Any]:
     """Metering totals for a tenant, optionally since an ISO-8601 timestamp."""
     scoped_tenant = _resolve_ledger_tenant(client, tenant_id)
     summary = BoundaryLedger().usage_summary(scoped_tenant, contract_name=contract_name, since=since)
@@ -668,28 +694,30 @@ class CommercialContractRequest(BaseModel):
     seller_id: str = Field(min_length=1, max_length=128)
     feed_id: str = Field(min_length=1, max_length=128)
     currency: str = Field(default="USD", min_length=3, max_length=3)
-    pricing: Dict[str, Any]
-    qualification: Dict[str, Any] = Field(default_factory=dict)
-    acceptance: Dict[str, Any] = Field(default_factory=dict)
-    penalty: Dict[str, Any] = Field(default_factory=dict)
+    pricing: dict[str, Any]
+    qualification: dict[str, Any] = Field(default_factory=dict)
+    acceptance: dict[str, Any] = Field(default_factory=dict)
+    penalty: dict[str, Any] = Field(default_factory=dict)
     effective_at: str
-    expires_at: Optional[str] = None
-    approved_by: List[str] = Field(default_factory=list)
-    description: Optional[str] = None
+    expires_at: str | None = None
+    approved_by: list[str] = Field(default_factory=list)
+    description: str | None = None
 
 
 @app.post("/api/v1/commercial-contracts", status_code=201)
 def create_commercial_contract(
     payload: CommercialContractRequest,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_WRITE)),
-):
+) -> dict[str, Any]:
     """Register an immutable commercial contract version (tenant-scoped)."""
     try:
         contract = CommercialContract(**payload.model_dump())
-        result = _settlement_service.register_contract(
+        _settlement_service.register_contract(
             contract, tenant_id=client.tenant_id, created_by=f"api:{client.role.value}")
     except ValidationError as exc:
-        raise HTTPException(status_code=400, detail="Commercial contract validation failed; check the submitted schema") from exc
+        raise HTTPException(
+            status_code=400,
+            detail="Commercial contract validation failed; check the submitted schema") from exc
     except (CommercialContractRegistryError, SettlementLedgerError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     telemetry_logger.info(
@@ -710,9 +738,9 @@ def create_commercial_contract(
 @app.get("/api/v1/commercial-contracts/{contract_id}")
 def get_commercial_contract(
     contract_id: str,
-    version: Optional[int] = None,
+    version: int | None = None,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
-):
+) -> dict[str, Any]:
     """Retrieve a commercial contract by id and optional exact version (tenant-scoped)."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", contract_id):
         raise HTTPException(status_code=400, detail="Invalid contract ID")
@@ -727,7 +755,7 @@ def get_commercial_contract(
 def list_commercial_contract_versions(
     contract_id: str,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
-):
+) -> dict[str, Any]:
     """List all immutable versions of a commercial contract (tenant-scoped)."""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", contract_id):
         raise HTTPException(status_code=400, detail="Invalid contract ID")
@@ -741,8 +769,8 @@ def list_commercial_contract_versions(
 class SettlementCalculateRequest(BaseModel):
     run_id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
     contract_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-    contract_version: Optional[int] = Field(default=None, ge=1)
-    idempotency_key: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    contract_version: int | None = Field(default=None, ge=1)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 @app.post("/api/v1/settlements/calculate")
@@ -750,7 +778,7 @@ def calculate_settlement(
     payload: SettlementCalculateRequest,
     request: Request,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_WRITE)),
-):
+) -> dict[str, Any]:
     """Calculate (or idempotently replay) the settlement for a completed run.
 
     Verifies the delivery certificate before calculating; an invalid
@@ -787,12 +815,12 @@ def calculate_settlement(
 
 @app.get("/api/v1/settlements")
 def list_settlements(
-    status: Optional[str] = None,
-    contract_id: Optional[str] = None,
+    status: str | None = None,
+    contract_id: str | None = None,
     limit: int = 50,
     offset: int = 0,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
-):
+) -> dict[str, Any]:
     """List settlement statements for the caller's tenant (paginated)."""
     rows = _settlement_service.list_settlements(
         client.tenant_id, status=status, contract_id=contract_id)
@@ -805,13 +833,14 @@ def list_settlements(
 def get_settlement(
     settlement_id: str,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
-):
+) -> dict[str, Any]:
     """Retrieve one settlement statement (tenant-scoped)."""
-    if not _RUN_ID_PATTERN.fullmatch(settlement_id.replace("stl_", "", 1).replace("_", "", 20)):
-        # Settlement IDs follow stl_<run>_<contract>_v<n>; validate loosely
-        # but reject path-like input defensively.
-        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", settlement_id):
-            raise HTTPException(status_code=400, detail="Invalid settlement ID")
+    # Settlement IDs follow stl_<run>_<contract>_v<n>; validate loosely but
+    # reject path-like input defensively.
+    if not _RUN_ID_PATTERN.fullmatch(settlement_id.replace("stl_", "", 1).replace("_", "", 20)) and not re.fullmatch(
+        r"[A-Za-z0-9_.-]{1,160}", settlement_id
+    ):
+        raise HTTPException(status_code=400, detail="Invalid settlement ID")
     row = _settlement_service.get_settlement(settlement_id, client.tenant_id)
     if row is None:
         raise HTTPException(status_code=404,
@@ -823,7 +852,7 @@ def get_settlement(
 def explain_settlement(
     settlement_id: str,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
-):
+) -> dict[str, Any]:
     """Full calculation explanation: units, price, thresholds, rounding, evidence."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", settlement_id):
         raise HTTPException(status_code=400, detail="Invalid settlement ID")
@@ -837,7 +866,7 @@ def explain_settlement(
 def verify_settlement(
     settlement_id: str,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
-):
+) -> dict[str, Any]:
     """Verify a settlement's signed receipt against its delivery certificate."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", settlement_id):
         raise HTTPException(status_code=400, detail="Invalid settlement ID")
@@ -851,7 +880,7 @@ def verify_settlement(
 class DisputeRequest(BaseModel):
     disputing_party: str = Field(min_length=1, max_length=128)
     reason: str = Field(min_length=1, max_length=2000)
-    evidence_references: List[str] = Field(default_factory=list)
+    evidence_references: list[str] = Field(default_factory=list)
     supporting_explanation: str = Field(default="", max_length=5000)
 
 
@@ -860,7 +889,7 @@ def open_settlement_dispute(
     settlement_id: str,
     payload: DisputeRequest,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_WRITE)),
-):
+) -> dict[str, Any]:
     """Open a dispute; the settlement becomes DISPUTED and non-billable."""
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,160}", settlement_id):
         raise HTTPException(status_code=400, detail="Invalid settlement ID")
@@ -886,7 +915,7 @@ def approve_settlement(
     settlement_id: str,
     payload: ApprovalRequest,
     client: APIKeyMetadata = Security(require_capability(Capability.BILLING_MANAGE)),
-):
+) -> dict[str, Any]:
     """Explicitly approve a settlement for billing (BILLING_MANAGE capability).
 
     Approval records an audited transition; it never overrides the
@@ -918,7 +947,7 @@ def settlement_billing_preview(
     settlement_id: str,
     request: Request,
     client: APIKeyMetadata = Security(require_capability(Capability.SETTLEMENTS_READ)),
-):
+) -> dict[str, Any]:
     """Create or replay a draft billing instruction via the configured provider.
 
     Read-only against the settlement; the external action is a *draft* invoice.
@@ -958,10 +987,11 @@ def settlement_billing_preview(
         description=f"Data delivery settlement {settlement_id} (run {row['run_id']})",
         idempotency_key=f"{client.tenant_id}:{idempotency_key}",
     )
-    if settings.billing_provider == "stripe":
-        provider = StripeBillingProvider(_settlement_service.ledger)
-    else:
-        provider = DryRunBillingProvider(_settlement_service.ledger)
+    provider: StripeBillingProvider | DryRunBillingProvider = (
+        StripeBillingProvider(_settlement_service.ledger)
+        if settings.billing_provider == "stripe"
+        else DryRunBillingProvider(_settlement_service.ledger)
+    )
     result = provider.create_draft_invoice(payload, idempotency_key=payload.idempotency_key)
     return result.as_dict()
 
@@ -978,7 +1008,7 @@ def create_managed_api_key(
     payload: CreateAPIKeyRequest,
     response: Response,
     client: APIKeyMetadata = Security(require_capability(Capability.ADMIN_MANAGE)),
-):
+) -> dict[str, Any]:
     """Create a credential and return its secret exactly once to an administrator."""
     raw_key = "dm_live_" + secrets.token_urlsafe(32)
     try:
@@ -1015,7 +1045,7 @@ def create_managed_api_key(
 def revoke_managed_api_key(
     key_id: str,
     client: APIKeyMetadata = Security(require_capability(Capability.ADMIN_MANAGE)),
-):
+) -> dict[str, Any]:
     """Revoke a managed key by its fingerprint. Revocation is durable in production."""
     if not re.fullmatch(r"[0-9a-f]{24}", key_id):
         raise HTTPException(status_code=400, detail="Invalid key ID")
@@ -1028,7 +1058,7 @@ def revoke_managed_api_key(
 # ----------------- Interactive Enterprise Web Console -----------------
 
 @app.get("/", response_class=HTMLResponse)
-def serve_enterprise_ui():
+def serve_enterprise_ui() -> str:
     """Serves the live interactive Enterprise Data Shell Console."""
     return """
 <!DOCTYPE html>
@@ -1037,7 +1067,8 @@ def serve_enterprise_ui():
   <meta charset="UTF-8">
   <title>Data Shell — Enterprise Perimeter Gateway</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap"
+        rel="stylesheet">
   <style>
     :root {
       --bg: #0B0E14;
@@ -1228,7 +1259,8 @@ def serve_enterprise_ui():
 
   <div class="container">
     <div class="hero-title">Bad data never lands, and never leaves.</div>
-    <div class="hero-sub">Enterprise contract enforcement platform with zero-deficit mathematical footing, dual vectorized engines (Polars + DuckDB), and cryptographic non-repudiation.</div>
+    <div class="hero-sub">Enterprise contract enforcement platform with zero-deficit mathematical footing,
+      dual vectorized engines (Polars + DuckDB), and cryptographic non-repudiation.</div>
 
     <div class="stats-row">
       <div class="stat-card">
@@ -1271,7 +1303,8 @@ def serve_enterprise_ui():
 
       <div class="card">
         <h3>Run Reconciliation Ledger</h3>
-        <div id="outputLedger" class="ledger-box">Awaiting boundary run... Upload a payload to enforce contracts and compute zero-deficit footing.</div>
+        <div id="outputLedger" class="ledger-box">Awaiting boundary run... Upload a payload to
+          enforce contracts and compute zero-deficit footing.</div>
         
         <div id="cryptoManifest" class="crypto-manifest">
           <strong style="color:#fff">CRYPTOGRAPHIC AUDIT CERTIFICATE:</strong><br>
@@ -1321,13 +1354,18 @@ def serve_enterprise_ui():
         ledgerText += `│ Terminal Status:       ${data.status.padEnd(36)} │\\n`;
         ledgerText += "├─────────────────────────────────────────────────────────────┤\\n";
         ledgerText += `│ Rows read from source:                    ${r.rows_read.toLocaleString().padStart(17)} │\\n`;
-        ledgerText += `│ Refused at the door (structural):        -${r.refused_structural.toLocaleString().padStart(17)} │\\n`;
-        ledgerText += `│ Held by quality rules:                   -${r.held_quality.toLocaleString().padStart(17)} │\\n`;
-        ledgerText += `│ Rows delivered:                           ${r.rows_delivered.toLocaleString().padStart(17)} │\\n`;
+        ledgerText += `│ Refused at the door (structural):        -${r.refused_structural
+          .toLocaleString().padStart(17)} │\\n`;
+        ledgerText += `│ Held by quality rules:                   -${r.held_quality
+          .toLocaleString().padStart(17)} │\\n`;
+        ledgerText += `│ Rows delivered:                           ${r.rows_delivered
+          .toLocaleString().padStart(17)} │\\n`;
         ledgerText += "├─────────────────────────────────────────────────────────────┤\\n";
-        ledgerText += `│ Unaccounted for:                          ${(r.unaccounted_for + " · Matched").padStart(17)} │\\n`;
+        ledgerText += `│ Unaccounted for:                          ${(r.unaccounted_for
+          + " · Matched").padStart(17)} │\\n`;
         ledgerText += "├─────────────────────────────────────────────────────────────┤\\n";
-        ledgerText += `│ Delivered: ${r.pct_delivered.toFixed(2).padStart(6)}%    |   Refused / Held: ${r.pct_refused_or_held.toFixed(2).padStart(6)}%       │\\n`;
+        ledgerText += `│ Delivered: ${r.pct_delivered.toFixed(2).padStart(6)}%    |
+          |   Refused / Held: ${r.pct_refused_or_held.toFixed(2).padStart(6)}%       │\\n`;
         ledgerText += "└─────────────────────────────────────────────────────────────┘\\n\\n";
         ledgerText += "Rule Violations Held:\\n" + JSON.stringify(data.rule_breakdown, null, 2);
 
@@ -1336,7 +1374,9 @@ def serve_enterprise_ui():
         if (data.cryptographic_manifest && data.digital_signature) {
           cryptoBox.style.display = 'block';
           document.getElementById('merkleRoot').innerText = "Merkle Root: " + data.cryptographic_manifest.merkle_root;
-          document.getElementById('sigDigest').innerText = "Signature:   " + data.digital_signature.signature.substring(0, 32) + "... (" + (data.digital_signature.algorithm || "HMAC-SHA256") + ")";
+          document.getElementById('sigDigest').innerText = "Signature:   "
+            + data.digital_signature.signature.substring(0, 32)
+            + "... (" + (data.digital_signature.algorithm || "HMAC-SHA256") + ")";
         }
       } catch (err) {
         out.innerText = "Network or execution error: " + err.message;

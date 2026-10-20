@@ -38,12 +38,13 @@ emits a failing result, and non-finite values emit an explicit failed result.
 """
 
 from __future__ import annotations
+
 import math
 from dataclasses import dataclass
-from typing import Dict, Any, Optional, List
+from typing import Any
+
 from datashell.core.ledger import BoundaryLedger
 from datashell.engines.metrics import RATE, metric_kind
-
 
 # Values at or below this magnitude are treated as zero for the relative
 # comparison policy. 1e-9 is far below any proportion or business aggregate a
@@ -86,7 +87,7 @@ class ContractHistoryTracker(BoundaryLedger):
     """
 
 
-def _finite(value: Any) -> Optional[float]:
+def _finite(value: Any) -> float | None:
     """Coerce a metric observation to a finite float, or None when invalid."""
     try:
         number = float(value)
@@ -104,7 +105,7 @@ def _display(value: Any) -> str:
 class HistoricalDriftEngine:
     """Evaluates cross-run drift assertions with strict multi-tenant boundary isolation."""
 
-    def __init__(self, history_tracker: Optional[ContractHistoryTracker] = None):
+    def __init__(self, history_tracker: ContractHistoryTracker | None = None):
         self.tracker = history_tracker or ContractHistoryTracker()
 
     @staticmethod
@@ -175,14 +176,14 @@ class HistoricalDriftEngine:
         self,
         contract_name: str,
         current_rows: int,
-        current_metrics: Dict[str, float],
+        current_metrics: dict[str, float],
         tenant_id: str = "default-tenant",
         max_volume_drop_pct: float = 30.0,
         max_metric_drift_pct: float = 50.0,
         baseline_window: int = 1,
         min_metric_baseline_samples: int = 1,
         max_rate_abs_delta: float = 0.1,
-    ) -> List[DriftCheckResult]:
+    ) -> list[DriftCheckResult]:
         """Compares current run metrics against a rolling baseline for the tenant.
 
         ``baseline_window=1`` compares against the previous delivered run (the
@@ -213,7 +214,7 @@ class HistoricalDriftEngine:
                 details="Initial run: established baseline."
             )]
 
-        results: List[DriftCheckResult] = []
+        results: list[DriftCheckResult] = []
         baseline_rows = float(baseline["rows_delivered"])
 
         # 1. Volume Drift Check (semantics preserved: signed % change vs the

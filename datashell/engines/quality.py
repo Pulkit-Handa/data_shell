@@ -8,20 +8,23 @@ Evaluates:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
-import polars as pl
-import duckdb
 
-from datashell.contract.models import DataContract, QualityRule, BatchRule, QualityBehavior
-from datashell.contract.compiler import RuleCompiler, BatchRuleCompiler
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import duckdb
+import polars as pl
+
+from datashell.contract.compiler import BatchRuleCompiler, RuleCompiler
+from datashell.contract.models import DataContract, QualityBehavior, QualityRule
 from datashell.core.config import settings
 
 
 @dataclass
 class RuleViolationCount:
     rule_id: str
-    description: Optional[str]
+    description: str | None
     violation_count: int
 
 
@@ -32,7 +35,7 @@ class BatchRuleResult:
     passed: bool
     actual_value: str
     expected_value: str
-    description: Optional[str]
+    description: str | None
 
 
 @dataclass
@@ -42,8 +45,8 @@ class QualityResult:
     total_candidate_rows: int
     admitted_count: int
     held_count: int
-    rule_violation_counts: Dict[str, int]
-    batch_results: List[BatchRuleResult]
+    rule_violation_counts: dict[str, int]
+    batch_results: list[BatchRuleResult]
     all_batch_rules_passed: bool
     should_reject_run: bool
     behavior: QualityBehavior
@@ -59,7 +62,7 @@ class SemanticQualityEngine:
         self.contract = contract
         self.quality_spec = contract.spec.quality
         self.behavior = self.quality_spec.behavior
-        self.compiled_row_rules: List[Tuple[QualityRule, pl.Expr]] = [
+        self.compiled_row_rules: list[tuple[QualityRule, pl.Expr]] = [
             (r, RuleCompiler.compile_row_rule(r))
             for r in self.quality_spec.rules
         ]
@@ -72,7 +75,7 @@ class SemanticQualityEngine:
         clean_cols = [c for c in candidate_df.columns]
 
         # 1. Row-level evaluation in Polars
-        rule_violation_counts: Dict[str, int] = {}
+        rule_violation_counts: dict[str, int] = {}
         rule_pass_cols = []
 
         if total_rows > 0 and self.compiled_row_rules:
@@ -135,14 +138,13 @@ class SemanticQualityEngine:
 
         # Determine if run must be rejected according to declared contract behavior
         should_reject_run = False
-        if self.behavior == QualityBehavior.REJECT_RUN:
-            # If behavior is REJECT_RUN, ANY row failure OR batch failure rejects the run
-            if held_df.height > 0 or not all_batch_passed:
-                should_reject_run = True
-        elif self.behavior == QualityBehavior.DROP_ROW:
-            # If behavior is DROP_ROW, batch failure still stops delivery
-            if not all_batch_passed:
-                should_reject_run = True
+        # REJECT_RUN: ANY row failure OR batch failure rejects the run.
+        # DROP_ROW: a batch failure still stops delivery (failing rows were already dropped).
+        if (
+            (self.behavior == QualityBehavior.REJECT_RUN and (held_df.height > 0 or not all_batch_passed))
+            or (self.behavior == QualityBehavior.DROP_ROW and not all_batch_passed)
+        ):
+            should_reject_run = True
 
         return QualityResult(
             admitted_df=admitted_df,
@@ -159,15 +161,14 @@ class SemanticQualityEngine:
 
     def evaluate_batch_rules(
         self,
-        dataset_source: Union[pl.DataFrame, Path, str, Any],
+        dataset_source: pl.DataFrame | Path | str | Any,
         fallback_arrow_schema: Any = None
-    ) -> Tuple[List[BatchRuleResult], bool]:
+    ) -> tuple[list[BatchRuleResult], bool]:
         """
         Evaluates batch rules in DuckDB over an Arrow table, Polars DataFrame, or out-of-core Parquet file.
         Uses pyarrow.dataset to stream Parquet data on demand without materializing the full dataset into RAM.
         """
-        from pathlib import Path
-        batch_results: List[BatchRuleResult] = []
+        batch_results: list[BatchRuleResult] = []
         all_batch_passed = True
 
         if not self.quality_spec.batch_rules:

@@ -11,18 +11,16 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import uuid
+from datetime import UTC
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, cast
 
 from pydantic import ValidationError
 
-from datashell.core.ledger import BoundaryLedger
-from datashell.settlement.ledger import SettlementLedger, SettlementLedgerError
+from datashell.settlement.ledger import SettlementLedgerError
 from datashell.settlement.models import (
     CommercialContract,
     DisputeResolution,
-    DisputeStatus,
     SettlementStatus,
 )
 from datashell.settlement.money import format_minor_units
@@ -39,13 +37,13 @@ def _print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, default=str))
 
 
-def _load_contract_payload(path: str) -> Dict[str, Any]:
+def _load_contract_payload(path: str) -> dict[str, Any]:
     contract_path = Path(path)
     if not contract_path.is_file():
         raise SettlementServiceError(f"contract file not found: {contract_path}")
     try:
-        with open(contract_path, "r", encoding="utf-8") as handle:
-            return json.load(handle)
+        with open(contract_path, encoding="utf-8") as handle:
+            return cast(dict[str, Any], json.load(handle))
     except (OSError, ValueError) as exc:
         raise SettlementServiceError(f"contract file could not be read: {type(exc).__name__}: {exc}") from exc
 
@@ -59,7 +57,8 @@ def command_contract_validate(args: argparse.Namespace) -> int:
         contract = CommercialContract(**payload)
     except ValidationError as exc:
         errors = exc.errors()
-        print(f"✗ Commercial contract is invalid ({len(errors)} error{'s' if len(errors) != 1 else ''}):", file=sys.stderr)
+        suffix = "s" if len(errors) != 1 else ""
+        print(f"✗ Commercial contract is invalid ({len(errors)} error{suffix}):", file=sys.stderr)
         for err in errors:
             location = ".".join(str(part) for part in err.get("loc", ())) or "(contract)"
             message = str(err.get("msg", "invalid value")).replace("Value error, ", "")
@@ -86,7 +85,8 @@ def command_contract_create(args: argparse.Namespace) -> int:
         result = registry.register(contract, tenant_id=args.tenant, created_by=args.actor)
     except ValidationError as exc:
         errors = exc.errors()
-        print(f"✗ Commercial contract is invalid ({len(errors)} error{'s' if len(errors) != 1 else ''}):", file=sys.stderr)
+        suffix = "s" if len(errors) != 1 else ""
+        print(f"✗ Commercial contract is invalid ({len(errors)} error{suffix}):", file=sys.stderr)
         for err in errors:
             location = ".".join(str(part) for part in err.get("loc", ())) or "(contract)"
             message = str(err.get("msg", "invalid value")).replace("Value error, ", "")
@@ -124,7 +124,8 @@ def command_contract_show(args: argparse.Namespace) -> int:
     print(f"  Currency:      {contract.currency}")
     print(f"  Pricing:       {contract.pricing.model.value}")
     if contract.pricing.unit_price_minor is not None:
-        print(f"  Unit price:    {format_minor_units(contract.pricing.unit_price_minor, contract.currency)} {contract.currency}")
+        unit = format_minor_units(contract.pricing.unit_price_minor, contract.currency)
+        print(f"  Unit price:    {unit} {contract.currency}")
     if contract.pricing.tiers:
         for tier in contract.pricing.tiers:
             bound = f"[{tier.min_units:,}, {tier.max_units or '∞'})"
@@ -187,14 +188,16 @@ def command_settlement_calculate(args: argparse.Namespace) -> int:
     print(f"  Pricing model:      {calc['pricing_model']}")
     print(f"  Qualified units:    {calc['qualified_units']:,}")
     if calc.get("unit_price_minor") is not None:
-        print(f"  Unit price:         {format_minor_units(calc['unit_price_minor'], row['currency'])} {row['currency']}")
+        unit = format_minor_units(calc["unit_price_minor"], row["currency"])
+        print(f"  Unit price:         {unit} {row['currency']}")
     for tier in calc.get("tiers_applied") or []:
         print(f"  Tier: {tier['units']:,} units x {tier['unit_price_minor']} = {tier['amount_minor']:,} minor")
     if calc.get("proration_ratio"):
         print(f"  Proration ratio:    {calc['proration_ratio']}")
     print(f"  Gross amount:       {format_minor_units(calc['gross_amount_minor'], row['currency'])} {row['currency']}")
     if calc.get("penalty_minor"):
-        print(f"  Penalty:            {format_minor_units(calc['penalty_minor'], row['currency'])} ({calc.get('penalty_reason')})")
+        penalty = format_minor_units(calc["penalty_minor"], row["currency"])
+        print(f"  Penalty:            {penalty} ({calc.get('penalty_reason')})")
     print(f"  Acceptance:         {row['acceptance_status']}")
     print(f"  Settlement status:  {row['settlement_status']}")
     if row.get("reason_codes"):
@@ -221,7 +224,8 @@ def command_settlement_show(args: argparse.Namespace) -> int:
                 "certificate_digest", "currency", "acceptance_status",
                 "settlement_status", "actor", "created_at"):
         print(f"  {key:<20} {row.get(key)}")
-    print(f"  {'gross_amount_minor':<20} {calc['gross_amount_minor']:,} ({format_minor_units(calc['gross_amount_minor'], row['currency'])} {row['currency']})")
+    gross = format_minor_units(calc["gross_amount_minor"], row["currency"])
+    print(f"  {'gross_amount_minor':<20} {calc['gross_amount_minor']:,} ({gross} {row['currency']})")
     print(f"  {'qualified_units':<20} {calc['qualified_units']:,}")
     print(f"  {'pricing_model':<20} {calc['pricing_model']}")
     print(f"  {'calculation_version':<20} {calc['calculation_version']}")
@@ -290,7 +294,7 @@ def command_settlement_verify(args: argparse.Namespace) -> int:
 
 
 def _invoice_payload(service: SettlementService, settlement_id: str, tenant_id: str,
-                     actor: str) -> Dict[str, Any]:
+                     actor: str) -> dict[str, Any]:
     """Build a stable, versioned invoice/billing-instruction representation.
 
     This is a draft billing document — never a paid invoice and never proof of
@@ -327,8 +331,8 @@ def _invoice_payload(service: SettlementService, settlement_id: str, tenant_id: 
 
 
 def datetime_now() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    return datetime.now(UTC).isoformat()
 
 
 def command_invoice_preview(args: argparse.Namespace) -> int:
@@ -341,7 +345,7 @@ def command_invoice_preview(args: argparse.Namespace) -> int:
     if args.json:
         _print_json(payload)
         return 0
-    print(f"Invoice preview (DRAFT — not a paid invoice)")
+    print("Invoice preview (DRAFT — not a paid invoice)")
     print(f"  Settlement:      {payload['settlement_id']}")
     print(f"  Contract:        {payload['contract_id']} v{payload['contract_version']}")
     print(f"  Amount:          {payload['amount']} {payload['currency']} ({payload['amount_minor']:,} minor)")
@@ -415,7 +419,13 @@ def command_dispute_resolve(args: argparse.Namespace) -> int:
         _print_json(result)
         return 0
     print(f"✓ Resolved dispute {result['dispute_id']}: {result['resolution']}")
-    print(f"  Settlement {result['settlement_id']} is now {service.get_settlement(result['settlement_id'], args.tenant)['settlement_status']}")
+    updated = service.get_settlement(result["settlement_id"], args.tenant)
+    if updated is None:
+        print(f"✗ settlement '{result['settlement_id']}' vanished after dispute resolution",
+              file=sys.stderr)
+        return 1
+    settlement_status = updated["settlement_status"]
+    print(f"  Settlement {result['settlement_id']} is now {settlement_status}")
     return 0
 
 
@@ -424,9 +434,9 @@ def command_dispute_resolve(args: argparse.Namespace) -> int:
 
 def command_billing_preview(args: argparse.Namespace) -> int:
     """Create (or replay) a draft billing instruction via the provider."""
+    from datashell.billing.base import InvoicePayload
     from datashell.billing.dry_run import DryRunBillingProvider
     from datashell.billing.stripe_adapter import StripeBillingProvider
-    from datashell.billing.base import InvoicePayload
     from datashell.settlement.models import SettlementStatus
 
     service = SettlementService()
@@ -457,10 +467,10 @@ def command_billing_preview(args: argparse.Namespace) -> int:
         idempotency_key=args.idempotency_key or f"billing:{args.tenant}:{args.settlement_id}",
     )
     provider_name = args.provider
-    if provider_name == "stripe":
-        provider = StripeBillingProvider(service.ledger)
-    else:
-        provider = DryRunBillingProvider(service.ledger)
+    provider: StripeBillingProvider | DryRunBillingProvider = (
+        StripeBillingProvider(service.ledger) if provider_name == "stripe"
+        else DryRunBillingProvider(service.ledger)
+    )
     try:
         result = provider.create_draft_invoice(payload, idempotency_key=payload.idempotency_key)
     except RuntimeError as exc:

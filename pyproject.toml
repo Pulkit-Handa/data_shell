@@ -26,7 +26,10 @@ dependencies = [
 dev = [
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.23.0,<2.0.0",
-    "pyyaml>=6.0.0,<7.0.0"
+    "pyyaml>=6.0.0,<7.0.0",
+    "ruff>=0.12.0",
+    "mypy>=1.17.0",
+    "pre-commit>=3.8.0"
 ]
 
 [project.scripts]
@@ -36,6 +39,75 @@ datashell = "datashell.cli.main:main"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-ra"
+
+[tool.ruff]
+# Enterprise contributor gate: repository-wide lint must pass with zero warnings.
+# 120 columns keeps the codebase's existing dense, documentation-first lines
+# iterable without a wholesale reformat.
+line-length = 120
+target-version = "py311"
+exclude = [
+    "build",
+    "dist",
+    "output",
+    "web",
+]
+
+[tool.ruff.lint]
+# E/F: correctness; I: import hygiene; UP: py3.11+ modernization;
+# B: real bug patterns (mutable defaults, unreachable code);
+# SIM: simplifications that reduce review load.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+# FastAPI's dependency-injection idiom is a call in a default argument:
+#     client: APIKeyMetadata = Security(require_capability(Capability.AUDIT_READ))
+# `Security(...)`, `Depends(...)` & friends are per-route constants evaluated at
+# import time and cached by the framework, so they are safe defaults. This is a
+# configuration-level exemption (not a suppression) — any *other* mutable call
+# in a default argument is still flagged by B008.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Security",
+    "fastapi.Query",
+    "fastapi.Header",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Body",
+    "fastapi.Path",
+    "fastapi.Cookie",
+    # Cosmetic security (our own layer): returns a closure built from module-level
+    # constants (an enum); routes declare it once per definition and it is a shared
+    # per-route constant, exactly like the FastAPI primitives above.
+    "datashell.core.security.require_capability",
+    "datashell.core.security.authenticate_client",
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["datashell"]
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_typed = true
+
+[[tool.mypy.overrides]]
+# Upstream pyarrow (>=14) ships no py.typed marker and no PEP 561 stubs, so
+# strict mode cannot resolve its package structure. This is the documented
+# upstream-stubs exception — no `# type: ignore` comments are used for it.
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# numpy 2.x ships py.typed stubs that use PEP 695 `type` statements, which the
+# 3.11 target version cannot parse (mypy hard-fails before type-checking our
+# code). Skipping the internals keeps numpy accesses typed as Any at our call
+# sites — this is an upstream-stubs limitation, not a suppression of our code.
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+ignore_errors = true
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -42,7 +42,6 @@ import os
 import sqlite3
 import sys
 import time
-import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -118,16 +117,14 @@ def _generate_feed(storage: Path, total: int, *, refused: int, held: int,
     with open(source, "w", encoding="utf-8") as handle:
         for i in range(delivered):
             handle.write(
-                '{"settlement_id": "SET-%09d", "amount": %s, "currency": "%s"}\n'
-                % (i, amounts[i % len(amounts)], currencies[i % 3]))
+                f'{{"settlement_id": "SET-{i:09d}", "amount": {amounts[i % len(amounts)]},'
+                 f' "currency": "{currencies[i % 3]}"}}\n')
         for i in range(held):
             handle.write(
-                '{"settlement_id": "HOLD-%09d", "amount": -%s, "currency": "USD"}\n'
-                % (i, amounts[i % len(amounts)]))
+                f'{{"settlement_id": "HOLD-{i:09d}", "amount": -{amounts[i % len(amounts)]}, "currency": "USD"}}\n')
         for i in range(refused):
             handle.write(
-                '{"settlement_id": "REJ-%09d", "amount": "NOT_A_FLOAT", "currency": "USD"}\n'
-                % i)
+                f'{{"settlement_id": "REJ-{i:09d}", "amount": "NOT_A_FLOAT", "currency": "USD"}}\n')
     return source, target
 
 

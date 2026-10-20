@@ -2,23 +2,19 @@
 
 from __future__ import annotations
 
-import json
 from fractions import Fraction
 
 import pytest
+from pydantic import ValidationError
 
+from datashell.settlement.acceptance import (
+    RunEvidence,
+    evaluate_acceptance,
+)
 from datashell.settlement.models import (
-    AcceptancePolicy,
     AcceptanceStatus,
     CommercialContract,
-    DisputeResolution,
-    DisputeStatus,
-    PenaltyModel,
-    PricingModel,
-    QualificationUnit,
     ReasonCode,
-    SettlementStatus,
-    TierBand,
 )
 from datashell.settlement.money import (
     MoneyValidationError,
@@ -30,10 +26,6 @@ from datashell.settlement.money import (
 from datashell.settlement.pricing import (
     price_per_accepted_unit,
     price_tiered,
-)
-from datashell.settlement.acceptance import (
-    RunEvidence,
-    evaluate_acceptance,
 )
 
 
@@ -97,6 +89,7 @@ class TestMoney:
 
     def test_decimal_to_minor_units_rejects_extra_precision(self):
         from decimal import Decimal
+
         from datashell.settlement.money import MoneyValidationError
         with pytest.raises(MoneyValidationError):
             decimal_to_minor_units(Decimal("49.251"), "USD")
@@ -116,26 +109,26 @@ class TestContractValidation:
         assert c1.contract_digest != c2.contract_digest
 
     def test_invalid_currency_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _contract(currency="US")
 
     def test_invalid_identifier_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _contract(contract_id="bad id with spaces")
 
     def test_unique_entities_requires_key_columns(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CommercialContract(
                 contract_id="c", buyer_id="b", seller_id="s", feed_id="f",
                 qualification={"billable_unit": "UNIQUE_ENTITIES"},
                 effective_at="2026-01-01T00:00:00Z")
 
     def test_maximum_below_expected_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             _contract(acceptance={"expected_units": 1000, "maximum_units": 100})
 
     def test_tiered_requires_start_at_zero(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CommercialContract(
                 contract_id="c", buyer_id="b", seller_id="s", feed_id="f",
                 pricing={"model": "TIERED_PRICING",
@@ -143,7 +136,7 @@ class TestContractValidation:
                 effective_at="2026-01-01T00:00:00Z")
 
     def test_tiered_non_contiguous_rejected(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CommercialContract(
                 contract_id="c", buyer_id="b", seller_id="s", feed_id="f",
                 pricing={"model": "TIERED_PRICING", "tiers": [
@@ -153,14 +146,14 @@ class TestContractValidation:
                 effective_at="2026-01-01T00:00:00Z")
 
     def test_per_unit_requires_price(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CommercialContract(
                 contract_id="c", buyer_id="b", seller_id="s", feed_id="f",
                 pricing={"model": "PER_ACCEPTED_UNIT"},
                 effective_at="2026-01-01T00:00:00Z")
 
     def test_fixed_fee_requires_amount(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CommercialContract(
                 contract_id="c", buyer_id="b", seller_id="s", feed_id="f",
                 pricing={"model": "FIXED_BATCH_FEE"},

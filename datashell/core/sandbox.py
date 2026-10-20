@@ -1,9 +1,9 @@
 """Security Sandbox: Enforces filesystem root boundaries, namespace isolation, and path traversal prevention."""
 
 from __future__ import annotations
-import os
+
 from pathlib import Path
-from typing import List, Optional, Union
+
 from datashell.core.config import settings
 
 
@@ -19,7 +19,7 @@ class FilesystemSandbox:
     """
 
     @staticmethod
-    def get_allowed_roots() -> List[Path]:
+    def get_allowed_roots() -> list[Path]:
         """Returns normalized absolute paths of permitted directories for general operations."""
         import tempfile
         return [
@@ -31,7 +31,7 @@ class FilesystemSandbox:
         ]
 
     @staticmethod
-    def get_allowed_delivery_roots(tenant_id: Optional[str] = None) -> List[Path]:
+    def get_allowed_delivery_roots(tenant_id: str | None = None) -> list[Path]:
         """
         Narrow delivery root: User-defined delivery targets may write
         inside the designated tenant output delivery namespace or standard temp directory for testing.
@@ -49,7 +49,7 @@ class FilesystemSandbox:
 
 
     @staticmethod
-    def get_forbidden_roots() -> List[Path]:
+    def get_forbidden_roots() -> list[Path]:
         """Returns forbidden directories that arbitrary operations must never touch."""
         return [
             settings.contracts_dir.resolve(),
@@ -61,7 +61,7 @@ class FilesystemSandbox:
         ]
 
     @staticmethod
-    def get_reserved_operational_roots() -> List[Path]:
+    def get_reserved_operational_roots() -> list[Path]:
         """
         Operational namespaces reserved exclusively for the gateway engine.
         User-defined data delivery targets CANNOT write into these namespaces.
@@ -88,9 +88,11 @@ class FilesystemSandbox:
         while parts and parts[0] in (".", "./"):
             parts.pop(0)
         # If parts start with 'output' and base_dir is already inside output
-        if parts and parts[0] == "output" and "output" in [b.name for b in [base_dir] + list(base_dir.parents)]:
-            parts.pop(0)
-        elif parts and parts[0] == base_dir.name:
+        child_of_output = (
+            parts and parts[0] == "output"
+            and "output" in [b.name for b in [base_dir] + list(base_dir.parents)]
+        )
+        if child_of_output or (parts and parts[0] == base_dir.name):
             parts.pop(0)
         
         return (base_dir / Path(*parts) if parts else base_dir).resolve()
@@ -98,11 +100,11 @@ class FilesystemSandbox:
     @classmethod
     def sanitize_and_validate_path(
         cls,
-        target_path: Union[str, Path],
-        allowed_roots: Optional[List[Path]] = None,
+        target_path: str | Path,
+        allowed_roots: list[Path] | None = None,
         create_parent: bool = True,
         is_delivery_target: bool = False,
-        tenant_id: Optional[str] = None
+        tenant_id: str | None = None
     ) -> Path:
         """
         Validates that a path stays strictly within approved storage roots,
@@ -161,13 +163,17 @@ class FilesystemSandbox:
             filename = path.name.lower()
             if (
                 filename.startswith((".staged_", ".dm-commit-"))
-                or filename.endswith((".backup", "_held_records.parquet", "_structural_rejections.jsonl", "_audit.json", "_audit_certificate.json"))
+                or filename.endswith((
+                    ".backup", "_held_records.parquet", "_structural_rejections.jsonl",
+                    "_audit.json", "_audit_certificate.json",
+                ))
                 or "_lineage_" in filename
                 or filename.startswith("dm_run_")
                 or filename.startswith("dm_stream_")
             ):
                 raise PathSecurityViolation(
-                    f"Access denied: delivery target '{path.name}' conflicts with reserved engine artifact naming pattern"
+                    f"Access denied: delivery target '{path.name}' conflicts with "
+                    "reserved engine artifact naming pattern"
                 )
 
             for op_root in cls.get_reserved_operational_roots():
@@ -180,12 +186,13 @@ class FilesystemSandbox:
             # Cross-tenant storage boundary check:
             # Deliveries targeted under the tenants/ tree must belong to the authenticated tenant
             tenants_root = (settings.output_dir / "tenants").resolve()
-            if path.is_relative_to(tenants_root):
-                if not (path == tenant_delivery_dir or path.is_relative_to(tenant_delivery_dir)):
-                    raise PathSecurityViolation(
-                        f"Cross-tenant storage boundary violation: tenant '{effective_tenant}' "
-                        f"is not permitted to deliver data into '{path}'"
-                    )
+            if path.is_relative_to(tenants_root) and not (
+                path == tenant_delivery_dir or path.is_relative_to(tenant_delivery_dir)
+            ):
+                raise PathSecurityViolation(
+                    f"Cross-tenant storage boundary violation: tenant '{effective_tenant}' "
+                    f"is not permitted to deliver data into '{path}'"
+                )
 
             # In production, reject temporary-directory delivery targets
             if settings.is_production_mode:

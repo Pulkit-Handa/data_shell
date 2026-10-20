@@ -1,0 +1,37 @@
+# Contributor gate for Data Shell.
+#
+# Install once, then every commit is checked locally:
+#
+#     pip install -e ".[dev]"
+#     pre-commit install          # run on every commit
+#     pre-commit run --all-files  # one-off full-repo check (runs in ~1 min)
+#
+# The same ruff/mypy gates run as blocking CI jobs (see
+# .github/workflows/ci.yml), so a push that skips local hooks is still caught.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        files: ^.*\.(py|md|toml|yaml|yml|json)$
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.12.7
+    hooks:
+      # Auto-fix import order, unused imports and py3.11+ idioms as possible.
+      - id: ruff
+        args: [--fix]
+
+  - repo: local
+    hooks:
+      # mypy is not on the pre-commit marketplace as a reliably pinned repo
+      # hook (it needs the full locked environment for accurate results), so it
+      # runs via a local hook against the local venv. This uses the same
+      # configuration in pyproject.toml that CI uses.
+      - id: mypy
+        name: mypy (strict, datashell/)
+        entry: python -m mypy datashell/
+        language: system
+        pass_filenames: false
+        files: ^datashell/.*\.py$

@@ -16,7 +16,7 @@ The single entry point used by the CLI and the HTTP API. Guarantees:
 from __future__ import annotations
 
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from datashell.core.ledger import BoundaryLedger
 from datashell.pipeline.artifacts import ArtifactGenerator
@@ -26,10 +26,9 @@ from datashell.settlement.certificate import (
     verify_settlement_receipt,
 )
 from datashell.settlement.engine import (
-    SettlementEngineError,
     calculate_settlement,
 )
-from datashell.settlement.ledger import SettlementLedger, SettlementLedgerError
+from datashell.settlement.ledger import SettlementLedger
 from datashell.settlement.models import (
     CommercialContract,
     Dispute,
@@ -37,8 +36,7 @@ from datashell.settlement.models import (
     DisputeStatus,
     SettlementStatus,
 )
-from datashell.settlement.registry import CommercialContractRegistry
-from datashell.settlement.registry import CommercialContractRegistryError
+from datashell.settlement.registry import CommercialContractRegistry, CommercialContractRegistryError
 
 
 class SettlementServiceError(RuntimeError):
@@ -46,9 +44,9 @@ class SettlementServiceError(RuntimeError):
 
 
 class SettlementService:
-    def __init__(self, *, ledger: Optional[SettlementLedger] = None,
-                 boundary_ledger: Optional[BoundaryLedger] = None,
-                 contract_registry: Optional[CommercialContractRegistry] = None):
+    def __init__(self, *, ledger: SettlementLedger | None = None,
+                 boundary_ledger: BoundaryLedger | None = None,
+                 contract_registry: CommercialContractRegistry | None = None):
         self.ledger = ledger or SettlementLedger()
         self.boundary = boundary_ledger or BoundaryLedger()
         self.registry = contract_registry or CommercialContractRegistry(ledger=self.ledger)
@@ -56,11 +54,11 @@ class SettlementService:
     # ------------------------------------------------------------- contracts
 
     def register_contract(self, contract: CommercialContract, *, tenant_id: str,
-                          created_by: str) -> Dict[str, Any]:
+                          created_by: str) -> dict[str, Any]:
         return self.registry.register(contract, tenant_id=tenant_id, created_by=created_by)
 
     def get_contract(self, contract_id: str, tenant_id: str,
-                     version: Optional[int] = None) -> Optional[CommercialContract]:
+                     version: int | None = None) -> CommercialContract | None:
         return self.registry.resolve_version(contract_id, tenant_id, version)
 
     # ------------------------------------------------------------- calculation
@@ -71,11 +69,11 @@ class SettlementService:
         tenant_id: str,
         run_id: str,
         contract_id: str,
-        contract_version: Optional[int] = None,
+        contract_version: int | None = None,
         actor: str,
-        idempotency_key: Optional[str] = None,
-        unique_entities_delivered: Optional[int] = None,
-    ) -> Tuple[Dict[str, Any], bool]:
+        idempotency_key: str | None = None,
+        unique_entities_delivered: int | None = None,
+    ) -> tuple[dict[str, Any], bool]:
         """Calculate (or replay) the settlement for a completed run.
 
         Returns ``(statement_dict, created)``. Replays of the same idempotency
@@ -113,7 +111,7 @@ class SettlementService:
         if not cert_path.is_file():
             raise SettlementServiceError("audit certificate file is missing; refusing to calculate")
         import json
-        with open(cert_path, "r", encoding="utf-8") as handle:
+        with open(cert_path, encoding="utf-8") as handle:
             cert_data = json.load(handle)
         if cert_data.get("tenant_id", tenant_id) != tenant_id:
             raise SettlementServiceError("certificate tenant mismatch; refusing to calculate")
@@ -149,23 +147,27 @@ class SettlementService:
         except Exception as exc:
             raise SettlementServiceError(f"settlement persistence failed: {exc}") from exc
 
-        return self.ledger.get_settlement(statement.settlement_id, tenant_id), created
+        stored = self.ledger.get_settlement(statement.settlement_id, tenant_id)
+        if stored is None:
+            raise SettlementServiceError(
+                f"settlement '{statement.settlement_id}' vanished after persistence")
+        return stored, created
 
     # -------------------------------------------------------------- inspection
 
-    def get_settlement(self, settlement_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
+    def get_settlement(self, settlement_id: str, tenant_id: str) -> dict[str, Any] | None:
         return self.ledger.get_settlement(settlement_id, tenant_id)
 
-    def list_settlements(self, tenant_id: str, status: Optional[str] = None,
-                         contract_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_settlements(self, tenant_id: str, status: str | None = None,
+                         contract_id: str | None = None) -> list[dict[str, Any]]:
         return self.ledger.list_settlements(tenant_id, status=status, contract_id=contract_id)
 
-    def explain(self, settlement_id: str, tenant_id: str) -> Dict[str, Any]:
+    def explain(self, settlement_id: str, tenant_id: str) -> dict[str, Any]:
         """Full calculation explanation with supporting evidence references."""
         row = self.ledger.get_settlement(settlement_id, tenant_id)
         if row is None:
             raise SettlementServiceError(f"settlement '{settlement_id}' not found for tenant '{tenant_id}'")
-        lines: List[str] = []
+        lines: list[str] = []
         calc = row["calculation"]
         from datashell.settlement.money import format_minor_units
         lines.append(f"Settlement {row['settlement_id']} — calculation explanation")
@@ -205,7 +207,7 @@ class SettlementService:
 
     # ------------------------------------------------------- receipt + verify
 
-    def issue_receipt(self, settlement_id: str, tenant_id: str) -> Dict[str, Any]:
+    def issue_receipt(self, settlement_id: str, tenant_id: str) -> dict[str, Any]:
         """Build the signed settlement receipt for a stored statement."""
         row = self.ledger.get_settlement(settlement_id, tenant_id)
         if row is None:
@@ -214,14 +216,13 @@ class SettlementService:
         if not run or not run.get("audit_path"):
             raise SettlementServiceError("run evidence missing; cannot issue receipt")
         import json
-        from pathlib import Path
-        with open(run["audit_path"], "r", encoding="utf-8") as handle:
+        with open(run["audit_path"], encoding="utf-8") as handle:
             cert_data = json.load(handle)
         from datashell.settlement.models import SettlementStatement
         statement = SettlementStatement(**{**row, "calculation": row["calculation"]})
         return build_settlement_receipt(statement, cert_data)
 
-    def verify_settlement(self, settlement_id: str, tenant_id: str) -> Dict[str, Any]:
+    def verify_settlement(self, settlement_id: str, tenant_id: str) -> dict[str, Any]:
         """Verify a stored settlement: re-check receipt signature + delivery certificate."""
         row = self.ledger.get_settlement(settlement_id, tenant_id)
         if row is None:
@@ -230,8 +231,7 @@ class SettlementService:
         if not run or not run.get("audit_path"):
             raise SettlementServiceError("run evidence missing; cannot verify")
         import json
-        from pathlib import Path
-        with open(run["audit_path"], "r", encoding="utf-8") as handle:
+        with open(run["audit_path"], encoding="utf-8") as handle:
             cert_data = json.load(handle)
         from datashell.settlement.models import SettlementStatement
         statement = SettlementStatement(**{**row, "calculation": row["calculation"]})
@@ -242,7 +242,7 @@ class SettlementService:
     # ---------------------------------------------------------------- disputes
 
     def open_dispute(self, *, settlement_id: str, tenant_id: str, disputing_party: str,
-                     reason: str, evidence_references: Optional[List[str]] = None,
+                     reason: str, evidence_references: list[str] | None = None,
                      supporting_explanation: str = "", actor: str = "") -> Dispute:
         row = self.ledger.get_settlement(settlement_id, tenant_id)
         if row is None:
@@ -270,7 +270,7 @@ class SettlementService:
 
     def resolve_dispute(self, *, dispute_id: str, tenant_id: str, resolution: DisputeResolution,
                         resolution_actor: str, resolution_reason: str,
-                        adjustment_settlement_id: Optional[str] = None) -> Dict[str, Any]:
+                        adjustment_settlement_id: str | None = None) -> dict[str, Any]:
         dispute = self.ledger.get_dispute(dispute_id, tenant_id)
         if dispute is None:
             raise SettlementServiceError(f"dispute '{dispute_id}' not found for tenant '{tenant_id}'")
@@ -302,7 +302,7 @@ class SettlementService:
                 "settlement_id": settlement_id}
 
     def supersede_settlement(self, *, settlement_id: str, tenant_id: str,
-                             replacement: Dict[str, Any], actor: str) -> Dict[str, Any]:
+                             replacement: dict[str, Any], actor: str) -> dict[str, Any]:
         """Mark a statement superseded by a correction; history is preserved."""
         row = self.ledger.get_settlement(settlement_id, tenant_id)
         if row is None:
@@ -313,4 +313,8 @@ class SettlementService:
             event_type="SUPERSEDED",
             payload={"replacement_settlement_id": replacement.get("settlement_id")},
         )
-        return self.ledger.get_settlement(settlement_id, tenant_id)
+        final_state = self.ledger.get_settlement(settlement_id, tenant_id)
+        if final_state is None:
+            raise SettlementServiceError(
+                f"settlement '{settlement_id}' vanished during transition")
+        return final_state

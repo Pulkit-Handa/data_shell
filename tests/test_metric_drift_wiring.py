@@ -12,8 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from datashell.core.config import settings
-from datashell.core.crypto import CryptoEngine
 from datashell.contract.models import (
     DataContract,
     DeliverySpec,
@@ -25,6 +23,8 @@ from datashell.contract.models import (
     SchemaColumn,
     SourceDefinition,
 )
+from datashell.core.config import settings
+from datashell.core.crypto import CryptoEngine
 from datashell.engines.delivery import TerminalStatus
 from datashell.pipeline.runner import DataShellPipeline
 

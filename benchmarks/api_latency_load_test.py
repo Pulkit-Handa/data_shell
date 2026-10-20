@@ -1,20 +1,28 @@
-"""Concurrent API load testing & latency percentile measurement (P50, P95, P99) with full authentication & delivery verification."""
+"""Concurrent API load testing & latency percentile measurement (P50, P95, P99),
+with full authentication & delivery verification."""
 
-import time
-import json
-import statistics
 import concurrent.futures
+import statistics
+import time
 from pathlib import Path
-from fastapi.testclient import TestClient
-import polars as pl
 
-from datashell.server.app import app
-from datashell.core.config import settings
+import polars as pl
+from fastapi.testclient import TestClient
+
 from datashell.contract.models import (
-    DataContract, SourceDefinition, SchemaColumn,
-    QualityRule, BatchRule, RowRuleCheckType, BatchRuleCheckType, DeliverySpec, DeliveryTarget
+    BatchRule,
+    BatchRuleCheckType,
+    DataContract,
+    DeliverySpec,
+    DeliveryTarget,
+    QualityRule,
+    RowRuleCheckType,
+    SchemaColumn,
+    SourceDefinition,
 )
 from datashell.contract.registry import ContractRegistry
+from datashell.core.config import settings
+from datashell.server.app import app
 
 
 def run_concurrent_load_test(total_requests: int = 50, concurrency: int = 8):
@@ -37,7 +45,8 @@ def run_concurrent_load_test(total_requests: int = 50, concurrency: int = 8):
             "quality": {
                 "behavior": "DROP_ROW",
                 "rules": [
-                    QualityRule(rule_id="positive-amount", check=RowRuleCheckType.GREATER_THAN, column="amount", value=0.0)
+                    QualityRule(rule_id="positive-amount",
+                                check=RowRuleCheckType.GREATER_THAN, column="amount", value=0.0)
                 ],
                 "batch_rules": [
                     BatchRule(rule_id="min-records", check=BatchRuleCheckType.MIN_ROW_COUNT, value=100)
@@ -143,7 +152,8 @@ def run_concurrent_load_test(total_requests: int = 50, concurrency: int = 8):
     print(f"Configured Limit:        {configured_limit}")
     print(f"Effective Concurrency:   {effective_concurrency}")
     print(f"HTTP 200 Responses:      {http_200_count}/{total_requests} ({(http_200_count/total_requests)*100:.1f}%)")
-    print(f"Business LOADED Verified:{business_success_count}/{total_requests} ({(business_success_count/total_requests)*100:.1f}%)")
+    print(f"Business LOADED Verified:{business_success_count}/{total_requests} "
+          f"({(business_success_count/total_requests)*100:.1f}%)")
     print(f"Capacity 503 Retries:    {capacity_rejection_count} (total attempts {total_attempts})")
     print(f"Total Wall Time:         {wall_duration:.2f}s")
     print(f"Throughput (RPS):        {rps:.1f} req/sec")

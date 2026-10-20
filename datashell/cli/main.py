@@ -18,20 +18,18 @@ import json
 import sys
 import tempfile
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, cast
 
 from pydantic import ValidationError
 
 from datashell import __version__
+from datashell.contract.models import DataContract
 from datashell.core.config import settings
 from datashell.core.ledger import BoundaryLedger
 from datashell.core.sandbox import FilesystemSandbox
-from datashell.contract.models import DataContract
 from datashell.pipeline.artifacts import ArtifactGenerator
-from datashell.pipeline.runner import DataShellPipeline
-
+from datashell.pipeline.runner import DataShellPipeline, PipelineResult
 
 # --------------------------------------------------------------------------- args
 
@@ -79,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     ledger_parser = subparsers.add_parser("ledger", help="Query the durable boundary ledger")
     ledger_sub = ledger_parser.add_subparsers(dest="ledger_command", required=True)
 
-    def _add_ledger_scope(p, *, with_contract: bool = True) -> None:
+    def _add_ledger_scope(p: argparse.ArgumentParser, *, with_contract: bool = True) -> None:
         p.add_argument("--tenant", default="default-tenant", help="Tenant identity to query")
         if with_contract:
             p.add_argument("--contract", "-c", default=None, help="Filter by contract name")
@@ -228,7 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return build_parser().parse_args(argv)
 
 
@@ -236,7 +234,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 
 def _load_contract(path: str) -> DataContract:
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         return DataContract(**json.load(f))
 
 
@@ -244,7 +242,7 @@ def _print_json(payload: Any) -> None:
     print(json.dumps(payload, indent=2, default=str))
 
 
-def _print_table(headers: List[str], rows: List[List[Any]]) -> None:
+def _print_table(headers: list[str], rows: list[list[Any]]) -> None:
     if not rows:
         print("(no records)")
         return
@@ -262,7 +260,7 @@ def _print_table(headers: List[str], rows: List[List[Any]]) -> None:
 # ----------------------------------------------------------------- commands: run
 
 
-def _print_rejection_details(result) -> None:
+def _print_rejection_details(result: PipelineResult) -> None:
     """Explain exactly why a run was rejected: rule, count, expectation.
 
     Printed to stderr so scripts that parse stdout continue to work, while a
@@ -309,7 +307,7 @@ def _print_rejection_details(result) -> None:
 
 
 def command_run(args: argparse.Namespace) -> int:
-    with open(args.contract, "r", encoding="utf-8") as f:
+    with open(args.contract, encoding="utf-8") as f:
         data = json.load(f)
     contract = DataContract(**data)
     pipeline = DataShellPipeline(
@@ -422,7 +420,7 @@ def command_validate_contract(args: argparse.Namespace) -> int:
         print(f"✗ Contract not found: {contract_path}", file=sys.stderr)
         return 1
     try:
-        with open(contract_path, "r", encoding="utf-8") as f:
+        with open(contract_path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError) as exc:
         print(f"✗ Contract file could not be parsed as JSON: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -443,8 +441,8 @@ def command_validate_contract(args: argparse.Namespace) -> int:
             print(f"  - {location}: {message}", file=sys.stderr)
         return 1
 
-    issues: List[str] = []
-    warnings: List[str] = []
+    issues: list[str] = []
+    warnings: list[str] = []
 
     sources = contract.spec.sources
     if not sources or not sources[0].schema_:
@@ -468,7 +466,8 @@ def command_validate_contract(args: argparse.Namespace) -> int:
         for column in referenced_columns:
             if column not in declared_columns:
                 issues.append(
-                    f"Batch rule '{batch_rule.rule_id}' references column '{column}' which is not in the declared schema"
+                    f"Batch rule '{batch_rule.rule_id}' references column '{column}' "
+                    "which is not in the declared schema"
                 )
 
     for target in contract.spec.delivery.targets:
@@ -516,7 +515,7 @@ def command_verify(args: argparse.Namespace) -> int:
         print(f"✗ Certificate not found: {cert_path}", file=sys.stderr)
         return 1
     try:
-        with open(cert_path, "r", encoding="utf-8") as f:
+        with open(cert_path, encoding="utf-8") as f:
             cert_data = json.load(f)
     except (OSError, ValueError) as exc:
         print(f"✗ Certificate could not be read: {type(exc).__name__}", file=sys.stderr)
@@ -545,7 +544,7 @@ def command_verify(args: argparse.Namespace) -> int:
     return 0 if report.get("status") == "AUTHENTIC_AND_UNMODIFIED" else 3
 
 
-def _committed_generation_check(cert_data: Dict[str, Any]) -> Dict[str, Any]:
+def _committed_generation_check(cert_data: dict[str, Any]) -> dict[str, Any]:
     """Report whether the certificate is the currently committed generation.
 
     Delegates to the shared reader contract in ``datashell.core.commit`` so the
@@ -590,7 +589,8 @@ def command_ledger(args: argparse.Namespace) -> int:
         return 0
 
     if args.ledger_command == "runs":
-        runs = ledger.list_runs(tenant, contract_name=contract, status=args.status, limit=args.limit, offset=args.offset)
+        runs = ledger.list_runs(tenant, contract_name=contract, status=args.status,
+                                limit=args.limit, offset=args.offset)
         total = ledger.count_runs(tenant, contract_name=contract, status=args.status)
         if _ledger_json_or({"tenant_id": tenant, "total": total, "runs": runs}, args):
             return 0
@@ -693,7 +693,7 @@ def command_ledger(args: argparse.Namespace) -> int:
 
 # ----------------------------------------------------------------- commands: demo
 
-_DEMO_CONTRACT: Dict[str, Any] = {
+_DEMO_CONTRACT: dict[str, Any] = {
     "apiVersion": "daas/v1",
     "kind": "DataProduct",
     "metadata": {
@@ -735,8 +735,8 @@ _DEMO_CONTRACT: Dict[str, Any] = {
 }
 
 
-def _demo_records() -> List[Dict[str, Any]]:
-    records: List[Dict[str, Any]] = []
+def _demo_records() -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
     for i in range(1, 901):
         records.append({
             "settlement_id": f"SETTLE-{1000 + i}",
@@ -745,7 +745,7 @@ def _demo_records() -> List[Dict[str, Any]]:
         })
     for i in range(1, 21):
         records.append({"settlement_id": f"SETTLE-BAD-AMT-{i}", "amount": "NOT_A_FLOAT", "currency": "USD"})
-    for i in range(21, 41):
+    for _ in range(21, 41):
         records.append({"settlement_id": None, "amount": 250.0, "currency": "GBP"})
     for i in range(1, 36):
         records.append({"settlement_id": f"SETTLE-NEG-{i}", "amount": -50.0, "currency": "USD"})
@@ -819,8 +819,8 @@ def command_demo(args: argparse.Namespace) -> int:
 
     # Tamper demonstration: flip one byte in the delivered artifact, prove the
     # certificate detects it, then restore the authentic bytes and prove recovery.
-    tamper_status: Optional[str] = None
-    restored_status: Optional[str] = None
+    tamper_status: str | None = None
+    restored_status: str | None = None
     if result.outcome.rows_delivered > 0 and target.is_file():
         original = target.read_bytes()
         tampered = bytearray(original)
@@ -859,8 +859,8 @@ def command_demo(args: argparse.Namespace) -> int:
     return 0 if result.status.value != "FAILED" else 1
 
 
-def _demo_contract_payload(workspace: Path, target: Path, quarantine: Path) -> Dict[str, Any]:
-    payload = json.loads(json.dumps(_DEMO_CONTRACT))
+def _demo_contract_payload(workspace: Path, target: Path, quarantine: Path) -> dict[str, Any]:
+    payload = cast(dict[str, Any], json.loads(json.dumps(_DEMO_CONTRACT)))
     payload["spec"]["sources"][0]["path"] = str(workspace / "incoming.jsonl")
     payload["spec"]["delivery"] = {
         "targets": [{"type": "PARQUET", "connectionRef": "local", "path": str(target), "mode": "overwrite"}],
@@ -869,18 +869,18 @@ def _demo_contract_payload(workspace: Path, target: Path, quarantine: Path) -> D
     return payload
 
 
-def result_verify_status(audit_path: Optional[str]) -> str:
+def result_verify_status(audit_path: str | None) -> str:
     if not audit_path or not Path(audit_path).is_file():
         return "NO_CERTIFICATE"
-    with open(audit_path, "r", encoding="utf-8") as f:
-        cert = json.load(f)
-    return ArtifactGenerator.verify_certificate_and_artifacts(cert).get("status", "UNKNOWN")
+    with open(audit_path, encoding="utf-8") as f:
+        cert = cast(dict[str, Any], json.load(f))
+    return str(ArtifactGenerator.verify_certificate_and_artifacts(cert).get("status", "UNKNOWN"))
 
 
 # --------------------------------------------------------------------------- main
 
 
-def main(argv: Optional[List[str]] = None) -> None:
+def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "validate-contract":
@@ -900,8 +900,10 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         if args.command == "contract":
             from datashell.cli.settlement_commands import (
-                command_contract_create, command_contract_show,
-                command_contract_validate, command_contract_versions,
+                command_contract_create,
+                command_contract_show,
+                command_contract_validate,
+                command_contract_versions,
             )
             handlers = {
                 "validate": command_contract_validate,
@@ -913,11 +915,16 @@ def main(argv: Optional[List[str]] = None) -> None:
 
         if args.command == "settlement":
             from datashell.cli.settlement_commands import (
-                command_settlement_calculate, command_settlement_explain,
-                command_settlement_list, command_settlement_show,
-                command_settlement_verify, command_invoice_export,
-                command_invoice_preview, command_billing_preview,
-                command_dispute_open, command_dispute_resolve,
+                command_billing_preview,
+                command_dispute_open,
+                command_dispute_resolve,
+                command_invoice_export,
+                command_invoice_preview,
+                command_settlement_calculate,
+                command_settlement_explain,
+                command_settlement_list,
+                command_settlement_show,
+                command_settlement_verify,
             )
             handlers = {
                 "calculate": command_settlement_calculate,

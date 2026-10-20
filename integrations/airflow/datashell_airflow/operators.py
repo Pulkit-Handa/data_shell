@@ -20,7 +20,8 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from airflow.exceptions import AirflowException
 from airflow.models import BaseOperator
@@ -40,8 +41,8 @@ class DataShellEnforceOperator(BaseOperator):
         contract_name: str,
         file_path: str,
         datashell_conn_id: str = DEFAULT_CONN_ID,
-        base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
         streaming: bool = False,
         verify_tls: bool = True,
         timeout: float = 300.0,
@@ -71,7 +72,7 @@ class DataShellEnforceOperator(BaseOperator):
             )
         return DataShellHook(self.datashell_conn_id, timeout=self.timeout).get_conn()
 
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, context: dict[str, Any]) -> dict[str, Any]:
         self.log.info(
             "Enforcing contract %s against %s", self.contract_name, self.file_path
         )
@@ -97,11 +98,11 @@ class DataShellLocalEnforceOperator(BaseOperator):
         *,
         contract: str,
         source: str,
-        target: Optional[str] = None,
-        audit: Optional[str] = None,
+        target: str | None = None,
+        audit: str | None = None,
         tenant: str = "default-tenant",
-        streaming: Optional[bool] = None,
-        chunk_size: Optional[int] = None,
+        streaming: bool | None = None,
+        chunk_size: int | None = None,
         datashell_bin: str = "datashell",
         fail_on_rejection: bool = False,
         **kwargs: Any,
@@ -117,7 +118,7 @@ class DataShellLocalEnforceOperator(BaseOperator):
         self.datashell_bin = datashell_bin
         self.fail_on_rejection = fail_on_rejection
 
-    def _command(self) -> List[str]:
+    def _command(self) -> list[str]:
         command = [
             self.datashell_bin,
             "run",
@@ -141,7 +142,7 @@ class DataShellLocalEnforceOperator(BaseOperator):
             command += ["--chunk-size", str(self.chunk_size)]
         return command
 
-    def execute(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(self, context: dict[str, Any]) -> dict[str, Any]:
         binary = shutil.which(self.datashell_bin)
         if binary is None:
             raise AirflowException(

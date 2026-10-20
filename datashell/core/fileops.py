@@ -13,14 +13,13 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
-from typing import Optional
 
 
 class InsufficientStorageError(Exception):
     """Raised when the storage volume cannot hold a run's transient footprint."""
 
 
-def available_bytes(path: Path) -> Optional[int]:
+def available_bytes(path: Path) -> int | None:
     """Return free bytes on the filesystem hosting ``path``, or None if unknown."""
     try:
         stat = os.statvfs(Path(path))

@@ -21,13 +21,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from fractions import Fraction
-from typing import Dict
-
 
 # Minor-unit exponent per currency code. Currencies not listed default to 2,
 # which is correct for USD, EUR, GBP and most others. Extend when a contract
 # names a currency with a different precision.
-CURRENCY_PRECISION: Dict[str, int] = {
+CURRENCY_PRECISION: dict[str, int] = {
     "USD": 2, "EUR": 2, "GBP": 2, "CAD": 2, "AUD": 2, "CHF": 2, "SEK": 2,
     "NOK": 2, "DKK": 2, "NZD": 2, "SGD": 2, "HKD": 2, "MXN": 2,
     "JPY": 0, "KRW": 0, "VND": 0, "ISK": 0, "CLP": 0, "XAF": 0, "XOF": 0,
@@ -103,7 +101,9 @@ def parse_unit_price_minor(value: object, currency: str) -> int:
     elif isinstance(value, float):
         # Floats are rejected outright for prices: a caller passing 0.05 as a
         # float has already lost exactness before we see it.
-        raise MoneyValidationError("unit price must be supplied as a string, Decimal, or integer minor units — never a binary float")
+        raise MoneyValidationError(
+            "unit price must be supplied as a string, Decimal, or integer minor "
+            "units — never a binary float")
     else:
         raise MoneyValidationError(f"unsupported unit price type: {type(value).__name__}")
     if minor < 0:
@@ -153,7 +153,7 @@ class Money:
             raise MoneyValidationError("amount exceeds the maximum supported monetary value")
 
     @classmethod
-    def from_major(cls, amount: object, currency: str) -> "Money":
+    def from_major(cls, amount: object, currency: str) -> Money:
         if isinstance(amount, (int,)) and not isinstance(amount, bool):
             minor = decimal_to_minor_units(Decimal(amount), currency)
         elif isinstance(amount, (str, Decimal)):
@@ -170,12 +170,12 @@ class Money:
     def as_major_str(self) -> str:
         return format_minor_units(self.minor, self.currency)
 
-    def __add__(self, other: "Money") -> "Money":
+    def __add__(self, other: Money) -> Money:
         if other.currency != self.currency:
             raise MoneyValidationError("cannot add amounts in different currencies")
         return Money(self.minor + other.minor, self.currency)
 
-    def __sub__(self, other: "Money") -> "Money":
+    def __sub__(self, other: Money) -> Money:
         if other.currency != self.currency:
             raise MoneyValidationError("cannot subtract amounts in different currencies")
         return Money(self.minor - other.minor, self.currency)

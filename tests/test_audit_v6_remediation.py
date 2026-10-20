@@ -74,6 +74,7 @@ def test_transactional_publish_rolls_back_on_mid_commit_failure(tmp_path, monkey
 
 def test_contract_registry_uses_encoded_tenant_namespace(tmp_path):
     import json
+
     from datashell.contract.models import DataContract
     from datashell.contract.registry import ContractRegistry
 
@@ -91,6 +92,7 @@ def test_contract_registry_uses_encoded_tenant_namespace(tmp_path):
 
 def test_unmarked_global_contract_is_not_visible_to_tenants(tmp_path):
     import json
+
     from datashell.contract.models import DataContract
     from datashell.contract.registry import ContractRegistry
 
@@ -133,6 +135,7 @@ def test_production_cors_accepts_explicit_allowlist(monkeypatch):
 
 def test_recovery_rejects_corrupt_journal_paths_outside_transaction_directory(tmp_path):
     import json
+
     from datashell.core.commit import _transaction_paths
 
     target = tmp_path / "active.parquet"
@@ -193,6 +196,7 @@ def test_transactional_publish_can_commit_delivery_and_certificate_across_subdir
 
 def test_cross_directory_recovery_rejects_modified_journal_mac(tmp_path):
     import json
+
     from datashell.core.commit import _journal_integrity_tag, _transaction_paths
 
     root = tmp_path / "output"
@@ -277,6 +281,7 @@ def test_cross_directory_transaction_rolls_back_all_artifacts_on_partial_publish
 
 def test_startup_recovery_rolls_back_interrupted_cross_directory_transaction(tmp_path):
     import json
+
     from datashell.core.commit import _journal_integrity_tag, _transaction_paths, recover_pending_publications
 
     root = tmp_path / "output"
@@ -297,8 +302,14 @@ def test_startup_recovery_rolls_back_interrupted_cross_directory_transaction(tmp
         "run_id": "simulated-crash",
         "state": "prepared",
         "entries": [
-            {"staged": str(staged_certificate), "final": str(final_certificate), "backup": str(audit_dir / ".certificate.backup"), "had_original": True},
-            {"staged": str(staged_target), "final": str(target), "backup": str(tenant_dir / ".active.backup"), "had_original": False},
+            {
+                "staged": str(staged_certificate), "final": str(final_certificate),
+                "backup": str(audit_dir / ".certificate.backup"), "had_original": True,
+            },
+            {
+                "staged": str(staged_target), "final": str(target),
+                "backup": str(tenant_dir / ".active.backup"), "had_original": False,
+            },
         ],
     }
     journal["journal_mac"] = _journal_integrity_tag(journal)

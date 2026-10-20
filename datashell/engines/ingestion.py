@@ -5,32 +5,34 @@ never enter the pipeline at all. Downstream stages never need to defend against 
 """
 
 from __future__ import annotations
+
+import csv
+import json
 import math
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-import json
-import csv
+from typing import Any
+
+import polars as pl
 import pyarrow as pa
 import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
-import polars as pl
 
+from datashell.contract.compiler import parse_polars_type
 from datashell.contract.models import (
     DataContract,
-    SchemaColumn,
     ExtraColumnsPolicy,
     SchemaCompatibilityPolicy,
     SourceParserOptions,
 )
-from datashell.contract.compiler import parse_polars_type
 
 
 @dataclass
 class StructuralRejection:
     row_index: int
-    raw_record: Dict[str, Any]
+    raw_record: dict[str, Any]
     failed_column: str
     expected_type: str
     error_message: str
@@ -41,11 +43,18 @@ class IngestionResult:
     rows_read: int
     refused_count: int
     conforming_df: pl.DataFrame
-    rejections: List[StructuralRejection] = field(default_factory=list)
+    rejections: list[StructuralRejection] = field(default_factory=list)
+
+
+def _to_dataframe(value: pl.DataFrame | pl.Series) -> pl.DataFrame:
+    """Narrow ``pl.from_arrow``'s ``DataFrame | Series`` result to a DataFrame."""
+    if isinstance(value, pl.DataFrame):
+        return value
+    return value.to_frame()
 
 
 # Exact integer bounds
-INT_BOUNDS = {
+INT_BOUNDS: dict[pl.DataType, tuple[int, int]] = {
     pl.Int8(): (-128, 127),
     pl.Int16(): (-32768, 32767),
     pl.Int32(): (-2147483648, 2147483647),
@@ -86,7 +95,7 @@ class StructuralIngestionEngine:
             for col in self.declared_schema
         }
 
-    def ingest_from_file(self, file_path: Union[str, Path]) -> IngestionResult:
+    def ingest_from_file(self, file_path: str | Path) -> IngestionResult:
         """Ingest CSV, JSONL, or Parquet file from path."""
         path = Path(file_path)
         if not path.exists():
@@ -102,7 +111,7 @@ class StructuralIngestionEngine:
         else:
             raise ValueError(f"Unsupported file format: {suffix}")
 
-    def iter_batches(self, file_path: Union[str, Path], batch_size: int = 100_000):
+    def iter_batches(self, file_path: str | Path, batch_size: int = 100_000) -> Iterator[pl.DataFrame]:
         """Yield source data as Polars DataFrames of roughly ``batch_size`` rows.
 
         Streams Parquet, CSV, and JSONL/NDJSON inputs without materializing the
@@ -125,19 +134,19 @@ class StructuralIngestionEngine:
         else:
             raise ValueError(f"Unsupported file format: {suffix}")
 
-    def _iter_parquet_batches(self, path: Path, batch_size: int):
+    def _iter_parquet_batches(self, path: Path, batch_size: int) -> Iterator[pl.DataFrame]:
         parquet_file = pq.ParquetFile(path)
         for batch in parquet_file.iter_batches(batch_size=batch_size):
-            yield pl.from_arrow(batch)
+            yield _to_dataframe(pl.from_arrow(batch))
 
-    def _iter_csv_batches(self, path: Path, batch_size: int):
+    def _iter_csv_batches(self, path: Path, batch_size: int) -> Iterator[pl.DataFrame]:
         # Force every field to Utf8 so strict Tier-1 casting (and its per-row
         # rejection diagnostics) behaves identically to the non-streaming CSV
         # reader instead of letting pyarrow infer a type and then hard-fail on a
         # single malformed value partway through the file.
         p = self.parser
         if p.has_header:
-            with open(path, "r", encoding=p.encoding, newline="") as handle:
+            with open(path, encoding=p.encoding, newline="") as handle:
                 header = next(csv.reader(handle, delimiter=p.delimiter, quotechar=p.quote_char), [])
             if not header:
                 raise ValueError(f"CSV source '{path}' has no header row")
@@ -154,7 +163,7 @@ class StructuralIngestionEngine:
         # the unit the pipeline validates, so bounding the block bounds memory
         # regardless of file size.
         block_size = min(max(batch_size * 32, 1 << 20), 4 << 20)
-        read_kwargs: Dict[str, Any] = {"block_size": block_size, "encoding": p.encoding}
+        read_kwargs: dict[str, Any] = {"block_size": block_size, "encoding": p.encoding}
         if not p.has_header:
             read_kwargs["column_names"] = column_names
         # NOTE: configured null tokens are applied during strict Tier-1 casting in
@@ -170,14 +179,14 @@ class StructuralIngestionEngine:
             for block in reader:
                 offset = 0
                 while offset < block.num_rows:
-                    yield pl.from_arrow(block.slice(offset, batch_size))
+                    yield _to_dataframe(pl.from_arrow(block.slice(offset, batch_size)))
                     offset += batch_size
         finally:
             reader.close()
 
-    def _iter_jsonl_batches(self, path: Path, batch_size: int):
-        records: List[Dict[str, Any]] = []
-        with open(path, "r", encoding=self.parser.encoding) as handle:
+    def _iter_jsonl_batches(self, path: Path, batch_size: int) -> Iterator[pl.DataFrame]:
+        records: list[dict[str, Any]] = []
+        with open(path, encoding=self.parser.encoding) as handle:
             for line in handle:
                 stripped = line.strip()
                 if not stripped:
@@ -249,15 +258,15 @@ class StructuralIngestionEngine:
             rejections=[],
         )
 
-    def ingest_records(self, raw_records: List[Dict[str, Any]]) -> IngestionResult:
+    def ingest_records(self, raw_records: list[dict[str, Any]]) -> IngestionResult:
         """Ingest raw python dictionary records directly."""
         rows_read = len(raw_records)
-        conforming_rows: List[Dict[str, Any]] = []
-        rejections: List[StructuralRejection] = []
+        conforming_rows: list[dict[str, Any]] = []
+        rejections: list[StructuralRejection] = []
 
         for idx, row in enumerate(raw_records):
             is_valid = True
-            cleaned_row: Dict[str, Any] = {}
+            cleaned_row: dict[str, Any] = {}
 
             # Extra columns check
             if self.extra_policy == ExtraColumnsPolicy.REJECT:
@@ -389,7 +398,7 @@ class StructuralIngestionEngine:
                 raise ValueError("Boolean cannot be implicitly cast to Float")
             f_val = float(val)
             if math.isnan(f_val) or math.isinf(f_val):
-                raise ValueError(f"NaN/Infinity is not permitted for numeric float column")
+                raise ValueError("NaN/Infinity is not permitted for numeric float column")
             return f_val
 
         # Boolean
@@ -425,7 +434,7 @@ class StructuralIngestionEngine:
         """
         table = pq.read_table(path)
         rows_read = table.num_rows
-        df = pl.from_arrow(table)
+        df = _to_dataframe(pl.from_arrow(table))
 
         # Check for extra unexpected columns
         extra_cols = set(df.columns) - self.declared_col_names
@@ -471,7 +480,8 @@ class StructuralIngestionEngine:
             cast_exprs = [pl.col(col.name).cast(self._polars_schema[col.name]) for col in self.declared_schema]
             if self.extra_policy == ExtraColumnsPolicy.ALLOW:
                 other_cols = [pl.col(c) for c in df.columns if c not in self.declared_col_names]
-                conforming_df = df.with_columns(cast_exprs).select([pl.col(col.name) for col in self.declared_schema] + other_cols)
+                conforming_df = df.with_columns(cast_exprs).select(
+                    [pl.col(col.name) for col in self.declared_schema] + other_cols)
             else:
                 conforming_df = df.select(cast_exprs)
 
@@ -486,8 +496,8 @@ class StructuralIngestionEngine:
             return self.ingest_records(table.to_pylist())
 
     def _ingest_jsonl(self, path: Path) -> IngestionResult:
-        records: List[Dict[str, Any]] = []
-        with open(path, "r", encoding=self.parser.encoding) as f:
+        records: list[dict[str, Any]] = []
+        with open(path, encoding=self.parser.encoding) as f:
             for line in f:
                 stripped = line.strip()
                 if stripped:
@@ -496,8 +506,8 @@ class StructuralIngestionEngine:
 
     def _ingest_csv(self, path: Path) -> IngestionResult:
         p = self.parser
-        records: List[Dict[str, Any]] = []
-        with open(path, "r", encoding=p.encoding, newline="") as f:
+        records: list[dict[str, Any]] = []
+        with open(path, encoding=p.encoding, newline="") as f:
             if p.has_header:
                 reader = csv.DictReader(f, delimiter=p.delimiter, quotechar=p.quote_char)
             else:

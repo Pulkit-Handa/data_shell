@@ -1,11 +1,12 @@
 """Enterprise Webhook & Event Dispatcher with HMAC Signature Non-Repudiation."""
 
 from __future__ import annotations
-import json
+
 import time
-from typing import Dict, Any, Optional
-import httpx
+from typing import Any
 from urllib.parse import urlsplit
+
+import httpx
 
 from datashell.core.crypto import CryptoEngine
 from datashell.core.telemetry import telemetry_logger
@@ -18,8 +19,8 @@ class WebhookDispatcher:
     def dispatch(
         url: str,
         event_type: str,
-        payload: Dict[str, Any],
-        secret_key: Optional[str] = None,
+        payload: dict[str, Any],
+        secret_key: str | None = None,
         timeout_seconds: float = 5.0
     ) -> bool:
         """

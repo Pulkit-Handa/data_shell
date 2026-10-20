@@ -24,7 +24,7 @@ settlement-critical field invalidates the signature.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 
 from datashell.core.config import settings
 from datashell.core.crypto import CryptoEngine
@@ -38,7 +38,7 @@ class SettlementCertificateError(RuntimeError):
     """Raised when a settlement receipt cannot be produced or parsed safely."""
 
 
-def certificate_digest(cert_data: Dict[str, Any]) -> str:
+def certificate_digest(cert_data: dict[str, Any]) -> str:
     """Digest over a delivery certificate's canonical JSON (signature excluded).
 
     Mirrors the signing convention: the ``digital_signature`` block is not
@@ -50,8 +50,8 @@ def certificate_digest(cert_data: Dict[str, Any]) -> str:
 
 def build_settlement_receipt(
     statement: SettlementStatement,
-    delivery_certificate: Dict[str, Any],
-) -> Dict[str, Any]:
+    delivery_certificate: dict[str, Any],
+) -> dict[str, Any]:
     """Produce the signed settlement receipt for a calculated statement.
 
     The receipt embeds the statement's signed payload and the delivery
@@ -117,11 +117,11 @@ def build_settlement_receipt(
 
 
 def verify_settlement_receipt(
-    receipt: Dict[str, Any],
+    receipt: dict[str, Any],
     *,
-    delivery_certificate: Optional[Dict[str, Any]] = None,
-    expected_statement: Optional[SettlementStatement] = None,
-) -> Dict[str, Any]:
+    delivery_certificate: dict[str, Any] | None = None,
+    expected_statement: SettlementStatement | None = None,
+) -> dict[str, Any]:
     """Verify a settlement receipt's signature and its bindings.
 
     Steps:
@@ -144,8 +144,8 @@ def verify_settlement_receipt(
     signature = sig_info.get("signature", "")
     payload = {k: v for k, v in receipt.items() if k != "digital_signature"}
 
-    verification_secret: Optional[str] = None
-    verification_public_key: Optional[str] = None
+    verification_secret: str | None = None
+    verification_public_key: str | None = None
     if algorithm == "HMAC-SHA256":
         verification_secret = CryptoEngine.resolve_verification_secret(
             key_id, getattr(settings, "trusted_hmac_keys", {}))
@@ -168,8 +168,12 @@ def verify_settlement_receipt(
         except (TypeError, ValueError):
             sig_valid = False
     else:
-        sig_valid = isinstance(signature, str) and CryptoEngine.verify_signature_ed25519(
-            payload, signature, verification_public_key)
+        # key_trusted checked above means a resolved verification key exists
+        if not isinstance(signature, str) or verification_public_key is None:
+            sig_valid = False
+        else:
+            sig_valid = CryptoEngine.verify_signature_ed25519(
+                payload, signature, verification_public_key)
     if not sig_valid:
         return _receipt_report(False, "TAMPERED_OR_INVALID_SIGNATURE",
                                "settlement receipt signature does not match its content",
@@ -227,7 +231,7 @@ def verify_settlement_receipt(
 
 def _receipt_report(sig_valid: bool, status_code: str, detail: str, *,
                     third_party: bool, artifacts_verified: bool,
-                    artifacts_status: str = "NOT_CHECKED") -> Dict[str, Any]:
+                    artifacts_status: str = "NOT_CHECKED") -> dict[str, Any]:
     overall = "AUTHENTIC_AND_UNMODIFIED" if sig_valid and artifacts_verified else status_code
     return {
         "signature_valid": sig_valid,
@@ -240,6 +244,6 @@ def _receipt_report(sig_valid: bool, status_code: str, detail: str, *,
     }
 
 
-def serialize_receipt(receipt: Dict[str, Any]) -> str:
+def serialize_receipt(receipt: dict[str, Any]) -> str:
     """Canonical JSON serialization for storage and transport."""
     return json.dumps(receipt, sort_keys=True, separators=(",", ":"), default=str)

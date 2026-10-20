@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from pathlib import Path
 
 import pytest
 
@@ -140,6 +139,7 @@ def test_body_limit_counts_chunked_body_without_content_length():
 
 def test_production_credentials_survive_cache_loss_and_revoke_durably(tmp_path, monkeypatch):
     import hashlib
+
     import datashell.core.security as security
 
     monkeypatch.setattr(security.settings, "environment", "production")

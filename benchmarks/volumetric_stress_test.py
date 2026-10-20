@@ -8,22 +8,30 @@ Evaluates:
 """
 
 from __future__ import annotations
+
 import os
 import sys
-import time
 import tempfile
 import threading
+import time
 from pathlib import Path
+
 import polars as pl
 import pyarrow.parquet as pq
 
 from datashell.contract.models import (
-    DataContract, SourceDefinition, SchemaColumn,
-    QualityRule, BatchRule, RowRuleCheckType, BatchRuleCheckType, DeliverySpec, DeliveryTarget
+    BatchRule,
+    BatchRuleCheckType,
+    DataContract,
+    DeliverySpec,
+    DeliveryTarget,
+    QualityRule,
+    RowRuleCheckType,
+    SchemaColumn,
+    SourceDefinition,
 )
-from datashell.pipeline.runner import DataShellPipeline
 from datashell.engines.delivery import TerminalStatus
-
+from datashell.pipeline.runner import DataShellPipeline
 
 
 class ProcessRSSSampler:
@@ -38,7 +46,7 @@ class ProcessRSSSampler:
     def _rss_bytes() -> int:
         # Linux procfs includes native allocations that tracemalloc cannot see.
         try:
-            with open("/proc/self/status", "r", encoding="utf-8") as handle:
+            with open("/proc/self/status", encoding="utf-8") as handle:
                 for line in handle:
                     if line.startswith("VmRSS:"):
                         return int(line.split()[1]) * 1024
@@ -88,14 +96,19 @@ def create_stress_contract() -> DataContract:
             "quality": {
                 "behavior": "DROP_ROW",
                 "rules": [
-                    QualityRule(rule_id="r1-amount-positive", check=RowRuleCheckType.GREATER_THAN, column="amount", value=0.0),
-                    QualityRule(rule_id="r2-fee-non-negative", check=RowRuleCheckType.GREATER_EQUAL, column="fee", value=0.0),
-                    QualityRule(rule_id="r3-currency-allowed", check=RowRuleCheckType.ALLOWED_VALUES, column="currency", value=["USD", "EUR", "GBP", "JPY"]),
-                    QualityRule(rule_id="r4-custom-margin", check=RowRuleCheckType.CUSTOM_EXPR, expression="amount >= fee"),
+                    QualityRule(rule_id="r1-amount-positive",
+                                check=RowRuleCheckType.GREATER_THAN, column="amount", value=0.0),
+                    QualityRule(rule_id="r2-fee-non-negative",
+                                check=RowRuleCheckType.GREATER_EQUAL, column="fee", value=0.0),
+                    QualityRule(rule_id="r3-currency-allowed", check=RowRuleCheckType.ALLOWED_VALUES,
+                                column="currency", value=["USD", "EUR", "GBP", "JPY"]),
+                    QualityRule(rule_id="r4-custom-margin",
+                                check=RowRuleCheckType.CUSTOM_EXPR, expression="amount >= fee"),
                 ],
                 "batch_rules": [
                     BatchRule(rule_id="b1-min-volume", check=BatchRuleCheckType.MIN_ROW_COUNT, value=1000),
-                    BatchRule(rule_id="b2-avg-fee-ratio", check=BatchRuleCheckType.SQL_ASSERTION, sql="AVG(fee) / NULLIF(AVG(amount), 0) < 0.20"),
+                    BatchRule(rule_id="b2-avg-fee-ratio", check=BatchRuleCheckType.SQL_ASSERTION,
+                              sql="AVG(fee) / NULLIF(AVG(amount), 0) < 0.20"),
                 ]
             },
             "delivery": DeliverySpec(
@@ -141,8 +154,9 @@ def generate_synthetic_batch(n_rows: int, defect_rate: float = 0.05) -> Path:
     # Shuffle
     df = df.sample(fraction=1.0, shuffle=True, seed=42)
 
-    tmp_file = tempfile.NamedTemporaryFile(suffix=".parquet", delete=False)
-    tmp_path = Path(tmp_file.name)
+    fd, tmp_name = tempfile.mkstemp(suffix=".parquet")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
     df.write_parquet(tmp_path)
     return tmp_path
 
@@ -169,7 +183,8 @@ def run_benchmark():
     print("      DATA SHELL — VOLUMETRIC & SYSTEMS BENCHMARK SUITE")
     print("=" * 75)
     print(f"Storage root: {settings.storage_root.resolve()}")
-    print(f"{'Scale (Rows)':<14} | {'Duration':<10} | {'Throughput':<16} | {'Delivered':<12} | {'Peak RSS':<10} | {'Footing':<10}")
+    print(f"{'Scale (Rows)':<14} | {'Duration':<10} | {'Throughput':<16} | "
+          f"{'Delivered':<12} | {'Peak RSS':<10} | {'Footing':<10}")
     print("-" * 75)
 
     for scale in test_scales:
@@ -220,7 +235,8 @@ def run_benchmark():
         audit_path.unlink(missing_ok=True)
 
     print("=" * 75)
-    print("Volumetric stress test completed successfully: every scale passed status, row-count, file-content, and footing assertions.")
+    print("Volumetric stress test completed successfully: every scale passed "
+          "status, row-count, file-content, and footing assertions.")
 
 
 if __name__ == "__main__":

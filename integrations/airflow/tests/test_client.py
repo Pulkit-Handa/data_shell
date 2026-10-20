@@ -12,7 +12,6 @@ import urllib.error
 from urllib.request import Request
 
 import pytest
-
 from datashell_airflow.client import (
     DataShellApiClient,
     DataShellApiError,
@@ -28,7 +27,7 @@ class _FakeResponse:
     def read(self) -> bytes:
         return self._payload
 
-    def __enter__(self) -> "_FakeResponse":
+    def __enter__(self) -> _FakeResponse:
         return self
 
     def __exit__(self, *exc: object) -> None:

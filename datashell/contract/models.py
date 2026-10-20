@@ -1,25 +1,29 @@
-"""Enterprise contract data models matching the daas/v1 DataProduct specification with rigorous cross-field validation."""
+"""Enterprise contract models matching the daas/v1 DataProduct specification,
+with rigorous cross-field validation."""
 
 from __future__ import annotations
-from enum import Enum
-from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, Field, model_validator, field_validator
+
+from enum import StrEnum
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
 from datashell.core.sandbox import FilesystemSandbox
 
 
-class QualityBehavior(str, Enum):
+class QualityBehavior(StrEnum):
     DROP_ROW = "DROP_ROW"      # Held rows quarantined; valid rows delivered unless batch check fails
     REJECT_RUN = "REJECT_RUN"  # Whole run rejected if any row rule OR batch rule fails
     WARN = "WARN"              # Violations recorded in audit certificate, but rows delivered without dropping
 
 
-class ExtraColumnsPolicy(str, Enum):
+class ExtraColumnsPolicy(StrEnum):
     REJECT = "REJECT"          # Any unexpected column causes structural rejection
     STRIP = "STRIP"            # Unexpected columns stripped from conforming dataset
     ALLOW = "ALLOW"            # Unexpected columns preserved as strings/raw
 
 
-class RowRuleCheckType(str, Enum):
+class RowRuleCheckType(StrEnum):
     NOT_NULL = "NOT_NULL"
     GREATER_THAN = "GREATER_THAN"
     GREATER_EQUAL = "GREATER_EQUAL"
@@ -33,7 +37,7 @@ class RowRuleCheckType(str, Enum):
     CUSTOM_EXPR = "CUSTOM_EXPR"
 
 
-class BatchRuleCheckType(str, Enum):
+class BatchRuleCheckType(StrEnum):
     MIN_ROW_COUNT = "MIN_ROW_COUNT"
     MAX_ROW_COUNT = "MAX_ROW_COUNT"
     MAX_NULL_RATE = "MAX_NULL_RATE"
@@ -44,7 +48,7 @@ class BatchRuleCheckType(str, Enum):
     SQL_ASSERTION = "SQL_ASSERTION"
 
 
-class SchemaCompatibilityPolicy(str, Enum):
+class SchemaCompatibilityPolicy(StrEnum):
     """How the boundary reacts when the source does not present the declared schema."""
 
     STRICT = "STRICT"        # Missing declared columns are structural failures
@@ -53,7 +57,7 @@ class SchemaCompatibilityPolicy(str, Enum):
 
 class _RuleCheckTypeMeta(type):
     """Metaclass providing backwards-compatible enum attribute access."""
-    def __getattr__(cls, name: str):
+    def __getattr__(cls, name: str) -> Any:
         if hasattr(RowRuleCheckType, name):
             return getattr(RowRuleCheckType, name)
         if hasattr(BatchRuleCheckType, name):
@@ -68,9 +72,11 @@ class RuleCheckType(metaclass=_RuleCheckTypeMeta):
 
 class SchemaColumn(BaseModel):
     name: str
-    polars_type: str = Field(description="Polars datatype: Utf8, String, Int64, Int32, Int16, Int8, UInt64, UInt32, Float64, Float32, Boolean, Date, Datetime")
+    polars_type: str = Field(
+        description="Polars datatype: Utf8, String, Int64, Int32, Int16, Int8, "
+                    "UInt64, UInt32, Float64, Float32, Boolean, Date, Datetime")
     nullable: bool = True
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class SourceParserOptions(BaseModel):
@@ -84,7 +90,7 @@ class SourceParserOptions(BaseModel):
     quote_char: str = '"'
     has_header: bool = True
     encoding: str = "utf-8"
-    null_values: List[str] = Field(default_factory=list)
+    null_values: list[str] = Field(default_factory=list)
 
     @field_validator("delimiter")
     @classmethod
@@ -115,10 +121,10 @@ class SourceParserOptions(BaseModel):
 
 class SourceDefinition(BaseModel):
     type: str = "LOCAL"  # LOCAL
-    connectionRef: Optional[str] = None
+    connectionRef: str | None = None
     path: str
     format: str = "parquet"  # parquet, csv, jsonl
-    schema_: List[SchemaColumn] = Field(alias="schema", default_factory=list)
+    schema_: list[SchemaColumn] = Field(alias="schema", default_factory=list)
     extra_columns_policy: ExtraColumnsPolicy = ExtraColumnsPolicy.STRIP
     schema_compatibility: SchemaCompatibilityPolicy = SchemaCompatibilityPolicy.EVOLVING
     parser: SourceParserOptions = Field(default_factory=SourceParserOptions)
@@ -137,10 +143,10 @@ class SourceDefinition(BaseModel):
 class QualityRule(BaseModel):
     rule_id: str = Field(description="Stable identifier kept across contract versions")
     check: RowRuleCheckType
-    column: Optional[str] = None
-    value: Optional[Any] = None
-    expression: Optional[str] = None
-    description: Optional[str] = None
+    column: str | None = None
+    value: Any | None = None
+    expression: str | None = None
+    description: str | None = None
 
     @model_validator(mode="after")
     def validate_rule_parameters(self) -> QualityRule:
@@ -171,12 +177,12 @@ class QualityRule(BaseModel):
 class BatchRule(BaseModel):
     rule_id: str = Field(description="Stable identifier kept across contract versions")
     check: BatchRuleCheckType
-    column: Optional[str] = None
-    columns: Optional[List[str]] = None
-    value: Optional[Any] = None
-    tolerance: Optional[float] = None
-    sql: Optional[str] = None
-    description: Optional[str] = None
+    column: str | None = None
+    columns: list[str] | None = None
+    value: Any | None = None
+    tolerance: float | None = None
+    sql: str | None = None
+    description: str | None = None
 
     @model_validator(mode="after")
     def validate_batch_rule_parameters(self) -> BatchRule:
@@ -190,14 +196,17 @@ class BatchRule(BaseModel):
             if not self.column:
                 raise ValueError(f"Batch rule '{self.rule_id}' with check MAX_NULL_RATE must supply 'column'")
             if self.value is None or not (0.0 <= float(self.value) <= 1.0):
-                raise ValueError(f"Batch rule '{self.rule_id}' with check MAX_NULL_RATE requires 'value' between 0.0 and 1.0")
+                raise ValueError(
+                    f"Batch rule '{self.rule_id}' with check MAX_NULL_RATE "
+                    "requires 'value' between 0.0 and 1.0")
         elif self.check == BatchRuleCheckType.UNIQUE:
             if not self.column:
                 raise ValueError(f"Batch rule '{self.rule_id}' with check UNIQUE must supply 'column'")
         elif self.check == BatchRuleCheckType.COMPOSITE_UNIQUE:
             if not self.columns or len(self.columns) < 2:
                 raise ValueError(
-                    f"Batch rule '{self.rule_id}' with check COMPOSITE_UNIQUE must supply 'columns' with at least 2 entries"
+                    f"Batch rule '{self.rule_id}' with check COMPOSITE_UNIQUE "
+                    "must supply 'columns' with at least 2 entries"
                 )
             if len(set(self.columns)) != len(self.columns):
                 raise ValueError(f"Batch rule '{self.rule_id}' COMPOSITE_UNIQUE columns must be distinct")
@@ -223,13 +232,13 @@ class BatchRule(BaseModel):
 
 class QualitySpec(BaseModel):
     behavior: QualityBehavior = QualityBehavior.DROP_ROW
-    rules: List[QualityRule] = Field(default_factory=list)
-    batch_rules: List[BatchRule] = Field(default_factory=list)
+    rules: list[QualityRule] = Field(default_factory=list)
+    batch_rules: list[BatchRule] = Field(default_factory=list)
 
 
 class DeliveryTarget(BaseModel):
     type: str = "PARQUET"
-    connectionRef: Optional[str] = None
+    connectionRef: str | None = None
     path: str
     mode: str = "overwrite"
 
@@ -253,8 +262,8 @@ class DeliveryTarget(BaseModel):
 
 
 class TransformationSpec(BaseModel):
-    map: List[Dict[str, Any]] = Field(default_factory=list)
-    reduce: List[Dict[str, Any]] = Field(default_factory=list)
+    map: list[dict[str, Any]] = Field(default_factory=list)
+    reduce: list[dict[str, Any]] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_transformations(self) -> TransformationSpec:
@@ -267,13 +276,13 @@ class TransformationSpec(BaseModel):
 
 
 class DeliverySpec(BaseModel):
-    refreshSchedule: Optional[str] = None
-    targets: List[DeliveryTarget] = Field(default_factory=list)
-    quarantinePath: Optional[str] = None
+    refreshSchedule: str | None = None
+    targets: list[DeliveryTarget] = Field(default_factory=list)
+    quarantinePath: str | None = None
 
     @field_validator("quarantinePath")
     @classmethod
-    def validate_quarantine_path(cls, v: Optional[str]) -> Optional[str]:
+    def validate_quarantine_path(cls, v: str | None) -> str | None:
         if v:
             FilesystemSandbox.sanitize_and_validate_path(v, create_parent=False)
         return v
@@ -284,7 +293,7 @@ class ContractMetadata(BaseModel):
     owner: str = "data-platform"
     version: str = "1.0.0"
     status: str = "ACTIVE"
-    description: Optional[str] = None
+    description: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -304,7 +313,7 @@ class ContractMetadata(BaseModel):
 
 
 class ContractSpec(BaseModel):
-    sources: List[SourceDefinition] = Field(default_factory=list)
+    sources: list[SourceDefinition] = Field(default_factory=list)
     quality: QualitySpec = Field(default_factory=QualitySpec)
     transformation: TransformationSpec = Field(default_factory=TransformationSpec)
     delivery: DeliverySpec = Field(default_factory=DeliverySpec)
@@ -327,7 +336,8 @@ class ContractSpec(BaseModel):
             # 3. Column existence check
             if r.column and r.column not in declared_cols:
                 raise ValueError(
-                    f"Rule '{r.rule_id}' references column '{r.column}' which is not in declared schema {sorted(declared_cols)}"
+                    f"Rule '{r.rule_id}' references column '{r.column}' which is "
+                    f"not in declared schema {sorted(declared_cols)}"
                 )
 
         for b in self.quality.batch_rules:
@@ -337,13 +347,15 @@ class ContractSpec(BaseModel):
 
             if b.column and b.column not in declared_cols:
                 raise ValueError(
-                    f"Batch rule '{b.rule_id}' references column '{b.column}' which is not in declared schema {sorted(declared_cols)}"
+                    f"Batch rule '{b.rule_id}' references column '{b.column}' which is "
+                    f"not in declared schema {sorted(declared_cols)}"
                 )
 
             for col in (b.columns or []):
                 if col not in declared_cols:
                     raise ValueError(
-                        f"Batch rule '{b.rule_id}' references column '{col}' which is not in declared schema {sorted(declared_cols)}"
+                        f"Batch rule '{b.rule_id}' references column '{col}' which is "
+                        f"not in declared schema {sorted(declared_cols)}"
                     )
 
         return self

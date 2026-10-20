@@ -5,7 +5,6 @@ and safe failure modes for the settlement subsystem.
 """
 from __future__ import annotations
 
-import json
 import pytest
 
 pytest.importorskip("polars")

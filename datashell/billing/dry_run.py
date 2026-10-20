@@ -10,7 +10,7 @@ without moving money.
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict
+from typing import Any
 
 from datashell.billing.base import (
     BillingProviderName,
@@ -108,7 +108,7 @@ class DryRunBillingProvider:
         )
 
     def verify_webhook(self, *, body: bytes, signature_header: str, secret: str,
-                       tolerance_seconds: int = 300) -> Dict[str, Any]:
+                       tolerance_seconds: int = 300) -> dict[str, Any]:
         # The dry-run provider never receives webhooks; fail closed.
         raise NotImplementedError("dry-run provider accepts no webhooks")
 

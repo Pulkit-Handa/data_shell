@@ -13,33 +13,31 @@ Covers:
 7. P2: ACTIVE_RUNS gauge reliability when path validation fails before streaming execution.
 """
 
-import os
-import shutil
 import tempfile
-import pytest
 from pathlib import Path
+
 import polars as pl
-import pyarrow.parquet as pq
-from fastapi.testclient import TestClient
+import pytest
 
-from datashell.core.config import (
-    _resolve_secret, normalize_environment, is_production,
-    EnterpriseSettings, settings
-)
-from datashell.core.security import (
-    authenticate_client, APIKeyMetadata, Role, Capability,
-    register_api_key, API_KEY_STORE
-)
-from datashell.core.sandbox import FilesystemSandbox, PathSecurityViolation
 from datashell.contract.models import (
-    DataContract, SourceDefinition, SchemaColumn, DeliverySpec, DeliveryTarget,
-    QualitySpec, QualityRule, BatchRule, QualityBehavior, RuleCheckType, BatchRuleCheckType
+    BatchRule,
+    BatchRuleCheckType,
+    DataContract,
+    DeliverySpec,
+    DeliveryTarget,
+    QualityBehavior,
+    QualityRule,
+    QualitySpec,
+    RuleCheckType,
+    SchemaColumn,
+    SourceDefinition,
 )
-from datashell.pipeline.runner import DataShellPipeline, ACTIVE_RUNS
-from datashell.pipeline.artifacts import ArtifactGenerator
+from datashell.core.config import EnterpriseSettings, _resolve_secret, settings
+from datashell.core.sandbox import FilesystemSandbox, PathSecurityViolation
+from datashell.core.security import authenticate_client
 from datashell.engines.delivery import TerminalStatus
-from datashell.server.app import app
-
+from datashell.pipeline.artifacts import ArtifactGenerator
+from datashell.pipeline.runner import ACTIVE_RUNS, DataShellPipeline
 
 # --------------------------------------------------------------------------
 # 1. P0: Production Case-Insensitive Validation & Alias Handling

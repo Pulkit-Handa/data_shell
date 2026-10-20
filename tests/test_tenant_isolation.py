@@ -4,19 +4,18 @@ Verifies that cross-tenant access is denied and produces no sensitive disclosure
 """
 from __future__ import annotations
 
-import json
 import pytest
 
 pytest.importorskip("polars")
 
-from datashell.core.security import (
-    verify_tenant_access,
-    Capability,
-    Role,
-    APIKeyMetadata,
-)
-from datashell.core.ledger import BoundaryLedger
 from fastapi import HTTPException
+
+from datashell.core.ledger import BoundaryLedger
+from datashell.core.security import (
+    APIKeyMetadata,
+    Role,
+    verify_tenant_access,
+)
 
 
 class TestTenantAccessControl:

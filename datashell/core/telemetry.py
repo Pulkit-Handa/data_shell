@@ -1,13 +1,13 @@
 """Enterprise Telemetry: Prometheus Metrics & Structured Logging."""
 
 from __future__ import annotations
-import logging
+
 import json
+import logging
 import time
-from typing import Dict, Any, Optional
-from prometheus_client import (
-    Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
-)
+from typing import Any
+
+from prometheus_client import Counter, Gauge, Histogram
 
 # ----------------- Prometheus Metrics -----------------
 

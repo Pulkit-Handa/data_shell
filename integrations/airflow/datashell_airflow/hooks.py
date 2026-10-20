@@ -11,7 +11,7 @@ The hook turns a standard Airflow ``http`` connection into a configured
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from airflow.hooks.base import BaseHook
 
@@ -39,7 +39,7 @@ def extract_api_key(conn: Any) -> str:
     api_key = (conn.password or "").strip()
     if api_key:
         return api_key
-    extra: Dict[str, Any] = conn.extra_dejson or {}
+    extra: dict[str, Any] = conn.extra_dejson or {}
     api_key = str(extra.get("api_key", "")).strip()
     if not api_key:
         raise ValueError(
@@ -68,7 +68,7 @@ class DataShellHook(BaseHook):
 
     def get_conn(self) -> DataShellApiClient:
         conn = self.get_connection(self.datashell_conn_id)
-        extra: Dict[str, Any] = conn.extra_dejson or {}
+        extra: dict[str, Any] = conn.extra_dejson or {}
         verify_tls = bool(extra.get("verify_tls", True))
         return DataShellApiClient(
             build_base_url(conn),

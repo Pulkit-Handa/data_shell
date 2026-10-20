@@ -12,7 +12,7 @@ imported, which keeps it unit-testable without Airflow installed.
 from __future__ import annotations
 
 from importlib import import_module
-from typing import Any, Dict
+from typing import Any
 
 from datashell_airflow.client import DataShellApiClient, DataShellApiError
 
@@ -40,7 +40,7 @@ def __getattr__(name: str) -> Any:
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-def get_provider_info() -> Dict[str, Any]:
+def get_provider_info() -> dict[str, Any]:
     """Metadata used by Airflow to register this provider."""
     return {
         "package-name": "data-shell-airflow",

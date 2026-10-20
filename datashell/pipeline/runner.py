@@ -1,25 +1,30 @@
-"""Enterprise Boundary Pipeline Runner: Coordinates zero-copy Arrow memory transport, streaming, and cryptographic gates."""
+"""Enterprise Boundary Pipeline Runner: Coordinates zero-copy Arrow memory
+transport, streaming, and cryptographic gates."""
 
 from __future__ import annotations
+
+import contextlib
 import os
-import uuid
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Union, List, Dict, Any
+from typing import Any
+
 import polars as pl
+import pyarrow as pa
 import pyarrow.parquet as pq
 
-from datashell.core.config import settings
-from datashell.core.sandbox import FilesystemSandbox
-from datashell.core.crypto import CryptoEngine
+from datashell.contract.models import DataContract, QualityBehavior
 from datashell.core.commit import (
-    generation_pointer_path,
     publish_transactionally,
-    read_generation_pointer,
-    recover_publication,
     recover_pending_publications,
+    recover_publication,
 )
+from datashell.core.config import settings
+from datashell.core.crypto import CryptoEngine
+from datashell.core.events import emit_run_event
+from datashell.core.fileops import ensure_disk_headroom, materialize_artifact_copy
 from datashell.core.ledger import (
     BoundaryLedger,
     clear_pending_outbox,
@@ -27,28 +32,30 @@ from datashell.core.ledger import (
     pending_outbox_path,
     write_pending_outbox,
 )
-from datashell.core.fileops import materialize_artifact_copy, ensure_disk_headroom
-from datashell.core.events import emit_run_event
-from datashell.contract.models import DataContract, QualityBehavior
-from datashell.engines.ingestion import StructuralIngestionEngine, IngestionResult
-from datashell.engines.quality import SemanticQualityEngine, QualityResult
-from datashell.engines.metrics import compute_metrics, compute_metrics_from_parquet
-from datashell.engines.drift import HistoricalDriftEngine, ContractHistoryTracker, DriftCheckResult
-from datashell.engines.reconciler import Reconciler, ReconciliationLedger
-from datashell.engines.delivery import DeliveryEngine, DeliveryOutcome, TerminalStatus, safe_json_dumps
-from datashell.pipeline.artifacts import ArtifactGenerator
-import pyarrow as pa
-
+from datashell.core.sandbox import FilesystemSandbox
 from datashell.core.telemetry import (
-    RUNS_TOTAL, ROWS_READ_TOTAL, ROWS_DELIVERED_TOTAL,
-    ROWS_HELD_TOTAL, ROWS_REFUSED_TOTAL, FOOTING_ERRORS_TOTAL,
-    RUN_DURATION_SECONDS, ACTIVE_RUNS, telemetry_logger
+    ACTIVE_RUNS,
+    FOOTING_ERRORS_TOTAL,
+    ROWS_DELIVERED_TOTAL,
+    ROWS_HELD_TOTAL,
+    ROWS_READ_TOTAL,
+    ROWS_REFUSED_TOTAL,
+    RUN_DURATION_SECONDS,
+    RUNS_TOTAL,
+    telemetry_logger,
 )
+from datashell.engines.delivery import DeliveryEngine, DeliveryOutcome, TerminalStatus, safe_json_dumps
+from datashell.engines.drift import ContractHistoryTracker, DriftCheckResult, HistoricalDriftEngine
+from datashell.engines.ingestion import IngestionResult, StructuralIngestionEngine
+from datashell.engines.metrics import compute_metrics, compute_metrics_from_parquet
+from datashell.engines.quality import QualityResult, SemanticQualityEngine
+from datashell.engines.reconciler import Reconciler, ReconciliationLedger
+from datashell.pipeline.artifacts import ArtifactGenerator
 
 
-def _quarantine_rows_from_payload(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _quarantine_rows_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Build the quarantine index rows carried by an outbox payload."""
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for artifact in payload.get("quarantine_files") or []:
         name = Path(str(artifact)).name
         is_held = name.endswith("_held_records.parquet")
@@ -67,12 +74,12 @@ def _quarantine_rows_from_payload(payload: Dict[str, Any]) -> List[Dict[str, Any
 
 def _publish_with_pending_outbox(
     *,
-    pairs: List[tuple],
+    pairs: list[tuple[Path, Path]],
     run_id: str,
     transaction_root: Path,
-    generation_pointer: Dict[str, Any],
+    generation_pointer: dict[str, Any],
     outbox_path: Path,
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
 ) -> None:
     """Write the pending ledger record, publish, and discard it on failure.
 
@@ -96,7 +103,7 @@ def _publish_with_pending_outbox(
         raise
 
 
-def _replay_payload_without_pipeline(store: BoundaryLedger, payload: Dict[str, Any]) -> None:
+def _replay_payload_without_pipeline(store: BoundaryLedger, payload: dict[str, Any]) -> None:
     """Apply an outbox payload directly when no contract catalog is available.
 
     The run row, its quarantine index rows, and its usage meter are written in
@@ -136,7 +143,7 @@ def _replay_payload_without_pipeline(store: BoundaryLedger, payload: Dict[str, A
     )
 
 
-def _published_artifacts_present(payload: Dict[str, Any]) -> bool:
+def _published_artifacts_present(payload: dict[str, Any]) -> bool:
     """Return True when the run's published artifacts are actually on disk.
 
     The pending outbox is written *before* publication. If publication then
@@ -165,9 +172,9 @@ def _published_artifacts_present(payload: Dict[str, Any]) -> bool:
 
 
 def reconcile_pending_ledger_entries(
-    storage_root: Optional[Path] = None,
-    ledger: Optional[BoundaryLedger] = None,
-) -> Dict[str, int]:
+    storage_root: Path | None = None,
+    ledger: BoundaryLedger | None = None,
+) -> dict[str, int]:
     """Replay durable outbox records into the ledger (LEDGER-001 recovery).
 
     Scans ``storage_root`` for pending-outbox records left by runs whose
@@ -254,9 +261,9 @@ def reconcile_pending_ledger_entries(
 
 
 def recover_pending_publications_and_ledger(
-    storage_root: Optional[Path] = None,
-    ledger: Optional[BoundaryLedger] = None,
-) -> Dict[str, int]:
+    storage_root: Path | None = None,
+    ledger: BoundaryLedger | None = None,
+) -> dict[str, int]:
     """Startup recovery gate: publication journals first, then ledger outbox.
 
     Returns a summary containing the number of journals recovered, the number
@@ -276,13 +283,15 @@ def recover_pending_publications_and_ledger(
     return {"journals": journals, "journal_errors": journal_errors, **result}
 
 
-def _common_transaction_root(paths: List[Path]) -> Path:
+def _common_transaction_root(paths: list[Path]) -> Path:
     """Find a stable writable root for recoverable multi-directory publication."""
     resolved_paths = [Path(path).resolve() for path in paths]
     if settings.is_production_mode:
         root = settings.output_dir.resolve()
         if any(not path.is_relative_to(root) for path in resolved_paths):
-            raise ValueError("Production delivery targets and audit certificates must remain under DATASHELL_OUTPUT_DIR")
+            raise ValueError(
+                "Production delivery targets and audit certificates "
+                "must remain under DATASHELL_OUTPUT_DIR")
     else:
         parents = [path.parent for path in resolved_paths]
         root = Path(os.path.commonpath([str(parent) for parent in parents])).resolve()
@@ -300,8 +309,8 @@ class PipelineResult:
     duration_seconds: float
     ledger: ReconciliationLedger
     outcome: DeliveryOutcome
-    audit_artifact_path: Optional[str]
-    audit_certificate: Optional[Dict[str, Any]] = None
+    audit_artifact_path: str | None
+    audit_certificate: dict[str, Any] | None = None
     ledger_status: str = "COMMITTED"
 
 
@@ -323,7 +332,7 @@ class DataShellPipeline:
         self,
         contract: DataContract,
         tenant_id: str = "default-tenant",
-        drift_enabled: Optional[bool] = None,
+        drift_enabled: bool | None = None,
     ):
         if not isinstance(tenant_id, str) or not tenant_id:
             raise ValueError("tenant_id must be a non-empty authenticated tenant identifier")
@@ -344,8 +353,8 @@ class DataShellPipeline:
         *,
         contract_name: str,
         current_rows: int,
-        current_metrics: Dict[str, float],
-    ) -> List[DriftCheckResult]:
+        current_metrics: dict[str, float],
+    ) -> list[DriftCheckResult]:
         """Run historical drift checks when enabled, honoring a baseline reset.
 
         Returns an empty list when drift is disabled, in which case no baseline
@@ -372,11 +381,11 @@ class DataShellPipeline:
 
     @staticmethod
     def _rejection_reason(
-        batch_results: Optional[List[Any]],
-        drift_checks: Optional[List[DriftCheckResult]],
+        batch_results: list[Any] | None,
+        drift_checks: list[DriftCheckResult] | None,
         *,
         held_rows: int = 0,
-        behavior: Optional[QualityBehavior] = None,
+        behavior: QualityBehavior | None = None,
         footing_ok: bool = True,
     ) -> str:
         """Build an operator-actionable rejection reason naming every failed gate.
@@ -385,7 +394,7 @@ class DataShellPipeline:
         metrics, and row-policy violations so a rejection is diagnosable from
         the CLI output and the ledger without opening the certificate.
         """
-        reasons: List[str] = []
+        reasons: list[str] = []
         for batch in batch_results or []:
             if getattr(batch, "passed", True):
                 continue
@@ -415,16 +424,16 @@ class DataShellPipeline:
         contract_name: str,
         ledger: ReconciliationLedger,
         outcome: DeliveryOutcome,
-        audit_cert: Optional[Dict[str, Any]],
-        audit_artifact_path: Optional[str],
-        source_path: Optional[Union[str, Path]],
+        audit_cert: dict[str, Any] | None,
+        audit_artifact_path: str | None,
+        source_path: str | Path | None,
         duration_seconds: float,
         execution_mode: str,
-        metrics: Optional[Dict[str, float]] = None,
-    ) -> Dict[str, Any]:
+        metrics: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
         """Build the durable ledger payload for one terminal run outcome."""
-        source_name: Optional[str] = None
-        source_bytes: Optional[int] = None
+        source_name: str | None = None
+        source_bytes: int | None = None
         if source_path is not None:
             source = Path(source_path)
             source_name = source.name
@@ -475,7 +484,7 @@ class DataShellPipeline:
             "structural_reasons": dict(ledger.structural_reasons),
         }
 
-    def _apply_ledger_payload(self, payload: Dict[str, Any]) -> None:
+    def _apply_ledger_payload(self, payload: dict[str, Any]) -> None:
         """Idempotently apply a ledger payload (normal path or outbox replay).
 
         The run row, its quarantine index rows, and its usage meter are written
@@ -521,13 +530,13 @@ class DataShellPipeline:
         contract_name: str,
         ledger: ReconciliationLedger,
         outcome: DeliveryOutcome,
-        audit_cert: Optional[Dict[str, Any]],
-        audit_artifact_path: Optional[str],
-        source_path: Optional[Union[str, Path]],
+        audit_cert: dict[str, Any] | None,
+        audit_artifact_path: str | None,
+        source_path: str | Path | None,
         duration_seconds: float,
         execution_mode: str,
-        metrics: Optional[Dict[str, float]] = None,
-        outbox_path: Optional[Path] = None,
+        metrics: dict[str, float] | None = None,
+        outbox_path: Path | None = None,
     ) -> str:
         """Persist the ledger row, quarantine index, usage meter, and event.
 
@@ -563,7 +572,10 @@ class DataShellPipeline:
                 error_type=type(history_error).__name__,
             )
             ledger_status = "PENDING"
-            try:
+            # The durable outbox already carries this run; the ledger retry is
+            # best-effort because reconciliation replays it from the pending
+            # outbox on next startup.
+            with contextlib.suppress(Exception):
                 self.history_tracker.record_run(
                     run_id=run_id,
                     contract_name=contract_name,
@@ -576,8 +588,6 @@ class DataShellPipeline:
                     certificate_digest=payload["certificate_digest"],
                     ledger_status="PENDING",
                 )
-            except Exception:
-                pass
         emit_run_event({
             "event": "run.completed",
             "run_id": run_id,
@@ -625,9 +635,9 @@ class DataShellPipeline:
 
     def run_file(
         self,
-        source_path: Union[str, Path],
-        target_path_override: Optional[str] = None,
-        audit_output_path: Optional[str] = None
+        source_path: str | Path,
+        target_path_override: str | None = None,
+        audit_output_path: str | None = None
     ) -> PipelineResult:
         """Run enforcement pipeline on an input file."""
         if target_path_override and self.contract.spec.delivery.targets:
@@ -646,8 +656,11 @@ class DataShellPipeline:
         contract_name = self.contract.metadata.name
         ACTIVE_RUNS.inc()
         start_time = time.time()
-        staged_to_publish: List[Path] = []
-        audit_dest = Path(audit_output_path).resolve() if audit_output_path else (settings.audit_dir / f"{run_id}_audit_certificate.json")
+        staged_to_publish: list[Path] = []
+        audit_dest = (
+            Path(audit_output_path).resolve() if audit_output_path
+            else settings.audit_dir / f"{run_id}_audit_certificate.json"
+        )
 
         try:
             # Step 1: Ingestion & Tier 1 Structural Gate
@@ -657,7 +670,7 @@ class DataShellPipeline:
             quality_res: QualityResult = self.quality_engine.evaluate(ingest_res.conforming_df)
 
             # Step 3: Zero-Deficit Reconciliation ("The arithmetic has to foot")
-            structural_reasons: Dict[str, int] = {}
+            structural_reasons: dict[str, int] = {}
             for r in ingest_res.rejections:
                 reason = f"{r.failed_column}:{r.expected_type}"
                 structural_reasons[reason] = structural_reasons.get(reason, 0) + 1
@@ -711,9 +724,9 @@ class DataShellPipeline:
                     else None
                 ),
             )
-            for staged_path in (outcome.staged_target_path, outcome.staged_run_artifact_path):
-                if staged_path:
-                    staged_to_publish.append(Path(staged_path))
+            for staged_candidate in (outcome.staged_target_path, outcome.staged_run_artifact_path):
+                if staged_candidate:
+                    staged_to_publish.append(Path(staged_candidate))
 
             duration = time.time() - start_time
 
@@ -736,13 +749,18 @@ class DataShellPipeline:
                 tenant_id=self.tenant_id
             )
             if outcome.status == TerminalStatus.LOADED:
-                if not outcome.staged_target_path or not outcome.staged_run_artifact_path or not outcome.target_path or not outcome.run_artifact_path:
+                if (
+                    outcome.staged_target_path is None
+                    or outcome.staged_run_artifact_path is None
+                    or outcome.target_path is None
+                    or outcome.run_artifact_path is None
+                ):
                     raise RuntimeError("Loaded delivery is missing staged publication artifacts")
                 staged_audit = audit_dest.with_name(f".staged_{run_id}_{audit_dest.name}")
                 staged_to_publish.append(staged_audit)
                 ArtifactGenerator.save_audit_file(audit_cert, staged_audit)
-                final_target = Path(outcome.target_path)
-                final_run_artifact = Path(outcome.run_artifact_path)
+                final_target = Path(str(outcome.target_path))
+                final_run_artifact = Path(str(outcome.run_artifact_path))
                 # Recover journals produced by earlier versions, then publish the
                 # signed certificate, immutable lineage, and active target together.
                 # The outbox record lands first so a crash between publication
@@ -753,9 +771,9 @@ class DataShellPipeline:
                 transaction_root = _common_transaction_root([final_target, final_run_artifact, audit_dest])
                 _publish_with_pending_outbox(
                     pairs=[
-                        (Path(outcome.staged_run_artifact_path), final_run_artifact),
+                        (Path(str(outcome.staged_run_artifact_path)), final_run_artifact),
                         (staged_audit, audit_dest),
-                        (Path(outcome.staged_target_path), final_target),
+                        (Path(str(outcome.staged_target_path)), final_target),
                     ],
                     run_id=run_id,
                     transaction_root=transaction_root,
@@ -803,7 +821,7 @@ class DataShellPipeline:
             ROWS_READ_TOTAL.inc(ledger.rows_read)
             ROWS_DELIVERED_TOTAL.inc(outcome.rows_delivered)
             ROWS_REFUSED_TOTAL.inc(ledger.refused_structural)
-            for r_id, count in quality_res.rule_violation_counts.items():
+            for _rule_id, count in quality_res.rule_violation_counts.items():
                 ROWS_HELD_TOTAL.inc(count)
             RUNS_TOTAL.labels(status=outcome.status.value).inc()
             RUN_DURATION_SECONDS.observe(duration)
@@ -834,23 +852,23 @@ class DataShellPipeline:
 
         except Exception as e:
             FOOTING_ERRORS_TOTAL.inc()
-            telemetry_logger.error("Enforcement run failed", run_id=run_id, contract=contract_name, error_type=type(e).__name__)
+            telemetry_logger.error(
+                "Enforcement run failed", run_id=run_id,
+                contract=contract_name, error_type=type(e).__name__)
             self._record_failed_run(run_id, contract_name, e)
             raise
         finally:
             for staged_path in staged_to_publish:
                 if staged_path.exists():
-                    try:
+                    with contextlib.suppress(OSError):
                         staged_path.unlink()
-                    except OSError:
-                        pass
             ACTIVE_RUNS.dec()
 
     def run_records(
         self,
-        records: List[Dict[str, Any]],
-        target_path_override: Optional[str] = None,
-        audit_output_path: Optional[str] = None
+        records: list[dict[str, Any]],
+        target_path_override: str | None = None,
+        audit_output_path: str | None = None
     ) -> PipelineResult:
         """Run enforcement pipeline directly on in-memory records."""
         if target_path_override and self.contract.spec.delivery.targets:
@@ -860,14 +878,17 @@ class DataShellPipeline:
         contract_name = self.contract.metadata.name
         ACTIVE_RUNS.inc()
         start_time = time.time()
-        staged_to_publish: List[Path] = []
-        audit_dest = Path(audit_output_path).resolve() if audit_output_path else (settings.audit_dir / f"{run_id}_audit_certificate.json")
+        staged_to_publish: list[Path] = []
+        audit_dest = (
+            Path(audit_output_path).resolve() if audit_output_path
+            else settings.audit_dir / f"{run_id}_audit_certificate.json"
+        )
 
         try:
             ingest_res: IngestionResult = self.ingestion_engine.ingest_records(records)
             quality_res: QualityResult = self.quality_engine.evaluate(ingest_res.conforming_df)
 
-            structural_reasons: Dict[str, int] = {}
+            structural_reasons: dict[str, int] = {}
             for r in ingest_res.rejections:
                 reason = f"{r.failed_column}:{r.expected_type}"
                 structural_reasons[reason] = structural_reasons.get(reason, 0) + 1
@@ -921,9 +942,9 @@ class DataShellPipeline:
                     else None
                 ),
             )
-            for staged_path in (outcome.staged_target_path, outcome.staged_run_artifact_path):
-                if staged_path:
-                    staged_to_publish.append(Path(staged_path))
+            for staged_candidate in (outcome.staged_target_path, outcome.staged_run_artifact_path):
+                if staged_candidate:
+                    staged_to_publish.append(Path(staged_candidate))
 
             duration = time.time() - start_time
             delivered_file_path = Path(outcome.target_path) if outcome.target_path else None
@@ -939,12 +960,17 @@ class DataShellPipeline:
                 delivered_file_path=delivered_file_path,
                 quarantine_files=[Path(p) for p in outcome.quarantine_files],
                 tenant_id=self.tenant_id,
-                drift_results=drift_checks,
+                drift_results=[d.__dict__ for d in drift_checks],
                 delivered_sha256_override=outcome.delivered_sha256,
                 run_artifact_path=Path(outcome.run_artifact_path) if outcome.run_artifact_path else None
             )
             if outcome.status == TerminalStatus.LOADED:
-                if not outcome.staged_target_path or not outcome.staged_run_artifact_path or not outcome.target_path or not outcome.run_artifact_path:
+                if (
+                    outcome.staged_target_path is None
+                    or outcome.staged_run_artifact_path is None
+                    or outcome.target_path is None
+                    or outcome.run_artifact_path is None
+                ):
                     raise RuntimeError("Loaded delivery is missing staged publication artifacts")
                 staged_audit = audit_dest.with_name(f".staged_{run_id}_{audit_dest.name}")
                 staged_to_publish.append(staged_audit)
@@ -1014,24 +1040,24 @@ class DataShellPipeline:
             )
         except Exception as e:
             FOOTING_ERRORS_TOTAL.inc()
-            telemetry_logger.error("Enforcement run failed", run_id=run_id, contract=contract_name, error_type=type(e).__name__)
+            telemetry_logger.error(
+                "Enforcement run failed", run_id=run_id,
+                contract=contract_name, error_type=type(e).__name__)
             self._record_failed_run(run_id, contract_name, e)
             raise
         finally:
             for staged_path in staged_to_publish:
                 if staged_path.exists():
-                    try:
+                    with contextlib.suppress(OSError):
                         staged_path.unlink()
-                    except OSError:
-                        pass
             ACTIVE_RUNS.dec()
 
     def run_streaming(
         self,
-        source_path: Union[str, Path],
-        chunk_size: Optional[int] = None,
-        target_path_override: Optional[str] = None,
-        audit_output_path: Optional[str] = None
+        source_path: str | Path,
+        chunk_size: int | None = None,
+        target_path_override: str | None = None,
+        audit_output_path: str | None = None
     ) -> PipelineResult:
         """
         Unified out-of-core streaming execution:
@@ -1059,10 +1085,13 @@ class DataShellPipeline:
 
         run_id = f"dm_stream_{uuid.uuid4().hex[:12]}"
         contract_name = self.contract.metadata.name
-        audit_dest = Path(audit_output_path).resolve() if audit_output_path else (settings.audit_dir / f"{run_id}_audit_certificate.json")
+        audit_dest = (
+            Path(audit_output_path).resolve() if audit_output_path
+            else settings.audit_dir / f"{run_id}_audit_certificate.json"
+        )
         start_time = time.time()
         ACTIVE_RUNS.inc()
-        staged_files: List[Path] = []
+        staged_files: list[Path] = []
 
         try:
             quarantine_path_str = self.contract.spec.delivery.quarantinePath
@@ -1097,76 +1126,84 @@ class DataShellPipeline:
             total_structural_refused = 0
             total_held_quality = 0
             total_admitted = 0
-            rule_breakdowns: Dict[str, int] = {}
-            structural_reasons: Dict[str, int] = {}
+            rule_breakdowns: dict[str, int] = {}
+            structural_reasons: dict[str, int] = {}
             accumulated_should_reject = False
 
-            target_writer: Optional[pq.ParquetWriter] = None
-            held_writer: Optional[pq.ParquetWriter] = None
-            rejections_file = open(staged_rejections, "w", encoding="utf-8")
+            target_writer: pq.ParquetWriter | None = None
+            held_writer: pq.ParquetWriter | None = None
+            # ExitStack keeps the rejection stream's lifetime identical to the
+            # parquet writers below: closed after per-chunk processing, before
+            # the whole-run batch gate.
+            with contextlib.ExitStack() as rejections_stack:
+                rejections_file = rejections_stack.enter_context(
+                    open(staged_rejections, "w", encoding="utf-8")
+                )
 
-            try:
-                for chunk_df in self.ingestion_engine.iter_batches(source_path, batch_size=chunk_size):
-                    chunk_len = chunk_df.height
-                    total_rows_read += chunk_len
+                try:
+                    for chunk_df in self.ingestion_engine.iter_batches(source_path, batch_size=chunk_size):
+                        chunk_len = chunk_df.height
+                        total_rows_read += chunk_len
 
-                    # Tier 1: Ingest chunk via the vectorized structural engine
-                    # (falls back to strict row-by-row diagnostics when needed).
-                    ingest_chunk: IngestionResult = self.ingestion_engine.ingest_dataframe(chunk_df)
-                    total_structural_refused += ingest_chunk.refused_count
+                        # Tier 1: Ingest chunk via the vectorized structural engine
+                        # (falls back to strict row-by-row diagnostics when needed).
+                        ingest_chunk: IngestionResult = self.ingestion_engine.ingest_dataframe(chunk_df)
+                        total_structural_refused += ingest_chunk.refused_count
 
-                    # Stream structural rejections incrementally to JSONL
-                    for r in ingest_chunk.rejections:
-                        reason = f"{r.failed_column}:{r.expected_type}"
-                        structural_reasons[reason] = structural_reasons.get(reason, 0) + 1
-                        rejections_file.write(safe_json_dumps({
-                            "row_index": r.row_index,
-                            "failed_column": r.failed_column,
-                            "expected_type": r.expected_type,
-                            "error_message": r.error_message,
-                            "raw_record": r.raw_record
-                        }) + "\n")
+                        # Stream structural rejections incrementally to JSONL
+                        for r in ingest_chunk.rejections:
+                            reason = f"{r.failed_column}:{r.expected_type}"
+                            structural_reasons[reason] = structural_reasons.get(reason, 0) + 1
+                            rejections_file.write(safe_json_dumps({
+                                "row_index": r.row_index,
+                                "failed_column": r.failed_column,
+                                "expected_type": r.expected_type,
+                                "error_message": r.error_message,
+                                "raw_record": r.raw_record
+                            }) + "\n")
 
-                    if ingest_chunk.conforming_df.height == 0:
-                        continue
+                        if ingest_chunk.conforming_df.height == 0:
+                            continue
 
-                    # Tier 2: Evaluate row-level quality rules on conforming rows (defer batch rules to whole staged dataset)
-                    quality_res: QualityResult = self.quality_engine.evaluate(ingest_chunk.conforming_df, evaluate_batch=False)
-                    for r_id, count in quality_res.rule_violation_counts.items():
-                        rule_breakdowns[r_id] = rule_breakdowns.get(r_id, 0) + count
+                        # Tier 2: Evaluate row-level quality rules on conforming
+                        # rows (defer batch rules to the whole staged dataset)
+                        quality_res = self.quality_engine.evaluate(
+                            ingest_chunk.conforming_df, evaluate_batch=False)
+                        for r_id, count in quality_res.rule_violation_counts.items():
+                            rule_breakdowns[r_id] = rule_breakdowns.get(r_id, 0) + count
 
-                    # CRITICAL FIX: Accumulate whole-run rejection flag across micro-batches!
-                    # If quality behavior is REJECT_RUN and ANY row failed, the entire run must be rejected!
-                    if quality_res.should_reject_run:
-                        accumulated_should_reject = True
-                    if self.contract.spec.quality.behavior == QualityBehavior.REJECT_RUN and quality_res.held_count > 0:
-                        accumulated_should_reject = True
+                        # CRITICAL FIX: Accumulate whole-run rejection flag across micro-batches!
+                        # If quality behavior is REJECT_RUN and ANY row failed, the entire run must be rejected!
+                        if quality_res.should_reject_run:
+                            accumulated_should_reject = True
+                        if (self.contract.spec.quality.behavior == QualityBehavior.REJECT_RUN
+                                and quality_res.held_count > 0):
+                            accumulated_should_reject = True
 
-                    # Incrementally write admitted rows to staged target. Flush
-                    # each micro-batch as its own row group so writer memory is
-                    # bounded by one batch instead of pyarrow's default ~1M-row
-                    # row group, which would balloon on wide datasets.
-                    if quality_res.admitted_df.height > 0:
-                        arrow_adm = quality_res.admitted_df.to_arrow()
-                        if target_writer is None:
-                            target_writer = pq.ParquetWriter(staged_target, arrow_adm.schema)
-                        target_writer.write_table(arrow_adm, row_group_size=arrow_adm.num_rows)
-                        total_admitted += quality_res.admitted_df.height
+                        # Incrementally write admitted rows to staged target. Flush
+                        # each micro-batch as its own row group so writer memory is
+                        # bounded by one batch instead of pyarrow's default ~1M-row
+                        # row group, which would balloon on wide datasets.
+                        if quality_res.admitted_df.height > 0:
+                            arrow_adm = quality_res.admitted_df.to_arrow()
+                            if target_writer is None:
+                                target_writer = pq.ParquetWriter(staged_target, arrow_adm.schema)
+                            target_writer.write_table(arrow_adm, row_group_size=arrow_adm.num_rows)
+                            total_admitted += quality_res.admitted_df.height
 
-                    # Incrementally write held rows to staged quarantine
-                    if quality_res.held_df.height > 0:
-                        arrow_held = quality_res.held_df.to_arrow()
-                        if held_writer is None:
-                            held_writer = pq.ParquetWriter(staged_held, arrow_held.schema)
-                        held_writer.write_table(arrow_held, row_group_size=arrow_held.num_rows)
-                        total_held_quality += quality_res.held_df.height
+                        # Incrementally write held rows to staged quarantine
+                        if quality_res.held_df.height > 0:
+                            arrow_held = quality_res.held_df.to_arrow()
+                            if held_writer is None:
+                                held_writer = pq.ParquetWriter(staged_held, arrow_held.schema)
+                            held_writer.write_table(arrow_held, row_group_size=arrow_held.num_rows)
+                            total_held_quality += quality_res.held_df.height
 
-            finally:
-                if target_writer:
-                    target_writer.close()
-                if held_writer:
-                    held_writer.close()
-                rejections_file.close()
+                finally:
+                    if target_writer:
+                        target_writer.close()
+                    if held_writer:
+                        held_writer.close()
 
             arrow_schema = pl.DataFrame(schema=self.ingestion_engine._polars_schema).to_arrow().schema
 
@@ -1206,7 +1243,7 @@ class DataShellPipeline:
                 accumulated_should_reject = True
 
             # Publish quarantine files
-            created_quarantine_files: List[Path] = []
+            created_quarantine_files: list[Path] = []
             if total_held_quality > 0 and staged_held.exists():
                 os.replace(staged_held, final_held)
                 created_quarantine_files.append(final_held)
@@ -1263,7 +1300,10 @@ class DataShellPipeline:
                     quarantine_path=str(quarantine_dir) if created_quarantine_files else None,
                     quarantine_files=[str(p) for p in created_quarantine_files],
                     ledger=ledger,
-                    details=f"Delivered {total_admitted:,} conforming rows across streaming micro-batches with recoverable lineage publication.",
+                    details=(
+                        f"Delivered {total_admitted:,} conforming rows across streaming "
+                        "micro-batches with recoverable lineage publication."
+                    ),
                     delivered_sha256=delivered_sha256,
                     run_artifact_path=str(run_artifact_path)
                 )
@@ -1283,7 +1323,7 @@ class DataShellPipeline:
                 drift_results=[d.__dict__ for d in drift_checks],
                 tenant_id=self.tenant_id
             )
-            if outcome.status == TerminalStatus.LOADED:
+            if outcome.status == TerminalStatus.LOADED and outcome.target_path and outcome.run_artifact_path:
                 staged_audit = audit_dest.with_name(f".staged_{run_id}_{audit_dest.name}")
                 staged_files.append(staged_audit)
                 ArtifactGenerator.save_audit_file(audit_cert, staged_audit)
@@ -1343,7 +1383,7 @@ class DataShellPipeline:
             ROWS_READ_TOTAL.inc(ledger.rows_read)
             ROWS_DELIVERED_TOTAL.inc(outcome.rows_delivered)
             ROWS_REFUSED_TOTAL.inc(ledger.refused_structural)
-            for r_id, count in rule_breakdowns.items():
+            for _rule_id, count in rule_breakdowns.items():
                 ROWS_HELD_TOTAL.inc(count)
             RUNS_TOTAL.labels(status=outcome.status.value).inc()
             RUN_DURATION_SECONDS.observe(duration)
@@ -1370,7 +1410,9 @@ class DataShellPipeline:
             )
 
         except Exception as e:
-            telemetry_logger.error("Streaming enforcement run failed", run_id=run_id, contract=contract_name, error_type=type(e).__name__)
+            telemetry_logger.error(
+                "Streaming enforcement run failed", run_id=run_id,
+                contract=contract_name, error_type=type(e).__name__)
             self._record_failed_run(run_id, contract_name, e)
             raise
         finally:
@@ -1378,8 +1420,6 @@ class DataShellPipeline:
             # Clean up uncommitted staged files in case of unhandled error
             for sf in staged_files:
                 if sf.exists():
-                    try:
+                    with contextlib.suppress(OSError):
                         sf.unlink()
-                    except OSError:
-                        pass
 

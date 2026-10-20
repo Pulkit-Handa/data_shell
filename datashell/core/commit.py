@@ -13,8 +13,10 @@ import hmac
 import json
 import os
 import uuid
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Sequence
+from typing import Any
+
 from datashell.core.config import settings
 
 MAX_COMMIT_JOURNAL_BYTES = 1024 * 1024
@@ -42,7 +44,7 @@ def _fsync_dir(path: Path) -> None:
         pass
 
 
-def _journal_integrity_tag(payload: dict) -> str:
+def _journal_integrity_tag(payload: dict[str, Any]) -> str:
     unsigned = {key: value for key, value in payload.items() if key != "journal_mac"}
     canonical = json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
     if settings.is_production_mode:
@@ -52,7 +54,7 @@ def _journal_integrity_tag(payload: dict) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def _write_json_atomic(path: Path, payload: dict) -> None:
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     payload.pop("journal_mac", None)
     payload["journal_mac"] = _journal_integrity_tag(payload)
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
@@ -79,11 +81,11 @@ def generation_pointer_path(final_target: Path) -> Path:
     return final_target.with_name(final_target.name + GENERATION_POINTER_SUFFIX)
 
 
-def read_generation_pointer(final_target: Path) -> Optional[dict]:
+def read_generation_pointer(final_target: Path) -> dict[str, Any] | None:
     """Return the committed generation for a target, or ``None`` if never set."""
     pointer = generation_pointer_path(Path(final_target))
     try:
-        with open(pointer, "r", encoding="utf-8") as handle:
+        with open(pointer, encoding="utf-8") as handle:
             payload = json.load(handle)
     except (OSError, ValueError):
         return None
@@ -92,7 +94,7 @@ def read_generation_pointer(final_target: Path) -> Optional[dict]:
     return payload
 
 
-def resolve_committed_generation(final_target: Path) -> Optional[str]:
+def resolve_committed_generation(final_target: Path) -> str | None:
     """Resolve the reader-visible committed generation for a delivery target.
 
     External consumers (audit jobs, settlement, downstream consumers) MUST call
@@ -111,7 +113,7 @@ def resolve_committed_generation(final_target: Path) -> Optional[str]:
     return str(pointer.get("run_id"))
 
 
-def committed_generation_status(certificate: Dict[str, Any]) -> Dict[str, Any]:
+def committed_generation_status(certificate: dict[str, Any]) -> dict[str, Any]:
     """Report whether a certificate describes the currently committed generation.
 
     This is the shared reader contract for every supported surface (CLI
@@ -146,7 +148,7 @@ def committed_generation_status(certificate: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _write_generation_pointer_atomically(pointer: Path, payload: dict) -> None:
+def _write_generation_pointer_atomically(pointer: Path, payload: dict[str, Any]) -> None:
     """Atomically replace the generation pointer (the commit point)."""
     temp = pointer.with_name(f".{pointer.name}.{uuid.uuid4().hex}.tmp")
     with open(temp, "w", encoding="utf-8") as handle:
@@ -163,7 +165,7 @@ def _transaction_paths(target: Path, transaction_root: Path | None = None) -> tu
     return root / f".dm-commit-{token}.json", root / f".dm-commit-{token}.lock"
 
 
-def _rollback(journal_path: Path, journal: dict) -> None:
+def _rollback(journal_path: Path, journal: dict[str, Any]) -> None:
     for entry in reversed(journal.get("entries", [])):
         final = Path(entry["final"])
         staged = Path(entry["staged"])
@@ -196,15 +198,20 @@ def _recover_locked(journal_path: Path) -> None:
     try:
         if journal_path.stat().st_size > MAX_COMMIT_JOURNAL_BYTES:
             raise RuntimeError(f"Commit journal exceeds the permitted size: {journal_path}")
-        with open(journal_path, "r", encoding="utf-8") as handle:
+        with open(journal_path, encoding="utf-8") as handle:
             journal = json.load(handle)
     except (OSError, ValueError) as exc:
         raise RuntimeError(f"Cannot safely recover corrupted commit journal {journal_path}") from exc
 
-    if not isinstance(journal, dict) or journal.get("version") != 1 or journal.get("state") not in {"prepared", "committed"}:
+    valid_journal_header = (
+        isinstance(journal, dict)
+        and journal.get("version") == 1
+        and journal.get("state") in {"prepared", "committed"}
+    )
+    if not valid_journal_header:
         raise RuntimeError(f"Cannot safely recover unsupported commit journal {journal_path}")
     entries = journal.get("entries")
-    if not isinstance(entries, list) or not entries or len(entries) > MAX_TRANSACTION_ENTRIES:
+    if not isinstance(entries, list) or not entries or len(entries) > MAX_TRANSACTION_ENTRIES:  # noqa: E501
         raise RuntimeError(f"Cannot safely recover malformed commit journal {journal_path}")
     # The journal lives at the declared transaction root. Never trust path
     # values from a corrupted journal to touch files outside that root.
@@ -228,7 +235,11 @@ def _recover_locked(journal_path: Path) -> None:
     if supplied_mac is None:
         # Backward compatibility for pre-MAC journals is limited to the old
         # same-directory format. New cross-directory journals must be signed.
-        if any(Path(entry[k]).resolve().parent != journal_path.parent.resolve() for entry in entries for k in ("final", "staged", "backup")):
+        crosses_directory = any(
+            Path(entry[k]).resolve().parent != journal_path.parent.resolve()
+            for entry in entries for k in ("final", "staged", "backup")
+        )
+        if crosses_directory:
             raise RuntimeError(f"Commit journal integrity verification failed: {journal_path}")
     else:
         expected_mac = _journal_integrity_tag(journal)
@@ -286,14 +297,14 @@ def recover_pending_publications(transaction_root: Path) -> int:
         try:
             if journal_path.stat().st_size > MAX_COMMIT_JOURNAL_BYTES:
                 raise RuntimeError(f"Commit journal exceeds the permitted size: {journal_path}")
-            with open(journal_path, "r", encoding="utf-8") as handle:
+            with open(journal_path, encoding="utf-8") as handle:
                 journal = json.load(handle)
         except (OSError, ValueError) as exc:
             raise RuntimeError(f"Cannot safely recover corrupted commit journal {journal_path}") from exc
         if not isinstance(journal, dict):
             raise RuntimeError(f"Cannot safely recover malformed commit journal {journal_path}")
-        entries = journal.get("entries")
-        if not isinstance(entries, list) or not entries or len(entries) > MAX_TRANSACTION_ENTRIES or not isinstance(entries[-1], dict):
+        entries: Any = journal.get("entries")
+        if not isinstance(entries, list) or not entries or len(entries) > MAX_TRANSACTION_ENTRIES or not isinstance(entries[-1], dict):  # noqa: E501
             raise RuntimeError(f"Cannot safely recover malformed commit journal {journal_path}")
         target_value = entries[-1].get("final")
         if not isinstance(target_value, str):
@@ -312,7 +323,7 @@ def publish_transactionally(
     *,
     run_id: str,
     transaction_root: Path | None = None,
-    generation_pointer: dict | None = None,
+    generation_pointer: dict[str, Any] | None = None,
 ) -> None:
     """Publish staged files to final paths as one recoverable transaction.
 
@@ -357,7 +368,7 @@ def publish_transactionally(
         journal = None
         try:
             _recover_locked(journal_path)
-            entries = []
+            entries: list[dict[str, Any]] = []
             for index, (staged, final) in enumerate(normalized):
                 entries.append({
                     "staged": str(staged),
@@ -394,7 +405,7 @@ def publish_transactionally(
                 # A cleanup failure must not be reported as a failed delivery;
                 # recovery can remove the remaining backups on the next run.
                 try:
-                    with open(journal_path, "r", encoding="utf-8") as handle:
+                    with open(journal_path, encoding="utf-8") as handle:
                         current_journal = json.load(handle)
                 except (OSError, ValueError):
                     current_journal = {}

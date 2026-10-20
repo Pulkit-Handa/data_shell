@@ -1,14 +1,15 @@
 """Enterprise Contract Registry: Concurrency-safe version management, semver activation, and tenant isolation."""
 
 from __future__ import annotations
-import os
-import re
+
 import fcntl
 import json
+import os
+import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+
 from datashell.contract.models import DataContract
 from datashell.core.config import settings
 
@@ -19,7 +20,7 @@ class ContractRegistry:
     semantic version ordering for active contracts, and multi-tenant catalog scoping.
     """
 
-    def __init__(self, storage_dir: Optional[Path] = None):
+    def __init__(self, storage_dir: Path | None = None):
         self.storage_dir = (storage_dir or Path("./contracts_registry")).resolve()
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self._lock_file = self.storage_dir / ".registry.lock"
@@ -32,7 +33,7 @@ class ContractRegistry:
         return identifier
 
     @staticmethod
-    def _parse_semver(version_str: str) -> Tuple[int, ...]:
+    def _parse_semver(version_str: str) -> tuple[int, ...]:
         """Parses version strings into numerical tuples for deterministic semantic ordering."""
         nums = [int(n) for n in re.findall(r"\d+", version_str)]
         return tuple(nums) if nums else (0,)
@@ -41,7 +42,7 @@ class ContractRegistry:
         if not self._shared_file.exists():
             return set()
         try:
-            with open(self._shared_file, "r", encoding="utf-8") as handle:
+            with open(self._shared_file, encoding="utf-8") as handle:
                 payload = json.load(handle)
             names = payload.get("names", [])
             if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
@@ -73,7 +74,7 @@ class ContractRegistry:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
 
-    def _get_target_dir(self, name: str, tenant_id: Optional[str] = None, for_write: bool = False) -> Path:
+    def _get_target_dir(self, name: str, tenant_id: str | None = None, for_write: bool = False) -> Path:
         """Resolve a tenant-owned path or the internal shared catalog path."""
         clean_name = self._validate_identifier(name)
         if tenant_id is not None:
@@ -86,7 +87,7 @@ class ContractRegistry:
         # Global catalog is reserved for explicitly seeded/shared contracts.
         return self.storage_dir / clean_name
 
-    def save_contract(self, contract: DataContract, tenant_id: Optional[str] = None) -> Path:
+    def save_contract(self, contract: DataContract, tenant_id: str | None = None) -> Path:
         """
         Stores a contract version immutably using atomic staging and inter-process locking.
         Deterministic activation ensures 'latest' points to highest semantic version.
@@ -108,7 +109,7 @@ class ContractRegistry:
             # versions and must not prevent a tenant from defining its own copy.
             existing_matches = sorted(contract_dir.glob(f"{name}__v{ver}__*.json"))
             if existing_matches:
-                with open(existing_matches[-1], "r", encoding="utf-8") as f:
+                with open(existing_matches[-1], encoding="utf-8") as f:
                     existing_payload = json.load(f)
                 if existing_payload == new_payload:
                     # Idempotent re-save of exact same contract
@@ -116,11 +117,12 @@ class ContractRegistry:
                         self._mark_shared_contract_unlocked(name)
                     return contract_dir / "latest.json"
                 raise ValueError(
-                    f"Contract '{name}' version '{ver}' already exists and is immutable. Bump version number (e.g. to '{ver}.1')."
+                    f"Contract '{name}' version '{ver}' already exists and is immutable. "
+                    f"Bump version number (e.g. to '{ver}.1')."
                 )
 
             # 2. Write immutable versioned artifact
-            now_iso = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
+            now_iso = datetime.now(UTC).strftime("%Y%m%dT%H%M%S_%fZ")
             unique_suffix = uuid.uuid4().hex[:6]
             filename = f"{name}__v{ver}__{now_iso}__{unique_suffix}.json"
             dest = contract_dir / filename
@@ -134,7 +136,7 @@ class ContractRegistry:
             latest_file = contract_dir / "latest.json"
             current_latest = None
             if latest_file.exists():
-                with open(latest_file, "r", encoding="utf-8") as f:
+                with open(latest_file, encoding="utf-8") as f:
                     current_latest = DataContract(**json.load(f))
             should_update_latest = True
             if current_latest is not None:
@@ -158,7 +160,7 @@ class ContractRegistry:
             fcntl.flock(lock_fd, fcntl.LOCK_UN)
             os.close(lock_fd)
 
-    def get_latest(self, name: str, tenant_id: Optional[str] = None) -> Optional[DataContract]:
+    def get_latest(self, name: str, tenant_id: str | None = None) -> DataContract | None:
         """Retrieve latest active contract for a data product, respecting tenant boundaries."""
         contract_dir = self._get_target_dir(name, tenant_id=tenant_id, for_write=False)
         latest_file = contract_dir / "latest.json"
@@ -174,11 +176,11 @@ class ContractRegistry:
                 return None
             else:
                 return None
-        with open(latest_file, "r", encoding="utf-8") as f:
+        with open(latest_file, encoding="utf-8") as f:
             data = json.load(f)
         return DataContract(**data)
 
-    def get_version(self, name: str, version: str, tenant_id: Optional[str] = None) -> Optional[DataContract]:
+    def get_version(self, name: str, version: str, tenant_id: str | None = None) -> DataContract | None:
         """Retrieve exact contract version deterministically."""
         clean_name = self._validate_identifier(name)
         clean_ver = self._validate_identifier(version)
@@ -194,10 +196,10 @@ class ContractRegistry:
         if not matches:
             return None
 
-        with open(matches[-1], "r", encoding="utf-8") as f:
+        with open(matches[-1], encoding="utf-8") as f:
             return DataContract(**json.load(f))
 
-    def get_as_of_timestamp(self, name: str, timestamp_iso: str, tenant_id: Optional[str] = None) -> Optional[DataContract]:
+    def get_as_of_timestamp(self, name: str, timestamp_iso: str, tenant_id: str | None = None) -> DataContract | None:
         """
         Point-in-time time travel: Retrieves the contract version active at a specific historical moment.
         """
@@ -218,13 +220,13 @@ class ContractRegistry:
             if len(parts) >= 3:
                 ts_str = parts[2]
                 try:
-                    v_dt = datetime.strptime(ts_str, "%Y%m%dT%H%M%S_%fZ").replace(tzinfo=timezone.utc)
+                    v_dt = datetime.strptime(ts_str, "%Y%m%dT%H%M%S_%fZ").replace(tzinfo=UTC)
                     if v_dt <= target_dt:
                         active_version_file = v_file
                 except Exception:
                     continue
 
         if active_version_file:
-            with open(active_version_file, "r", encoding="utf-8") as f:
+            with open(active_version_file, encoding="utf-8") as f:
                 return DataContract(**json.load(f))
         return None

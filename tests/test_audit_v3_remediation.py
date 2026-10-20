@@ -1,29 +1,33 @@
 """Exhaustive regression test suite verifying all remediation items from Audit Review v3."""
 
-import os
 import json
-import pytest
-from pathlib import Path
+
 import polars as pl
+import pytest
 from fastapi.testclient import TestClient
 
-from datashell.core.config import settings, EnterpriseSettings, _resolve_secret
-from datashell.core.security import (
-    Role, Capability, APIKeyMetadata, register_api_key, revoke_api_key,
-    API_KEY_STORE, verify_tenant_access
-)
-from datashell.core.sandbox import FilesystemSandbox, PathSecurityViolation
-from datashell.core.crypto import CryptoEngine
 from datashell.contract.models import (
-    DataContract, SourceDefinition, SchemaColumn,
-    QualityRule, BatchRule, RowRuleCheckType, BatchRuleCheckType,
-    QualityBehavior, DeliverySpec, DeliveryTarget, ExtraColumnsPolicy, RuleCheckType
+    BatchRule,
+    BatchRuleCheckType,
+    DataContract,
+    DeliverySpec,
+    DeliveryTarget,
+    ExtraColumnsPolicy,
+    QualityRule,
+    RowRuleCheckType,
+    RuleCheckType,
+    SchemaColumn,
+    SourceDefinition,
 )
 from datashell.contract.registry import ContractRegistry
-from datashell.pipeline.runner import DataShellPipeline
+from datashell.core.config import _resolve_secret, settings
+from datashell.core.crypto import CryptoEngine
+from datashell.core.sandbox import FilesystemSandbox, PathSecurityViolation
+from datashell.core.security import APIKeyMetadata, Role, register_api_key
 from datashell.engines.delivery import TerminalStatus
 from datashell.engines.ingestion import StructuralIngestionEngine
 from datashell.engines.quality import SemanticQualityEngine
+from datashell.pipeline.runner import DataShellPipeline
 from datashell.server.app import app
 
 client = TestClient(app)
@@ -341,7 +345,10 @@ def test_unified_streaming_pipeline_execution(tmp_path):
             ],
             "quality": {
                 "behavior": "DROP_ROW",
-                "rules": [QualityRule(rule_id="positive-val", check=RowRuleCheckType.GREATER_THAN, column="val", value=0.0)],
+                "rules": [
+                    QualityRule(rule_id="positive-val",
+                                check=RowRuleCheckType.GREATER_THAN, column="val", value=0.0)
+                ],
                 "batch_rules": [BatchRule(rule_id="min-rows", check=BatchRuleCheckType.MIN_ROW_COUNT, value=1000)]
             },
             "delivery": DeliverySpec(targets=[DeliveryTarget(path=str(target_parquet), mode="overwrite")])
@@ -349,7 +356,9 @@ def test_unified_streaming_pipeline_execution(tmp_path):
     )
 
     pipeline = DataShellPipeline(contract)
-    res = pipeline.run_streaming(source_path=source_parquet, chunk_size=1000, audit_output_path=str(tmp_path / "stream_audit.json"))
+    res = pipeline.run_streaming(
+        source_path=source_parquet, chunk_size=1000,
+        audit_output_path=str(tmp_path / "stream_audit.json"))
 
     assert res.status == TerminalStatus.LOADED
     assert res.outcome.rows_delivered == 5000

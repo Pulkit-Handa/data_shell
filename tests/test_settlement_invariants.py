@@ -47,7 +47,6 @@ from datashell.settlement.money import (
 from datashell.settlement.pricing import calculate as calculate_price
 from datashell.settlement.pricing import price_tiered
 
-
 # ------------------------------------------------------------------- builders
 
 
