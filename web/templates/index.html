@@ -62,6 +62,7 @@
             <span><b>Airflow</b> provider</span>
             <span><b>CSV</b> · JSONL · Parquet</span>
             <span><b>20 GiB</b> ceiling</span>
+            <span><b>5M rows</b> streamed in 1.0 s</span>
           </div>
         </div>
 
@@ -152,6 +153,49 @@
             <tr><td class="how">Vast expectation ecosystem, profiling, data docs.</td><td class="how">Deliberately narrower: 19 built-in checks plus your own. If you want a data catalog/observability stack, GX is a reasonable choice — this is for controlled perimeters with inputs you have reason not to trust.</td></tr>
           </tbody>
         </table>
+
+        <div class="sec-head reveal" style="margin-top:56px">
+          <h2 class="sec-title" style="font-size:1.4rem">Built for the feeds that can hurt you.</h2>
+          <p class="sec-desc">
+            Teams whose inputs arrive from outside their trust boundary — partner feeds, vendor
+            payouts, claims and filings — where a bad row is expensive and “prove it” is a
+            compliance requirement, not a preference.
+          </p>
+        </div>
+
+        <div class="hgrid reveal">
+          <div class="hgrid__cell">
+            <p class="hgrid__k">Vendor settlements &amp; payouts</p>
+            <p class="hgrid__d">
+              The engine ships a settlement ledger, not just checks: exact minor-unit calculation
+              bound to one immutable contract version, dispute and billing-instruction flows, and
+              acceptance/pricing semantics your counterparties can be held to.
+            </p>
+          </div>
+          <div class="hgrid__cell">
+            <p class="hgrid__k">Partner &amp; affiliate data onboarding</p>
+            <p class="hgrid__d">
+              One versioned contract per partner — reviewed, diffed, rolled back like code. Every
+              rejected record lands in tenant-scoped quarantine with the exact rule that held it,
+              and the gateway rate-limits and refuses oversized payloads before they touch the
+              pipeline.
+            </p>
+          </div>
+          <div class="hgrid__cell">
+            <p class="hgrid__k">Claims &amp; regulatory submissions</p>
+            <p class="hgrid__d">
+              Batch gates — row-count floors, composite uniqueness, out-of-core SQL assertions —
+              plus zero-deficit footing, and a signed certificate an auditor can verify offline,
+              from content hashes alone.
+            </p>
+          </div>
+        </div>
+
+        <p class="table__note reveal">
+          Boundary honesty cuts both ways: if your inputs are first-party and already inside your
+          trust perimeter, a validation library is the better-shaped tool. This page is written for
+          the controlled-perimeter case.
+        </p>
       </div>
     </section>
 
@@ -230,6 +274,60 @@
               <li><span class="facts__k">Auditable</span> Every held row names its rule; every refused row names its structural reason.</li>
               <li><span class="facts__k">Extensible</span> Ship your own row/batch check types as plugins — built-ins stay closed and cannot be shadowed.</li>
               <li><span class="facts__k">Fail-closed</span> If the feed cannot be accounted for, nothing is delivered.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="sec-head reveal" style="margin-top:56px">
+          <h2 class="sec-title" style="font-size:1.4rem">Evidence your auditors can hold.</h2>
+          <p class="sec-desc">
+            Every delivery ships a certificate that binds contract, source bytes, delivered bytes,
+            and quarantine artifacts together — Merkle-rooted and signed. This is the actual
+            reconciliation and signature header from a live 5,000,000-row streaming run of this
+            repository (hashes abbreviated). <code>datashell verify</code> recomputes every hash and
+            the signature offline; flipping one byte in any bound artifact fails it.
+          </p>
+        </div>
+
+        <div class="proof proof--code reveal">
+          <div class="proof__cell" style="padding:0">
+<pre class="code" style="border:0;border-radius:0;height:100%"><span class="c">// streamed_audit_certificate.json — values from a real run</span>
+{
+  <span class="k">"certificate_version"</span>: "2.0-enterprise",
+  <span class="k">"run_id"</span>: "dm_run_8ac8db1eb5d9",
+  <span class="k">"timestamp"</span>: "2026-10-20T17:43:56.783374+00:00",
+  <span class="k">"contract"</span>: { "name": "vendor-settlements", "version": "1.0.0",
+                "sha256": "8518c50b25f7cbc4…" },
+  <span class="k">"cryptographic_manifest"</span>: {
+    "source_payload_sha256":    "6f47ec5ac8c4424f…",
+    "delivered_payload_sha256": "7ed8cf047ba8ab50…",
+    "delivered_status": "DELIVERED",
+    "quarantine_payload_sha256": "NONE_NO_VIOLATIONS",
+    "merkle_root": "54667d66a95b5102ff03ae37…"
+  },
+  <span class="k">"reconciliation"</span>: {
+    "rows_read":          5000000,
+    "refused_structural": 0,    "held_quality": 0,
+    "rows_delivered":     5000000,
+    "unaccounted_for":    0,    "footing_matched": true
+  },
+  <span class="k">"signature_header"</span>: {
+    "algorithm": "HMAC-SHA256",
+    "integrity_type": "SYMMETRIC_HMAC_AUTHENTICATION",
+    "third_party_verifiable": false,
+    "requires_shared_secret": true,
+    "tamper_evident": true
+  }
+}</pre>
+          </div>
+          <div class="proof__cell">
+            <h4>What the certificate gives you</h4>
+            <ul class="facts">
+              <li><span class="facts__k">Arithmetic, not claims</span> The reconciliation block is a zero-deficit equation: rows read = delivered + held + refused, with <code>unaccounted_for</code> as a hard-zero field.</li>
+              <li><span class="facts__k">Offline verification</span> <code>datashell verify</code> recomputes hashes and the signature locally — you never have to trust the reporter.</li>
+              <li><span class="facts__k">Third-party verifiable</span> Provision an Ed25519 key and the header becomes <code>third_party_verifiable: true</code>: any holder of the public key can verify without a shared secret.</li>
+              <li><span class="facts__k">Durable</span> The boundary ledger persists delivered, rejected, and failed runs per tenant — queryable and machine-readable.</li>
+              <li><span class="facts__k">Complete even when refused</span> Quarantine artifacts are hashed into the same Merkle root; a run that rejects still ships proof of what it rejected.</li>
             </ul>
           </div>
         </div>
@@ -377,26 +475,30 @@ datashell verify run_9f3c7a21_audit.json
           <tbody>
             <tr><td class="metric">Automated tests</td><td class="num">519</td><td class="how"><code>pytest</code> on the main suite, plus 14 for the Airflow provider</td></tr>
             <tr><td class="metric">Rows published on a footing mismatch</td><td class="num">0</td><td class="how">Reconciliation is a hard gate, not a warning</td></tr>
-            <tr><td class="metric">Boundary throughput, 1M-row feed</td><td class="num">3.3M rows/s</td><td class="how"><code>python benchmarks/volumetric_stress_test.py</code> — measured on a single node; delivered counts, file contents, and footing asserted at every scale</td></tr>
-            <tr><td class="metric">Zero-deficit accounting, 1M-row feed</td><td class="num">960,000 + 40,000</td><td class="how">960,000 delivered + 40,000 held or refused = 1,000,000 read; footing matched at every benchmarked scale</td></tr>
-            <tr><td class="metric">Peak RSS, 1M-row run</td><td class="num">782 MB</td><td class="how">Sampled process high-water mark in the same benchmark (includes native Polars/Arrow)</td></tr>
+            <tr><td class="metric">In-memory path, 1M-row feed</td><td class="num">3.3M rows/s</td><td class="how"><code>python benchmarks/volumetric_stress_test.py</code> — delivered counts, file contents, and footing asserted at every scale; peak RSS 782 MB</td></tr>
+            <tr><td class="metric">Out-of-core stream, 5M-row Parquet feed</td><td class="num">&lt; 1.1 s</td><td class="how"><code>python benchmarks/streaming_profile.py --rows 5000000 --format parquet</code> — vectorized fast path, footing asserted, ~4.9M rows/s, peak RSS 989 MiB</td></tr>
+            <tr><td class="metric">Out-of-core stream, 5M-row CSV feed</td><td class="num">158k rows/s</td><td class="how">Same harness with <code>--format csv</code> — chunk columns arrive as strings, so the strict per-row caster runs by design (exact rejection diagnostics); memory grows with feed size on this build</td></tr>
+            <tr><td class="metric">Zero-deficit accounting, 5M-row feed</td><td class="num">5,000,000 = 5,000,000</td><td class="how">The certificate above is a real certificate: read = delivered + held + refused, zero unaccounted, footing matched</td></tr>
+            <tr><td class="metric">Gateway latency, 1k-row uploads</td><td class="num">P50 137 · P95 238 · P99 594 ms</td><td class="how"><code>python benchmarks/api_latency_load_test.py</code> — 50/50 HTTP 200 and business-verified at the configured concurrency ceiling; in-process gateway</td></tr>
             <tr><td class="metric">Upload ceiling</td><td class="num">20 GiB</td><td class="how">Derived request-body limit — 21,474,836,480 bytes</td></tr>
             <tr><td class="metric">Access model</td><td class="num">4 × 9</td><td class="how">RBAC roles × capabilities, enforced at every endpoint</td></tr>
             <tr><td class="metric">API surface</td><td class="num">28 operations</td><td class="how">Every route scope-checked at startup; CI keeps <code>docs/openapi.yaml</code> (27 paths) in sync</td></tr>
             <tr><td class="metric">Built-in rule checks</td><td class="num">19</td><td class="how">11 row + 8 batch — <code>datashell rules</code>; extend more via entry-point plugins</td></tr>
             <tr><td class="metric">Static security + dependency audit</td><td class="num">0 + 0</td><td class="how">bandit zero-findings policy; OSV audit on every push</td></tr>
-            <tr><td class="metric">Streaming formats</td><td class="num">3</td><td class="how">CSV, JSONL/NDJSON, Parquet — bounded memory</td></tr>
+            <tr><td class="metric">Streaming formats</td><td class="num">3</td><td class="how">CSV, JSONL/NDJSON, Parquet — chunked staging, one row group per batch (<code>STREAM_CHUNK_ROWS</code>)</td></tr>
             <tr><td class="metric">Python versions in CI</td><td class="num">3.11–3.13</td><td class="how">Test, wheel build, and container jobs</td></tr>
           </tbody>
         </table>
         <p class="table__note reveal">
-          The throughput and memory figures above were measured on development hardware (single
-          node, in-memory path) by the repository's own harnesses —
-          <code>python benchmarks/volumetric_stress_test.py</code> and
-          <code>datashell benchmark --rows 1000000 --json</code> — which assert expected delivered
-          counts and inspect the output files, so a run that silently drops rows <em>fails</em>
-          instead of reporting a flattering number. Measure on your own hardware before capacity
-          planning.
+          The throughput, latency, and memory figures above were measured on a single-node
+          development machine (13 GB RAM, Python 3.14) by the repository's own harnesses —
+          <code>python benchmarks/volumetric_stress_test.py</code>,
+          <code>python benchmarks/streaming_profile.py</code>, and
+          <code>python benchmarks/api_latency_load_test.py</code> — all of which assert expected
+          delivered counts and the reconciliation footing, so a run that silently drops rows
+          <em>fails</em> instead of reporting a flattering number. The gateway latency is measured
+          in-process (TestClient), not over a network. Measure on your own hardware — and at your
+          own scale — before capacity planning.
         </p>
       </div>
     </section>
@@ -450,7 +552,7 @@ datashell verify run_9f3c7a21_audit.json
           <tbody>
             <tr><td class="metric">Security posture</td><td class="how">Hardened — startup rejects weak/seeded secrets, RBAC on every route, rate limiting, non-root read-only container, artifact paths validated before use. CI enforces a zero-findings bandit policy and an OSV dependency audit on every push.</td></tr>
             <tr><td class="metric">Reference topology</td><td class="how">Single replica and single worker. The credential registry and rate limiter are process-local by design.</td></tr>
-            <tr><td class="metric">Scaling surfaces</td><td class="how">Five documented, environment-tunable surfaces — ingest backend (auto/memory/stream), batch size, SQL threads, delivery codec, concurrency/disk — in <code>docs/SCALING.md</code> with worked profiles.</td></tr>
+            <tr><td class="metric">Scaling surfaces</td><td class="how">Five documented, environment-tunable surfaces — ingest backend (auto/memory/stream), batch size, SQL threads, delivery codec, concurrency/disk — in <code>docs/SCALING.md</code> with worked profiles. <code>benchmarks/streaming_profile.py</code> measures the out-of-core path's wall time and peak RSS on your hardware.</td></tr>
             <tr><td class="metric">Certification</td><td class="how">None claimed. Code-level checks are not a substitute for a deployment-specific threat model and independent review.</td></tr>
             <tr><td class="metric">Horizontal scale</td><td class="how">Beyond the reference topology — requires shared credential/rate-limit stores before running multiple replicas.</td></tr>
             <tr><td class="metric">Certificate semantics</td><td class="how">Proves integrity and authorship; it does not prove sender identity. Pair it with your own trust anchor.</td></tr>

@@ -175,7 +175,7 @@ def test_streaming_flushes_bounded_row_groups(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("fmt", ["csv", "jsonl"])
-def test_run_streaming_handles_csv_and_jsonl_in_constant_memory(tmp_path, monkeypatch, fmt):
+def test_run_streaming_handles_csv_and_jsonl(tmp_path, monkeypatch, fmt):
     _isolate_storage(monkeypatch, tmp_path)
     rows = 20_000
     source = tmp_path / f"source.{fmt}"
