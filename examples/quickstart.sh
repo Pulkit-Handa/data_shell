@@ -6,7 +6,7 @@
 # provably detected by the signed audit certificate.
 #
 # Prerequisite: the CLI is installed (run `pip install -e .` from the repo root,
-# or `pip install data-shell`).
+# or `pip install datashell`).
 #
 #   ./examples/quickstart.sh
 #

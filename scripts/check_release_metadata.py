@@ -12,8 +12,9 @@ other copy of the version and every dependency claim must match it:
 * historical changelog claims ("removed the unused `x` runtime dependency")
   never contradict the current dependency list.
 
-The distribution name (``data-shell``), the import package (``datashell``) and
-the product name (``Data Shell``) are deliberately distinct and all preserved.
+The distribution name (``datashell`` — matching the import package so
+``pip install datashell`` works directly), and the product name
+(``Data Shell``) are deliberately distinct and both preserved.
 
 Exit code 0 = consistent, 1 = inconsistency (details printed).
 
@@ -72,8 +73,8 @@ def collect_problems(root: Path = REPO_ROOT, tag: str | None = None) -> list[str
     version = project["version"]
 
     # --- canonical identity: distribution / import package / product name ---
-    if project["name"] != "data-shell":
-        problems.append(f"pyproject project.name is {project['name']!r}, expected 'data-shell'")
+    if project["name"] != "datashell":
+        problems.append(f"pyproject project.name is {project['name']!r}, expected 'datashell'")
     scripts = project.get("scripts", {})
     if scripts.get("datashell") != "datashell.cli.main:main":
         problems.append(
@@ -161,7 +162,7 @@ def main(argv: list[str]) -> int:
         return 1
     version = tomllib.loads((Path(args.root) / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
     suffix = f" (tag {args.tag})" if args.tag else ""
-    print(f"Release metadata consistent: data-shell {version}{suffix} "
+    print(f"Release metadata consistent: datashell {version}{suffix} "
           "— package, web app, changelog and lockfiles agree")
     return 0
 

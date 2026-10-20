@@ -31,7 +31,7 @@ def test_release_version_matches_installed_package_metadata():
 
     import datashell
 
-    assert datashell.__version__ == dist_version("data-shell")
+    assert datashell.__version__ == dist_version("datashell")
 
 
 def test_tag_check_accepts_the_matching_tag():

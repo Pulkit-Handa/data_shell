@@ -532,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
     _section("SUMMARY")
     failures = SCENARIOS.get("failures", [])
     report = {
-        "demo": "data-shell-verifiable-settlement",
+        "demo": "datashell-verifiable-settlement",
         "records": args.records,
         "splits": {"refused": refused, "held": held, "delivered": delivered_expected},
         "run_id": result.run_id,

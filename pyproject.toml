@@ -3,33 +3,63 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "data-shell"
+name = "datashell"
 version = "1.0.2"
 description = "Contract-driven boundary enforcement engine: Bad data never lands, and never leaves."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "polars>=2.0.0,<3.0.0",
-    "duckdb>=1.0.0,<2.0.0",
     "pyarrow>=14.0.0,<27.0.0",
     "pydantic>=2.9.0,<3.0.0",
-    "fastapi>=0.110.0,<1.0.0",
-    "uvicorn>=0.28.0,<1.0.0",
-    "python-multipart>=0.0.9,<1.0.0",
-    "prometheus-client>=0.20.0,<1.0.0",
-    "httpx>=0.27.0,<1.0.0",
-    "numpy>=1.26.0,<3.0.0",
-    "cryptography>=42.0.0,<51.0.0"
+    "cryptography>=42.0.0,<51.0.0",
+    "prometheus-client>=0.20.0,<1.0.0"
 ]
 
 [project.optional-dependencies]
+# The enforcement pipeline runs on `pip install datashell`. Features live behind
+# extras so service-critical nodes can install a minimal, auditable dependency
+# set (a purely structural-boundary node never pulls a web framework).
+server = [
+    "fastapi>=0.110.0,<1.0.0",
+    "uvicorn>=0.28.0,<1.0.0",
+    "python-multipart>=0.0.9,<1.0.0"
+]
+# The Stripe adapter speaks the signed REST API via httpx directly (request
+# signature verification, retry, and idempotency are part of our boundaries);
+# the heavyweight stripe SDK is intentionally NOT declared — it would add an
+# unused, network-capable dependency without being imported anywhere.
+billing = [
+    "httpx>=0.27.0,<1.0.0"
+]
+# Batch rules compile to SQL and run against the vectorized DuckDB engine.
+duckdb = [
+    "duckdb>=1.0.0,<2.0.0"
+]
+# Airflow operator integration (integrations/airflow uses the stdlib HTTP
+# client, so this extra is only what gives you a runnable scheduler).
+airflow = [
+    "apache-airflow>=2.7.0,<3.1.0"
+]
 dev = [
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.23.0,<2.0.0",
     "pyyaml>=6.0.0,<7.0.0",
+    "numpy>=1.26.0,<3.0.0",
     "ruff>=0.12.0",
     "mypy>=1.17.0",
     "pre-commit>=3.8.0"
+]
+# Explicit union (not a self-referential extra) for older-resolver compatibility.
+# `airflow` is deliberately NOT part of `all`: Apache Airflow pins Python
+# interpreter ranges of its own and is deployed as scheduler infrastructure,
+# not as a library extra; opt in via datashell[airflow].
+all = [
+    "fastapi>=0.110.0,<1.0.0",
+    "uvicorn>=0.28.0,<1.0.0",
+    "python-multipart>=0.0.9,<1.0.0",
+    "httpx>=0.27.0,<1.0.0",
+    "duckdb>=1.0.0,<2.0.0"
 ]
 
 [project.scripts]

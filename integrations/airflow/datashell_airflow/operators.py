@@ -147,7 +147,7 @@ class DataShellLocalEnforceOperator(BaseOperator):
         if binary is None:
             raise AirflowException(
                 f"Data Shell CLI '{self.datashell_bin}' was not found on PATH. "
-                f"Install the data-shell package in the worker environment."
+                f"Install the datashell package in the worker environment."
             )
         command = self._command()
         command[0] = binary

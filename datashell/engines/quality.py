@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import duckdb
 import polars as pl
 
 from datashell.contract.compiler import BatchRuleCompiler, RuleCompiler
@@ -167,12 +166,22 @@ class SemanticQualityEngine:
         """
         Evaluates batch rules in DuckDB over an Arrow table, Polars DataFrame, or out-of-core Parquet file.
         Uses pyarrow.dataset to stream Parquet data on demand without materializing the full dataset into RAM.
+
+        DuckDB is an optional dependency (``pip install datashell[duckdb]``); contracts
+        that only use row rules run fine without it.
         """
         batch_results: list[BatchRuleResult] = []
         all_batch_passed = True
 
         if not self.quality_spec.batch_rules:
             return batch_results, all_batch_passed
+
+        try:
+            import duckdb
+        except ImportError as exc:  # pragma: no cover - environment-dependent
+            raise ImportError(
+                "Batch rules require the DuckDB engine. Install it with: pip install datashell[duckdb]"
+            ) from exc
 
         con = duckdb.connect(
             database=":memory:",

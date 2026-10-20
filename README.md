@@ -22,8 +22,10 @@ The reference deployment is deliberately **single-replica**: the credential regi
 ![Data Shell quickstart](docs/demo.gif)
 
 ```bash
-pip install -e .          # or: pip install data-shell
-datashell demo             # refuse poisoned rows, publish clean ones, detect tampering
+pip install datashell          # core enforcement engine (polars + pyarrow only)
+pip install "datashell[all]"   # + HTTP gateway, DuckDB batch rules, billing adapter
+datashell doctor               # report which capabilities the environment has
+datashell demo                 # refuse poisoned rows, publish clean ones, detect tampering
 ```
 
 `datashell demo` is a self-contained walkthrough: it generates a 1,000-row feed with

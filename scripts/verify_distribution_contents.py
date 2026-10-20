@@ -76,7 +76,7 @@ def _violations(names: list[str], *, allow_egg_info_root: bool) -> list[str]:
                 # Generated metadata is normal directly under an sdist root,
                 # and never legitimate inside a wheel.
                 top = name.split("/", 1)[0]
-                if not (allow_egg_info_root and top.startswith("data_shell.egg-info")):
+                if not (allow_egg_info_root and top.startswith("datashell.egg-info")):
                     bad.append(f"{name}  (unexpected egg-info location)")
             elif lowered.endswith(".parquet") and not name.startswith(PARQUET_FIXTURE_PREFIXES):
                 bad.append(f"{name}  (non-fixture Parquet)")
@@ -90,7 +90,7 @@ def check_wheel(path: Path) -> tuple[list[str], list[str]]:
     problems = _violations(names, allow_egg_info_root=False)
 
     # Strict allowlist: nothing outside the package and its own metadata.
-    allowed = re.compile(r"^(datashell/|data_shell-[0-9][^/]*\.dist-info/)")
+    allowed = re.compile(r"^(datashell/|datashell-[0-9][^/]*\.dist-info/)")
     for name in names:
         if not allowed.match(name):
             problems.append(f"{name}  (outside the datashell package allowlist)")

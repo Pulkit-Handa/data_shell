@@ -277,7 +277,7 @@ async def correlation_id_and_tracing(request: Request, call_next: Callable[[Requ
 @app.get("/health")
 def healthcheck() -> dict[str, Any]:
     """Liveness probe for orchestrators, load balancers, and Kubernetes."""
-    return {"status": "healthy", "service": "data-shell"}
+    return {"status": "healthy", "service": "datashell"}
 
 
 @app.get("/ready")
@@ -305,7 +305,7 @@ def readinesscheck() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Credential registry is not ready")
     if not BoundaryLedger().check_integrity():
         raise HTTPException(status_code=503, detail="Boundary ledger is not ready")
-    return {"status": "ready", "service": "data-shell"}
+    return {"status": "ready", "service": "datashell"}
 
 
 @app.get("/metrics")

@@ -6,7 +6,13 @@ import time
 from typing import Any
 from urllib.parse import urlsplit
 
-import httpx
+try:
+    import httpx
+except ImportError as _exc:  # pragma: no cover - exercised only outside the extra
+    raise ImportError(
+        "The webhook dispatcher requires the 'billing' extra "
+        "(it reuses the signed HTTP client). Install it with: pip install datashell[billing]"
+    ) from _exc
 
 from datashell.core.crypto import CryptoEngine
 from datashell.core.telemetry import telemetry_logger

@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="datashell",
         description="Data Shell: Contract-driven boundary enforcement engine. Bad data never lands, and never leaves.",
     )
-    parser.add_argument("--version", action="version", version=f"data-shell {__version__}")
+    parser.add_argument("--version", action="version", version=f"datashell {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # run command
@@ -119,6 +119,10 @@ def build_parser() -> argparse.ArgumentParser:
     # demo command
     demo_parser = subparsers.add_parser("demo", help="Run a self-contained refusal/tamper/verify walkthrough")
     demo_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+
+    # doctor command (environment capability report)
+    doctor_parser = subparsers.add_parser("doctor", help="Report which capabilities this environment has")
+    doctor_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     # contract command (commercial contract management)
     contract_parser = subparsers.add_parser("contract", help="Manage commercial delivery contracts")
@@ -503,6 +507,149 @@ def command_validate_contract(args: argparse.Namespace) -> int:
     )
     for warning in warnings:
         print(f"  WARNING: {warning}")
+    return 0
+
+
+# --------------------------------------------------------------- commands: doctor
+
+
+def _importable(module_name: str) -> tuple[bool, str | None]:
+    """Return ``(importable, version_or_none)`` without executing heavy init twice."""
+    import importlib
+
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError:
+        return False, None
+    return True, str(getattr(module, "__version__", "unknown"))
+
+
+def command_doctor(args: argparse.Namespace) -> int:
+    """Environment capability report: what this install can and cannot do.
+
+    ``datashell`` is a feature-partitioned install: the enforcement core is one
+    dependency set, and the gateway/batch-SQL/billing capabilities are optional
+    extras. ``doctor`` tells an SRE or a CI script exactly which capabilities
+    the current environment has, and prints the extra name that supplies any
+    missing one. Core capability failures exit 1; missing optional extras do
+    not (they are configuration choices, not breakage).
+    """
+    core_modules = (
+        ("polars", "polars"),
+        ("pyarrow", "pyarrow"),
+        ("pydantic", "pydantic"),
+        ("cryptography", "cryptography"),
+        ("prometheus_client", "prometheus_client"),
+    )
+    extra_modules = (
+        ("server", [("fastapi", "fastapi"), ("uvicorn", "uvicorn"), ("multipart", "python-multipart")]),
+        ("duckdb", [("duckdb", "duckdb")]),
+        ("billing", [("httpx", "httpx")]),
+        ("airflow", [("airflow", "apache-airflow")]),
+    )
+
+    core_status: dict[str, Any] = {}
+    failures: list[str] = []
+    for label, module_name in core_modules:
+        ok, version = _importable(module_name)
+        core_status[label] = {"available": ok, "version": version}
+        if not ok:
+            failures.append(f"core dependency '{label}' is not importable")
+
+    extras_status: dict[str, Any] = {}
+    for extra_name, modules in extra_modules:
+        entries: dict[str, Any] = {}
+        available = True
+        for label, module_name in modules:
+            ok, version = _importable(module_name)
+            entries[label] = {"available": ok, "version": version}
+            available = available and ok
+        extras_status[extra_name] = {"available": available, "modules": entries}
+
+    # Environment sanity: storage root writable; production self-checks.
+    environment_status: dict[str, Any] = {}
+    try:
+        settings.output_dir.mkdir(parents=True, exist_ok=True)
+        probe = settings.output_dir / ".datashell_doctor.write"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        environment_status["storage_root_writable"] = {
+            "available": True,
+            "path": str(settings.output_dir),
+        }
+    except OSError as exc:
+        environment_status["storage_root_writable"] = {
+            "available": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        failures.append("storage root is not writable")
+
+    # Production posture: EnterpriseSettings validates secrets/CORS/auth on
+    # construction, so reaching this point means construction passed. Re-run it
+    # against an isolated copy to surface the actionable message for SREs.
+    try:
+        production_copy = settings.model_copy(deep=True)
+        production_copy.model_post_init(None)
+        environment_status["production_security_check"] = {"available": True}
+    except RuntimeError as exc:
+        environment_status["production_security_check"] = {"available": False, "error": str(exc)}
+        if settings.is_production_mode:
+            failures.append(f"production security check failed: {exc}")
+
+    environment_status["environment"] = settings.environment
+    environment_status["auth_enabled"] = settings.auth_enabled
+
+    healthy = not failures
+
+    if args.json:
+        print(json.dumps({
+            "version": __version__,
+            "python": "{}.{}.{}".format(*sys.version_info[:3]),
+            "healthy": healthy,
+            "core": core_status,
+            "extras": extras_status,
+            "environment": environment_status,
+            "failures": failures,
+        }, indent=2))
+        return 0 if healthy else 1
+
+    print(f"datashell doctor — version {__version__} (Python {sys.version_info.major}.{sys.version_info.minor})")
+    print()
+    print("Core enforcement engine:")
+    for label, _import_name in core_modules:
+        entry = core_status[label]
+        mark = "✓" if entry["available"] else "✗"
+        version_note = f" (v{entry['version']})" if entry["available"] else ""
+        print(f"  {mark} {label}{version_note}")
+    print()
+    print("Optional capabilities (enable with pip install \"datashell[<extra>]\"):")
+    for extra_name, modules in extra_modules:
+        entry = extras_status[extra_name]
+        mark = "✓" if entry["available"] else "○"
+        detail = ", ".join(
+            f"{label}: {'present' if entry['modules'][label]['available'] else 'missing'}"
+            for label, _module_name in modules
+        )
+        print(f"  {mark} [{extra_name}] — {detail}")
+    print()
+    print("Environment:")
+    print(f"  ENVIRONMENT={settings.environment}  auth={'enabled' if settings.auth_enabled else 'disabled'}")
+    writable = environment_status["storage_root_writable"]["available"]
+    print(f"  storage root {'writable' if writable else 'NOT writable'} ({settings.output_dir})")
+
+    if failures:
+        print()
+        print("✗ Environment problems detected:", file=sys.stderr)
+        for failure in failures:
+            print(f"  - {failure}", file=sys.stderr)
+        return 1
+    if not all(v["available"] for v in extras_status.values()):
+        print()
+        print("○ Optional extras are missing — install the ones your deployment needs, e.g. "
+              "pip install \"datashell[server,duckdb]\"")
+    else:
+        print()
+        print("✓ All capabilities available.")
     return 0
 
 
@@ -897,6 +1044,9 @@ def main(argv: list[str] | None = None) -> None:
 
         if args.command == "demo":
             sys.exit(command_demo(args))
+
+        if args.command == "doctor":
+            sys.exit(command_doctor(args))
 
         if args.command == "contract":
             from datashell.cli.settlement_commands import (

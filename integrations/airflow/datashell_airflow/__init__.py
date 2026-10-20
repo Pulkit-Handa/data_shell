@@ -43,7 +43,7 @@ def __getattr__(name: str) -> Any:
 def get_provider_info() -> dict[str, Any]:
     """Metadata used by Airflow to register this provider."""
     return {
-        "package-name": "data-shell-airflow",
+        "package-name": "datashell-airflow",
         "name": "Data Shell",
         "description": "Gate Airflow DAGs on Data Shell boundary enforcement.",
         "versions": [__version__],

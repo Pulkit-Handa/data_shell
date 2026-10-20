@@ -30,7 +30,13 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-import httpx
+try:
+    import httpx
+except ImportError as _exc:  # pragma: no cover - exercised only outside the extra
+    raise ImportError(
+        "The Stripe billing adapter requires the 'billing' extra. "
+        "Install it with: pip install datashell[billing]"
+    ) from _exc
 
 from datashell.billing.base import (
     BillingProviderName,

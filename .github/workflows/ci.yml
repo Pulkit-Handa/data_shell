@@ -114,11 +114,11 @@ print(f'pre-commit config valid: {len(repos)} repos, hooks:',
       - name: Check out source
         uses: actions/checkout@v4
       - name: Build container image
-        run: docker build --pull --tag data-shell:ci .
+        run: docker build --pull --tag datashell:ci .
       - name: Check image configuration
         run: |
-          test "$(docker image inspect data-shell:ci --format '{{.Config.User}}')" = "10001:10001"
-          test "$(docker image inspect data-shell:ci --format '{{.Config.WorkingDir}}')" = "/app"
+          test "$(docker image inspect datashell:ci --format '{{.Config.User}}')" = "10001:10001"
+          test "$(docker image inspect datashell:ci --format '{{.Config.WorkingDir}}')" = "/app"
       - name: Exercise production container with read-only root filesystem
         shell: bash
         run: |
@@ -139,7 +139,7 @@ print(f'pre-commit config valid: {len(repos)} repos, hooks:',
             -e ALLOWED_ORIGINS=https://console.ci.example \
             -e FORWARDED_ALLOW_IPS=127.0.0.1 \
             -e MIN_FREE_DISK_BYTES=0 \
-            data-shell:ci
+            datashell:ci
           cleanup() {
             docker logs datashell-ci || true
             docker stop datashell-ci >/dev/null 2>&1 || true
