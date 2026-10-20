@@ -61,6 +61,9 @@ This document is the **authoritative source** for all Data Shell configuration. 
 | `RATE_LIMIT_REQUESTS_PER_MINUTE` | `120` | Token bucket rate limit per API key. |
 | `STREAM_CHUNK_ROWS` | `100000` | Rows per micro-batch in streaming mode. Must be >= 1. |
 | `STREAM_AUTO_THRESHOLD_BYTES` | `67108864` (64 MiB) | Files at or above this size use streaming automatically. |
+| `DATASHELL_INGEST_MODE` | `auto` | Ingest backend policy: `auto` (promote by size), `memory` (always in-memory), `stream` (always out-of-core). Explicit CLI `--streaming`/`--no-streaming` or API request field beats this. |
+| `DATASHELL_DELIVERY_COMPRESSION` | `zstd` | Parquet codec for delivered targets and quarantine snapshots (`snappy`, `zstd`, `gzip`, `lz4`, `brotli`, `uncompressed`). One setting covers both in-memory (Polars) and streaming (pyarrow) writers. |
+| `DATASHELL_DUCKDB_THREADS` | `4` | DuckDB worker threads for batch-rule (SQL) evaluation. Must be >= 1; scale to node cores on dedicated batch-SQL nodes. |
 
 ### 1.5 Drift Configuration
 

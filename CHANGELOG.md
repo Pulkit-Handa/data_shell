@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Scaling backend controls + `docs/SCALING.md`.** The ingest backend is now a
+  documented policy: `DATASHELL_INGEST_MODE` (`auto|memory|stream`) resolves in
+  one place (`choose_execution_backend`) after explicit CLI/API requests, and
+  size-threshold auto-promotion stays the default. Three new environment
+  knobs: `DATASHELL_INGEST_MODE`, `DATASHELL_DELIVERY_COMPRESSION`
+  (`snappy|zstd|gzip|lz4|brotli|uncompressed`, applied to delivered targets and
+  quarantine snapshots on both the in-memory Polars writer and the streaming
+  pyarrow writers — unified on `zstd`, the codec in-memory 1.0 deliveries
+  already used), and `DATASHELL_DUCKDB_THREADS` (batch-rule evaluation
+  parallelism). `docs/SCALING.md` documents the five scaling surfaces, worked
+  deployment profiles, and how to reproduce the capacity numbers.
+
 ### Changed
 - **Distribution name `data-shell` → `datashell`.** The import package and the
   pip distribution now share one name, so `pip install datashell` is all a new

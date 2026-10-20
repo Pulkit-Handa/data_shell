@@ -328,6 +328,7 @@ memory stays bounded by the streaming batch size rather than the input size.
 * `docs/production/RELEASE_CHECKLIST.md` — pilot release gates, acceptance evidence, and remaining blockers.
 * `docs/production/OPERATIONS_RUNBOOK.md` — runbook: startup, health checks, backup/restore, monitoring, rollback.
 * `docs/production/CONFIGURATION_REFERENCE.md` — every environment variable, CLI option, API endpoint, role, and certificate field.
+* `docs/SCALING.md` — the five scaling surfaces (ingest backend, batch size, SQL threads, delivery codec, concurrency/disk) and worked deployment profiles.
 * `docs/THREAT_MODEL.md` — assets, trust boundaries, and mitigations.
 * `docs/SETTLEMENT.md` — settlement architecture, schemas, acceptance/pricing semantics, invariants, and limitations.
 * `docs/SETTLEMENT_OPERATIONS.md` — settlement CLI/API reference, billing configuration, disputes, threat model, and production checklist.

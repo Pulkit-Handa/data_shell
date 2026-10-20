@@ -24,6 +24,7 @@
 
 | Document | Purpose |
 |---|---|
+| [SCALING.md](SCALING.md) | The five scaling surfaces, per-deployment profiles, and how to re-tune with environment variables |
 | [FIRST_RUN.md](FIRST_RUN.md) | 5-minute quickstart from install to first verified delivery |
 | [../TUTORIAL.md](../TUTORIAL.md) | End-to-end tutorial from contract authoring to enforcement |
 | [../examples/README](../examples/README.md) | Example contracts, quickstart, and samples |

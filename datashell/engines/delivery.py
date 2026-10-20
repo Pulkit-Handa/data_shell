@@ -19,7 +19,7 @@ from datashell.contract.models import DataContract
 from datashell.core.commit import publish_transactionally, recover_publication
 from datashell.core.config import settings
 from datashell.core.crypto import CryptoEngine
-from datashell.core.fileops import materialize_artifact_copy, parquet_compression_codec
+from datashell.core.fileops import materialize_artifact_copy, polars_parquet_compression
 from datashell.core.sandbox import FilesystemSandbox
 from datashell.engines.ingestion import StructuralRejection
 from datashell.engines.reconciler import ReconciliationFootingError, ReconciliationLedger
@@ -128,11 +128,7 @@ class DeliveryEngine:
             if held_df.height > 0:
                 staged_held = quarantine_dir / f".staged_{ledger.run_id}_held_records.parquet"
                 final_held = quarantine_dir / f"{ledger.run_id}_held_records.parquet"
-                held_codec = parquet_compression_codec()
-                if held_codec is None:
-                    held_df.write_parquet(staged_held)
-                else:
-                    held_df.write_parquet(staged_held, compression=held_codec)
+                held_df.write_parquet(staged_held, compression=polars_parquet_compression())
                 staged_files.append(staged_held)
                 os.replace(staged_held, final_held)
                 created_quarantine_files.append(final_held)
@@ -184,11 +180,7 @@ class DeliveryEngine:
             staged_files.append(staged_target)
 
             # Write to staging path
-            admitted_codec = parquet_compression_codec()
-            if admitted_codec is None:
-                admitted_df.write_parquet(staged_target)
-            else:
-                admitted_df.write_parquet(staged_target, compression=admitted_codec)
+            admitted_df.write_parquet(staged_target, compression=polars_parquet_compression())
 
             # Compute cryptographic hash of the exact staged file BEFORE publication
             # Guarantees concurrent runs cannot tamper with or replace the hash binding!
