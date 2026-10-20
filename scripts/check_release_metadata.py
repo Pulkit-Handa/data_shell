@@ -19,7 +19,7 @@ The distribution name (``datashell`` — matching the import package so
 Exit code 0 = consistent, 1 = inconsistency (details printed).
 
     python scripts/check_release_metadata.py
-    python scripts/check_release_metadata.py --tag v1.0.2
+    python scripts/check_release_metadata.py --tag v2.0.0
 """
 
 from __future__ import annotations
@@ -151,7 +151,7 @@ def collect_problems(root: Path = REPO_ROOT, tag: str | None = None) -> list[str
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=str(REPO_ROOT), help="repository root (defaults to the script's parent)")
-    parser.add_argument("--tag", help="release tag to compare against the package version (e.g. v1.0.2)")
+    parser.add_argument("--tag", help="release tag to compare against the package version (e.g. v2.0.0)")
     args = parser.parse_args(argv)
 
     problems = collect_problems(Path(args.root), tag=args.tag)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datashell"
-version = "1.0.2"
+version = "2.0.0"
 description = "Contract-driven boundary enforcement engine: Bad data never lands, and never leaves."
 readme = "README.md"
 requires-python = ">=3.11"

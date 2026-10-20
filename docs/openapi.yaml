@@ -247,7 +247,7 @@ info:
   description: Contract-driven perimeter boundary enforcement platform. Bad data never
     lands, and never leaves.
   title: Data Shell Enterprise Gateway
-  version: 1.0.2-enterprise
+  version: 2.0.0-enterprise
 openapi: 3.1.0
 paths:
   /:

@@ -5,7 +5,31 @@ All notable changes to Data Shell are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.0.0] - 2026-10-20
+
+Production-readiness release: everything below was shipped incrementally and
+gated by CI at each step (lint, strict typing, 519 tests, zero-findings
+bandit, OSV clean dependency audit, wheel/sdist content checks, and a
+CI-verified OpenAPI schema). One version number now covers all of it.
+
+### Migration notes (1.0.x → 2.0.0)
+
+- **Upgrades are configuration-only.** The boundary model, defaults, ledger
+  format, and contract schema (`daas/v1`) are unchanged; no data or ledger
+  migration is required.
+- **New optional things stay off until asked for:** tracing activates only
+  with `OTEL_EXPORTER_OTLP_ENDPOINT` **and** `datashell[otel]`; the benchmark
+  output lives in a fresh temp directory unless `--out` is given; plugin
+  rule checks are inert unless a package registers them via the
+  `datashell.rule_checks.row`/`batch` entry-point groups.
+- **Removed/renamed:** none. (`py.typed` was already shipped; extras gained
+  `otel` — core installs and every existing extra are unchanged, and
+  `all` still excludes `airflow` for its own Python-range support reasons.)
+- **Operators should read** `docs/SCALING.md` (backend policy env knobs),
+  `docs/production/CONFIGURATION_REFERENCE.md` (OTEL + LOG_FORMAT rows),
+  `docs/SDK.md` (client regeneration truth table), and `docs/THREAT_MODEL.md`
+  before promotion; CI now *fails* on new `bandit` findings or new known
+  dependency vulnerabilities, so vendored dependency drift is visible.
 
 ### Added
 - **Scaling backend controls + `docs/SCALING.md`.** The ingest backend is now a
