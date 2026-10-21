@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="/static/css/style.css" />
 </head>
 <body>
+  <div class="scroll-progress" aria-hidden="true"><span class="scroll-progress__bar"></span></div>
 
   <!-- ============================================================ nav -->
   <header class="site-nav">
@@ -264,23 +265,23 @@
           </p>
         </div>
 
-        <ol class="flow reveal">
-          <li class="flow__step">
+        <ol class="flow">
+          <li class="flow__step reveal">
             <span class="flow__n">01 / STRUCTURAL</span>
             <h3 class="flow__title">Strict cast at the door</h3>
             <p class="flow__desc">Each record is cast against the declared schema per-row. A value that cannot be realized is refused and indexed — never silently coerced into something it is not.</p>
           </li>
-          <li class="flow__step">
+          <li class="flow__step reveal">
             <span class="flow__n">02 / SEMANTIC</span>
             <h3 class="flow__title">Rules inside</h3>
             <p class="flow__desc">Row rules run vectorized (Polars); batch rules run out-of-core (DuckDB). The fast path only engages on chunks that already match the schema, so strictness is never traded for speed.</p>
           </li>
-          <li class="flow__step">
+          <li class="flow__step reveal">
             <span class="flow__n">03 / RECONCILIATION</span>
             <h3 class="flow__title">The arithmetic must foot</h3>
             <p class="flow__desc">A single unaccounted-for row refuses the entire run instead of publishing a partial dataset.</p>
           </li>
-          <li class="flow__step">
+          <li class="flow__step reveal">
             <span class="flow__n">04 / PUBLISH</span>
             <h3 class="flow__title">Atomic &amp; crash-recoverable</h3>
             <p class="flow__desc">Target, lineage, and certificate commit through a write-ahead journal and are recovered at startup. Quarantine evidence survives the rejection.</p>
@@ -400,36 +401,36 @@
           </p>
         </div>
 
-        <div class="arch reveal">
+        <div class="arch">
           <div class="arch__col">
-            <div class="arch__box">
+            <div class="arch__box reveal">
               <p class="arch__label">Producer</p>
               <p class="arch__t">External partner / vendor feed</p>
               <p class="arch__d">CSV, JSONL, or Parquet — delivered on your existing schedule or landing path.</p>
             </div>
-            <div class="arch__box">
+            <div class="arch__box reveal">
               <p class="arch__label">Your workflow</p>
               <p class="arch__t">Landing zone · Airflow · storage</p>
               <p class="arch__d">Unchanged. The scheduler decides when to call the boundary; retries and alerts stay yours.</p>
             </div>
           </div>
-          <div class="arch__arrow">→</div>
+          <div class="arch__arrow reveal">→</div>
           <div class="arch__col">
-            <div class="arch__box arch__box--dark">
+            <div class="arch__box arch__box--dark reveal">
               <span class="arch__tag">the boundary</span>
               <p class="arch__t">Data Shell enforcement</p>
               <p class="arch__d">strict cast → row + batch rules → zero-deficit footing → atomic publish</p>
               <p class="arch__d" style="margin-top:8px">exit <b>0</b> published · exit <b>2</b> refused by policy · exit <b>1</b> engine failure</p>
             </div>
           </div>
-          <div class="arch__arrow">→</div>
+          <div class="arch__arrow reveal">→</div>
           <div class="arch__col">
-            <div class="arch__box">
+            <div class="arch__box reveal">
               <p class="arch__label">Accepted</p>
               <p class="arch__t">Delivered artifact only</p>
               <p class="arch__d">The downstream consumer receives the published file — never a partial batch.</p>
             </div>
-            <div class="arch__box">
+            <div class="arch__box reveal">
               <p class="arch__label">Evidence</p>
               <p class="arch__t">Signed certificate + ledger + quarantine</p>
               <p class="arch__d">Verifiable offline. Quarantine names the exact rule that held each row.</p>
@@ -605,19 +606,19 @@ datashell verify run_9f3c7a21_audit.json
             <tr><th>Metric</th><th>Value</th><th>How it is verified</th></tr>
           </thead>
           <tbody>
-            <tr><td class="metric">Automated tests</td><td class="num">522</td><td class="how"><code>pytest</code> on the main suite, plus 14 for the Airflow provider</td></tr>
-            <tr><td class="metric">Rows published on a footing mismatch</td><td class="num">0</td><td class="how">Reconciliation is a hard gate, not a warning</td></tr>
+            <tr><td class="metric">Automated tests</td><td class="num" data-count="522">522</td><td class="how"><code>pytest</code> on the main suite, plus 14 for the Airflow provider</td></tr>
+            <tr><td class="metric">Rows published on a footing mismatch</td><td class="num" data-count="0">0</td><td class="how">Reconciliation is a hard gate, not a warning</td></tr>
             <tr><td class="metric">In-memory path, 1M-row feed</td><td class="num">3.3M rows/s</td><td class="how"><code>python benchmarks/volumetric_stress_test.py</code> — delivered counts, file contents, and footing asserted at every scale; peak RSS 782 MB</td></tr>
             <tr><td class="metric">Out-of-core stream, 5M-row Parquet feed</td><td class="num">&lt; 1.1 s</td><td class="how"><code>python benchmarks/streaming_profile.py --rows 5000000 --format parquet</code> — vectorized fast path, footing asserted, ~4.9M rows/s, peak RSS 989 MiB</td></tr>
             <tr><td class="metric">Out-of-core stream, 5M-row CSV feed</td><td class="num">158k rows/s</td><td class="how">Same harness with <code>--format csv</code> — chunk columns arrive as strings, so the strict per-row caster runs by design (exact rejection diagnostics); memory grows with feed size on this build</td></tr>
             <tr><td class="metric">Zero-deficit accounting, 5M-row feed</td><td class="num">5,000,000 = 5,000,000</td><td class="how">The certificate above is a real certificate: read = delivered + held + refused, zero unaccounted, footing matched</td></tr>
             <tr><td class="metric">Gateway latency, 1k-row uploads</td><td class="num">P50 137 · P95 238 · P99 594 ms</td><td class="how"><code>python benchmarks/api_latency_load_test.py</code> — 50/50 HTTP 200 and business-verified at the configured concurrency ceiling; in-process gateway</td></tr>
-            <tr><td class="metric">Upload ceiling</td><td class="num">20 GiB</td><td class="how">Derived request-body limit — 21,474,836,480 bytes</td></tr>
+            <tr><td class="metric">Upload ceiling</td><td class="num" data-count="20" data-suffix=" GiB">20 GiB</td><td class="how">Derived request-body limit — 21,474,836,480 bytes</td></tr>
             <tr><td class="metric">Access model</td><td class="num">4 × 9</td><td class="how">RBAC roles × capabilities, enforced at every endpoint</td></tr>
-            <tr><td class="metric">API surface</td><td class="num">28 operations</td><td class="how">Every route scope-checked at startup; CI keeps <code>docs/openapi.yaml</code> (27 paths) in sync</td></tr>
-            <tr><td class="metric">Built-in rule checks</td><td class="num">19</td><td class="how">11 row + 8 batch — <code>datashell rules</code>; extend more via entry-point plugins</td></tr>
+            <tr><td class="metric">API surface</td><td class="num" data-count="28" data-suffix=" operations">28 operations</td><td class="how">Every route scope-checked at startup; CI keeps <code>docs/openapi.yaml</code> (27 paths) in sync</td></tr>
+            <tr><td class="metric">Built-in rule checks</td><td class="num" data-count="19">19</td><td class="how">11 row + 8 batch — <code>datashell rules</code>; extend more via entry-point plugins</td></tr>
             <tr><td class="metric">Static security + dependency audit</td><td class="num">0 + 0</td><td class="how">bandit zero-findings policy; OSV audit on every push</td></tr>
-            <tr><td class="metric">Streaming formats</td><td class="num">3</td><td class="how">CSV, JSONL/NDJSON, Parquet — chunked staging, one row group per batch (<code>STREAM_CHUNK_ROWS</code>)</td></tr>
+            <tr><td class="metric">Streaming formats</td><td class="num" data-count="3">3</td><td class="how">CSV, JSONL/NDJSON, Parquet — chunked staging, one row group per batch (<code>STREAM_CHUNK_ROWS</code>)</td></tr>
             <tr><td class="metric">Python versions in CI</td><td class="num">3.11–3.13</td><td class="how">Test, wheel build, and container jobs</td></tr>
           </tbody>
         </table>
@@ -972,8 +973,11 @@ datashell ledger summary --tenant eval-demo</pre>
     </div>
   </footer>
 
+  <script src="/static/vendor/gsap.min.js"></script>
+  <script src="/static/vendor/ScrollTrigger.min.js"></script>
   <script src="/static/js/engine-console.js"></script>
   <script src="/static/js/site.js"></script>
+  <script src="/static/js/motion.js"></script>
   <script src="/static/js/demo.js"></script>
   <script src="/static/js/calculator.js"></script>
 </body>
