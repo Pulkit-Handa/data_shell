@@ -148,6 +148,16 @@ follow_imports = "skip"
 follow_imports_for_stubs = true
 ignore_errors = true
 
+[[tool.mypy.overrides]]
+# The OpenTelemetry SDK and the OTLP gRPC exporter belong to the optional
+# `datashell[otel]` extra; the developer/CI environment installs only
+# `opentelemetry-api`. Their imports in datashell/core/observability.py are
+# guarded by `try/except ImportError` at runtime, so strict mode cannot resolve
+# them without a py.typed distribution — an upstream-optional dependency, not a
+# suppression of our code.
+module = ["opentelemetry.exporter.*", "opentelemetry.sdk.*"]
+ignore_missing_imports = true
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["datashell*"]

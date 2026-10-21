@@ -52,14 +52,16 @@ jobs:
       - name: Verify pre-commit configuration is parseable
         run: |
           python -m pip install "pre-commit==4.2.0"
-          python -c "
-import yaml
-with open('.pre-commit-config.yaml', encoding='utf-8') as f:
-    config = yaml.safe_load(f)
-repos = config['repos']
-print(f'pre-commit config valid: {len(repos)} repos, hooks:',
-      [h['name'] for r in repos for h in r['hooks']])
-"
+          python - <<'PY'
+          import yaml
+          with open('.pre-commit-config.yaml', encoding='utf-8') as f:
+              config = yaml.safe_load(f)
+          repos = config['repos']
+          # `name` is optional in the pre-commit schema (it falls back to the
+          # hook id), so keep this check schema-accurate with a fallback.
+          names = [h.get('name', h.get('id')) for r in repos for h in r['hooks']]
+          print('pre-commit config valid:', len(repos), 'repos, hooks:', names)
+          PY
       - name: Verify release metadata consistency
         run: python scripts/check_release_metadata.py
       - name: Verify the committed OpenAPI document is in sync (docs/openapi.yaml)

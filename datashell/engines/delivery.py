@@ -39,7 +39,7 @@ class DeliveryGateError(Exception):
 
 def safe_json_default(obj: Any) -> Any:
     """Encodes non-JSON primitive types (datetime, Decimal, UUID, bytes, Enum) gracefully."""
-    if isinstance(obj, (datetime.date, datetime.datetime, datetime.time)):
+    if isinstance(obj, datetime.date | datetime.datetime | datetime.time):
         return obj.isoformat()
     if isinstance(obj, decimal.Decimal):
         return float(obj)
