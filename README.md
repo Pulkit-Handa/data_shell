@@ -31,7 +31,7 @@ it delivered is exactly what it validated**.
    is bound to a Merkle-rooted certificate signed with Ed25519 (third-party
    verifiable from a public key) or HMAC-SHA256, plus a durable forensic ledger;
    `datashell verify` detects a single flipped byte in the delivered Parquet
-   after the fact — and proves it — in the 60-second walkthrough below.
+   after the fact — and proves it — in the local quickstart below.
 3. **The boundary ships as a system.** GX is a library you wire into a pipeline
    program you also have to build, secure, and audit. Data Shell ships that
    pipeline side as an API gateway: key-based roles and capabilities, upload
@@ -46,46 +46,6 @@ it delivered is exactly what it validated**.
    auditability matter more than expectation breadth. The reference deployment is
    intentionally single-replica and self-contained; scale-out moves the same
    engine onto shared infrastructure (see `docs/SCALING.md`).
-
----
-
-## Try it in 60 seconds
-
-![Data Shell quickstart](docs/demo.gif)
-
-> The `datashell` name on PyPI currently belongs to an unrelated project. Install
-> from this repository until this package is published under its own name.
-
-```bash
-git clone https://github.com/Pulkit-Handa/data_shell.git
-cd data_shell
-python -m venv .venv && . .venv/bin/activate
-pip install -e ".[all]"        # or `pip install -e .` for the engine only
-datashell doctor               # report which capabilities the environment has
-datashell demo                 # refuse poisoned rows, publish clean ones, detect tampering
-```
-
-`datashell demo` is a self-contained walkthrough: it generates a 1,000-row feed with
-100 seeded defects, enforces a contract, then flips a byte in the delivered Parquet
-and proves the signed certificate detects it — and that restoring the bytes restores
-the verdict:
-
-```text
-[3a] Held rows by rule:
-      - amount-positive     :   35 held
-      - currency-settled    :   25 held
-[3b] Structural refusals at ingestion:
-      - amount:Float64      :   20 refused
-      - settlement_id:Utf8  :   20 refused
-
-[4] Verify the signed certificate -> AUTHENTIC_AND_UNMODIFIED
-[5] Tamper the delivered parquet (1 byte) and re-verify -> TAMPERED_UNDERLYING_ARTIFACTS
-[6] Restore the authentic bytes and re-verify           -> AUTHENTIC_AND_UNMODIFIED
-```
-
-The full walkthrough also runs from `./examples/quickstart.sh`. To regenerate the GIF,
-either run `vhs examples/demo.tape` (requires [VHS](https://github.com/charmbracelet/vhs))
-or, without a terminal recorder, run `./examples/render_demo_gif.sh` (uses ImageMagick).
 
 ---
 
