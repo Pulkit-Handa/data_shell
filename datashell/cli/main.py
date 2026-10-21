@@ -552,6 +552,33 @@ def _importable(module_name: str) -> tuple[bool, str | None]:
     return True, str(getattr(module, "__version__", "unknown"))
 
 
+# Capability probes for the optional extras: extra name, then the modules that
+# prove it is installed, as (distribution name, import path).
+#
+# The import path must be the one the capability actually loads at runtime,
+# not the distribution's name: a distribution name is not an import path
+# ("python-multipart" is imported as "multipart"), and the tracing extra
+# installs ``opentelemetry-exporter-otlp-proto-grpc``, whose import path is
+# ``opentelemetry.exporter.otlp.proto.grpc`` — the same module
+# ``datashell.core.observability`` loads. Probing the wrong path reports a
+# correctly installed extra as missing, which is exactly the misdiagnosis this
+# table must not make.
+#
+# Tracing intent is configuration: the endpoint env turns it on, the extra
+# provides the SDK. Doctor reports both halves separately, so "requested but
+# missing extra" is diagnosable without guessing.
+EXTRA_MODULE_PROBES: dict[str, tuple[tuple[str, str], ...]] = {
+    "server": (("fastapi", "fastapi"),
+               ("uvicorn", "uvicorn"),
+               ("python-multipart", "multipart")),
+    "duckdb": (("duckdb", "duckdb"),),
+    "billing": (("httpx", "httpx"),),
+    "airflow": (("apache-airflow", "airflow"),),
+    "otel": (("opentelemetry-sdk", "opentelemetry.sdk"),
+             ("opentelemetry-exporter-otlp-proto-grpc", "opentelemetry.exporter.otlp.proto.grpc")),
+}
+
+
 def command_doctor(args: argparse.Namespace) -> int:
     """Environment capability report: what this install can and cannot do.
 
@@ -569,17 +596,6 @@ def command_doctor(args: argparse.Namespace) -> int:
         ("cryptography", "cryptography"),
         ("prometheus_client", "prometheus_client"),
     )
-    extra_modules = (
-        ("server", [("fastapi", "fastapi"), ("uvicorn", "uvicorn"), ("multipart", "python-multipart")]),
-        ("duckdb", [("duckdb", "duckdb")]),
-        ("billing", [("httpx", "httpx")]),
-        ("airflow", [("airflow", "apache-airflow")]),
-        # Tracing intent is configuration: the endpoint env turns it on, the
-        # extra provides the SDK. Doctor reports both halves separately, so
-        # "requested but missing extra" is diagnosable without guessing.
-        ("otel", [("opentelemetry.sdk", "opentelemetry-sdk"),
-                  ("opentelemetry.exporter.otlp.grpc", "opentelemetry-exporter-otlp-proto-grpc")]),
-    )
 
     core_status: dict[str, Any] = {}
     failures: list[str] = []
@@ -590,7 +606,7 @@ def command_doctor(args: argparse.Namespace) -> int:
             failures.append(f"core dependency '{label}' is not importable")
 
     extras_status: dict[str, Any] = {}
-    for extra_name, modules in extra_modules:
+    for extra_name, modules in EXTRA_MODULE_PROBES.items():
         entries: dict[str, Any] = {}
         available = True
         for label, module_name in modules:
@@ -656,7 +672,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         print(f"  {mark} {label}{version_note}")
     print()
     print("Optional capabilities (enable with pip install \"datashell[<extra>]\"):")
-    for extra_name, modules in extra_modules:
+    for extra_name, modules in EXTRA_MODULE_PROBES.items():
         entry = extras_status[extra_name]
         mark = "✓" if entry["available"] else "○"
         detail = ", ".join(

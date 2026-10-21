@@ -26,6 +26,11 @@ The gateway is driven through its own ASGI stack, so the exported span is the
 one a deployed gateway emits. What is *not* covered here is the transport to a
 production tracing backend (Tempo, Jaeger, Elastic): the collector is the last
 hop this repository owns.
+
+FastAPI ships its own OpenTelemetry instrumentation (scope ``fastapi``) and
+names its server span after the route too, so a collector receives both the
+framework's span and the gateway's. The check therefore selects the gateway's
+span by instrumentation scope (``datashell``) — the one this repository owns.
 """
 
 from __future__ import annotations
@@ -54,6 +59,11 @@ ENDPOINT_ENV = "OTEL_EXPORTER_OTLP_ENDPOINT"
 EXPECTED_SERVICE_NAME = "datashell-e2e"
 EXPECTED_SPAN_NAME = "GET /health"
 EXPECTED_ROUTE = "/health"
+# The gateway's own instrumentation scope (``trace.get_tracer("datashell")`` in
+# ``configure_otel``). FastAPI ships its own OpenTelemetry instrumentation
+# (scope ``fastapi``) and names its server span after the route as well, so
+# the scope is what distinguishes the gateway's span from the framework's.
+GATEWAY_SCOPE = "datashell"
 COLLECTOR_READY_TIMEOUT_SECONDS = 15.0
 SPAN_WAIT_TIMEOUT_SECONDS = 30.0
 
@@ -135,6 +145,7 @@ def _wait_for_collector(endpoint: str, timeout: float = COLLECTOR_READY_TIMEOUT_
 def _wait_for_span(
     path: Path,
     span_name: str,
+    scope: str,
     seen_trace_ids: set[str],
     timeout: float = SPAN_WAIT_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
@@ -143,16 +154,24 @@ def _wait_for_span(
     ``seen_trace_ids`` holds the spans the collector had already captured
     before this exchange. Only a span that was not there before counts, so a
     stale capture file can never make the check pass.
+
+    The scope matters: FastAPI's built-in instrumentation also emits a server
+    span named after the route, under the scope ``fastapi``. Only the span
+    the gateway itself produced (scope ``datashell``) is the one under test.
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         for span in _iter_spans(path):
-            if span["name"] == span_name and span["trace_id"] not in seen_trace_ids:
+            if (
+                span["name"] == span_name
+                and span["scope"] == scope
+                and span["trace_id"] not in seen_trace_ids
+            ):
                 return span
         time.sleep(0.25)
     pytest.fail(
-        f"collector never received a new span named {span_name!r}; "
-        f"captured spans: {[span['name'] for span in _iter_spans(path)]}"
+        f"collector never received a new span {scope!r}/{span_name!r}; "
+        f"captured spans: {[(s['scope'], s['name']) for s in _iter_spans(path)]}"
     )
 
 
@@ -217,10 +236,10 @@ def test_gateway_spans_reach_a_real_collector(monkeypatch: pytest.MonkeyPatch) -
 
     _force_flush()
 
-    span = _wait_for_span(spans_file, EXPECTED_SPAN_NAME, seen_trace_ids)
+    span = _wait_for_span(spans_file, EXPECTED_SPAN_NAME, GATEWAY_SCOPE, seen_trace_ids)
 
     # The span the collector received must be the one the gateway produced.
-    assert span["scope"] == "datashell"
+    assert span["scope"] == GATEWAY_SCOPE
     assert span["resource"].get("service.name") == service_name
     assert span["attributes"].get("http.route") == EXPECTED_ROUTE
     assert span["attributes"].get("http.request.method") == "GET"

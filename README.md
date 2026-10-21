@@ -556,7 +556,7 @@ See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 The Airflow provider has its own test suite under
 [`integrations/airflow/tests`](integrations/airflow/tests). The main test suite
-currently contains 528 tests; the provider suite contains 9.
+currently contains 539 tests; the provider suite contains 9.
 
 If you change the OpenAPI surface, regenerate the committed document with
 `python scripts/export_openapi.py --out docs/openapi.yaml`. If you change release
