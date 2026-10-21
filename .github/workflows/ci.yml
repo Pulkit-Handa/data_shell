@@ -132,7 +132,36 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
       - name: Build container image
-        run: docker build --pull --tag datashell:ci .
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Diagnostics for runner-level failures (disk exhaustion, daemon
+          # trouble) that otherwise only surface as an opaque exit code.
+          docker version
+          df -h /
+          # Base-image pulls and Debian/PyPI mirrors occasionally fail on hosted
+          # runners before the build starts. Retry the build so a transient
+          # registry or network error does not fail the job; the first attempt
+          # refreshes the base image, later attempts reuse it.
+          for attempt in 1 2 3; do
+            args=(--progress=plain --tag datashell:ci)
+            if [ "$attempt" -eq 1 ]; then
+              args+=(--pull)
+            fi
+            echo "::group::docker build (attempt ${attempt}/3)"
+            if docker build "${args[@]}" .; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            if [ "$attempt" -eq 3 ]; then
+              echo "docker build failed after 3 attempts" >&2
+              docker system df || true
+              df -h / || true
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
       - name: Check image configuration
         run: |
           test "$(docker image inspect datashell:ci --format '{{.Config.User}}')" = "10001:10001"
