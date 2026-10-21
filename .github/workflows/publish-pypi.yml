@@ -1,0 +1,119 @@
+name: Publish to PyPI
+
+# Publishes the two Python distributions to PyPI with **Trusted Publishing
+# (OIDC)**: PyPI verifies the identity of this workflow through GitHub's OIDC
+# token, so no long-lived API token is stored in this repository and no secret
+# has to be rotated.
+#
+# One-time setup, per PyPI project (project -> Publishing -> "Add a new
+# pending publisher"):
+#
+#   PyPI project:  datashell-engine      (and: datashell-airflow)
+#   Owner:         Pulkit-Handa
+#   Repository:    data_shell
+#   Workflow name: publish-pypi.yml
+#   Environment:   pypi
+#
+# The GitHub environment named "pypi" must exist in the repository settings;
+# it is what the pending publisher is bound to.
+#
+# The release procedure (including the one-time setup above) is documented in
+# docs/PUBLISHING.md.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Build and verify the distributions without uploading them"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish-core:
+    name: Publish datashell-engine
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      # PyPI Trusted Publishing: this job proves its identity with an OIDC
+      # token, not with a secret.
+      id-token: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-build.lock
+
+      - name: Install pinned build tooling (hash-verified)
+        run: python -m pip install --require-hashes -r requirements-build.lock
+
+      - name: Verify tag, distribution version, changelog and lockfiles agree
+        if: github.ref_type == 'tag'
+        run: python scripts/check_release_metadata.py --tag "${GITHUB_REF_NAME}"
+
+      - name: Verify distribution version, changelog and lockfiles agree
+        if: github.ref_type != 'tag'
+        run: python scripts/check_release_metadata.py
+
+      - name: Build the wheel and sdist from the pinned build backend
+        run: python -m build --no-isolation --outdir dist
+
+      - name: Verify built distribution contents (wheel + sdist)
+        run: python scripts/verify_distribution_contents.py --dist-dir dist
+
+      - name: Publish datashell-engine to PyPI
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  publish-provider:
+    name: Publish datashell-airflow
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-build.lock
+
+      - name: Install pinned build tooling (hash-verified)
+        run: python -m pip install --require-hashes -r requirements-build.lock
+
+      - name: Verify tag, distribution version, changelog and lockfiles agree
+        if: github.ref_type == 'tag'
+        run: python scripts/check_release_metadata.py --tag "${GITHUB_REF_NAME}"
+
+      - name: Build the provider wheel and sdist from the pinned build backend
+        working-directory: integrations/airflow
+        run: python -m build --no-isolation --outdir dist
+
+      - name: Verify built provider distribution contents (wheel + sdist)
+        run: python scripts/verify_provider_distribution_contents.py --dist-dir integrations/airflow/dist
+
+      - name: Publish datashell-airflow to PyPI
+        if: github.event_name != 'workflow_dispatch' || !inputs.dry_run
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: integrations/airflow/dist
