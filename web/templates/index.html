@@ -98,7 +98,7 @@
             <span><b>CLI</b> · HTTP · SDKs</span>
             <span><b>CSV</b> · JSONL · Parquet</span>
             <span><b>20 GiB</b> upload ceiling</span>
-            <span><b>5M rows</b> streamed out-of-core</span>
+            <span><b>5M-row Parquet</b> · streaming path</span>
           </p>
         </div>
 
@@ -476,12 +476,12 @@
                 <td class="table__how"><code>python benchmarks/volumetric_stress_test.py</code> — delivered counts, file contents, and footing asserted at 10k, 100k, 500k, and 1M rows.</td>
               </tr>
               <tr>
-                <td class="table__metric">Out-of-core stream, 5M-row Parquet</td>
+                <td class="table__metric">Streaming path, 5M-row Parquet</td>
                 <td class="table__value">1.51 s · 3.31M rows/s · 857 MiB RSS</td>
                 <td class="table__how"><code>python benchmarks/streaming_profile.py --rows 5000000 --format parquet</code> — vectorized fast path; footing matched.</td>
               </tr>
               <tr>
-                <td class="table__metric">Out-of-core stream, 5M-row CSV</td>
+                <td class="table__metric">Streaming path, 5M-row CSV</td>
                 <td class="table__value">33.9 s · 147k rows/s · 3.0 GiB RSS</td>
                 <td class="table__how">Same harness with <code>--format csv</code> — the strict per-row caster runs by design for exact rejection diagnostics; memory grows with feed size on this build.</td>
               </tr>
@@ -526,7 +526,10 @@
               counts and the reconciliation footing. Gateway latency is measured in-process
               (TestClient), not over a network. CI runs the supported interpreter range, 3.11–3.13.
               Throughput and memory vary materially with hardware, feed shape, and row width —
-              measure on your own hardware and at your own scale before capacity planning.
+              measure on your own hardware and at your own scale before capacity planning. Only
+              the Parquet path stays on the vectorized fast path; CSV falls back to the strict
+              per-row caster, so its peak RSS grows with feed size (3.0 GiB at 5M rows here).
+              Convert large CSV feeds to Parquet before enforcing them.
             </p>
           </div>
         </details>
