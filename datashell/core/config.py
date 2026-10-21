@@ -343,6 +343,14 @@ class EnterpriseSettings(BaseModel):
         default_factory=lambda: int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(DEFAULT_MAX_UPLOAD_SIZE_BYTES)))
     )
     stream_chunk_rows: int = Field(default_factory=lambda: int(os.getenv("STREAM_CHUNK_ROWS", "100000")))
+    # Safety valve for wide schemas. A row budget alone is not a memory bound:
+    # 100k rows x 100 columns is 10M cells, which can exhaust a small host even
+    # though the row count is unchanged. The streaming runner caps the effective
+    # chunk at ``STREAM_CHUNK_CELL_BUDGET // declared_column_count``. Set to 0
+    # to opt out and use STREAM_CHUNK_ROWS literally.
+    stream_chunk_cell_budget: int = Field(
+        default_factory=lambda: int(os.getenv("STREAM_CHUNK_CELL_BUDGET", "1000000"))
+    )
     # Files at or above this size are processed out-of-core even when a caller
     # does not explicitly request streaming, so large inputs never materialize
     # fully in application memory.
@@ -600,6 +608,8 @@ class EnterpriseSettings(BaseModel):
             raise RuntimeError("MAX_UPLOAD_SIZE_BYTES must be a positive integer")
         if self.stream_chunk_rows < 1:
             raise RuntimeError("STREAM_CHUNK_ROWS must be a positive integer")
+        if self.stream_chunk_cell_budget < 0:
+            raise RuntimeError("STREAM_CHUNK_CELL_BUDGET must be zero or a positive integer")
         if self.stream_auto_threshold_bytes < 0:
             raise RuntimeError("STREAM_AUTO_THRESHOLD_BYTES cannot be negative")
         if self.rate_limit_requests_per_minute < 1:

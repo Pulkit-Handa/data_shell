@@ -1094,6 +1094,38 @@ class DataShellPipeline:
                         staged_path.unlink()
             ACTIVE_RUNS.dec()
 
+    def _effective_chunk_size(self, chunk_size: int | None) -> int:
+        """Return a row batch size that also respects the schema-width budget.
+
+        A fixed row count is not a memory bound: 100k rows of a 4-column feed is
+        a very different allocation from 100k rows of a 100-column feed. Cap the
+        effective batch at ``STREAM_CHUNK_CELL_BUDGET / columns`` (default:
+        1,000,000 cells) so a wide Parquet/Lake feed does not turn the default
+        row chunk into a multi-gigabyte allocation. Set the budget to 0 to use
+        ``chunk_size``/``STREAM_CHUNK_ROWS`` literally.
+        """
+        effective = int(chunk_size or settings.stream_chunk_rows)
+        if effective < 1:
+            raise ValueError("chunk_size must be a positive integer")
+
+        sources = self.contract.spec.sources
+        column_count = len(sources[0].schema_) if sources else 0
+        budget = settings.stream_chunk_cell_budget
+        if budget > 0 and column_count > 0:
+            width_cap = max(1, budget // column_count)
+            if effective > width_cap:
+                telemetry_logger.info(
+                    "Streaming chunk capped for wide schema",
+                    extra={
+                        "requested_chunk_rows": effective,
+                        "effective_chunk_rows": width_cap,
+                        "declared_columns": column_count,
+                        "stream_chunk_cell_budget": budget,
+                    },
+                )
+                effective = width_cap
+        return effective
+
     def run_streaming(
         self,
         source_path: str | Path,
@@ -1103,15 +1135,13 @@ class DataShellPipeline:
     ) -> PipelineResult:
         """
         Unified out-of-core streaming execution:
-        Processes massive Parquet, CSV, or JSONL datasets in constant O(1) memory
+        Processes massive Parquet, CSV, or JSONL datasets in memory-bounded
         batches through Tier 1 structural and Tier 2 row-level quality gates, stages
         atomic parquet writes, executes global batch assertions via out-of-core
         DuckDB streaming, and enforces whole-run rejection and historical drift
-        policies with zero memory ballooning.
+        policies without materializing the full source.
         """
-        chunk_size = int(chunk_size or settings.stream_chunk_rows)
-        if chunk_size < 1:
-            raise ValueError("chunk_size must be a positive integer")
+        chunk_size = self._effective_chunk_size(chunk_size)
 
         if target_path_override and self.contract.spec.delivery.targets:
             self.contract.spec.delivery.targets[0].path = target_path_override

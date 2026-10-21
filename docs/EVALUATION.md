@@ -5,7 +5,7 @@ approver who reviews it.
 
 **Product status at 2.0.0:** controlled-pilot candidate. The enforcement
 engine, reconciliation, publication, recovery, and certificate stack are
-implemented and covered by 531 automated tests (522 in the main suite plus 9
+implemented and covered by 534 automated tests (525 in the main suite plus 9
 Airflow provider tests). The reference topology is a single replica with process-local
 limits. Horizontal scale, shared credential stores, and real-collector
 OpenTelemetry export are documented as prerequisites, not features (see

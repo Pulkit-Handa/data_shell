@@ -1,7 +1,7 @@
 # Data Shell — Target-Host Release Validation Package
 
-**Version:** 1.0
-**Date:** 2026-10-20
+**Version:** 1.1
+**Date:** 2026-10-21
 **Branch:** `production_hardening`
 
 This is the **index and gate matrix** for qualifying a deployment of Data
@@ -22,7 +22,7 @@ or system outside this repository.
 |---|---|---|
 | Deployment and startup verification | [`DEPLOYMENT_VERIFICATION.md`](DEPLOYMENT_VERIFICATION.md) | Clean deploy, startup, secrets, health/readiness, protected endpoints, valid run, rejected run, certificate verification, recovery, restart, migration, rollback. **§ "Session checklist"** adds the 19-step ordered checklist and the 14 stop conditions. |
 | Production configuration and secret checks | `DEPLOYMENT_VERIFICATION.md` § 0, § 2 | Required env vars, placeholder/entropy rejection, wildcard CORS/proxy refusal, signer selection |
-| Capacity and concurrency | [`BENCHMARK_PROCEDURE.md`](BENCHMARK_PROCEDURE.md) + `benchmarks/large_file_capacity_test.py`, `benchmarks/volumetric_stress_test.py`, `benchmarks/api_latency_load_test.py` | Throughput, latency percentiles, peak RSS, storage growth, concurrency ceiling, pass criteria |
+| Capacity and concurrency | [`BENCHMARK_PROCEDURE.md`](BENCHMARK_PROCEDURE.md) + `benchmarks/large_file_capacity_test.py`, `benchmarks/volumetric_stress_test.py`, `benchmarks/api_latency_load_test.py` | Throughput, latency percentiles, peak RSS, storage growth, concurrency ceiling, narrow and 100-column wide-schema envelopes, pass criteria |
 | Backup / restore drill | [`BACKUP_RESTORE_DRILL.md`](BACKUP_RESTORE_DRILL.md) + `scripts/backup_restore_drill.py` | Backup coverage, isolated restore, certificate re-verification, ledger reconciliation |
 | RPO / RTO measurement | `BACKUP_RESTORE_DRILL.md` § 3, § 4 | Recovery point (backup interval), recovery duration, restoration drill worksheet |
 | Alert delivery | `DEPLOYMENT_VERIFICATION.md` § 11 + `scripts/alert_signal_test.py` + `deploy/prometheus-alerts.yaml` | Signal generation (locally verified) and external delivery (target) |
@@ -92,7 +92,7 @@ requires a party or system outside this repository.
 
 | # | Gate | Must be proven | Evidence | How to produce | Status |
 |---|---|---|---|---|---|
-| F1 | Capacity envelope | 1 GiB completes with bounded memory, footing matched, 0 unaccounted | 1,024.3 MiB / 27.55 M rows → 173.14 s, 752.8 MiB peak RSS, 467.8 MiB storage growth | `benchmarks/large_file_capacity_test.py --size-mb 1024` | **LOCAL-VERIFIED** (dev container, tmpfs) |
+| F1 | Capacity envelope | 1 GiB narrow and 100-column wide feeds complete with bounded memory, footing matched, 0 unaccounted | Narrow: 1,024.3 MiB / 27.55 M rows → 121.88 s, 837.2 MiB peak RSS, 130.8 MiB growth. Wide CSV: 1,065.2 MiB → 61.65 s, 1,115.3 MiB peak. Wide Parquet: 1,033.6 MiB → 104.71 s, 2,127.3 MiB peak. All matched. | `benchmarks/large_file_capacity_test.py --size-mb 1024` and `--columns 100 --string-width 32 --format csv|parquet` | **LOCAL-VERIFIED** (dev container, block volume) |
 | F2 | Throughput | Sustained rate recorded with the environment | 27k–1.94 M r/s across 10 k–1 M rows | `benchmarks/volumetric_stress_test.py` | **LOCAL-VERIFIED** |
 | F3 | API latency under the configured concurrency | Percentiles at the enforced concurrency | 50/50 HTTP 200, 20.9 r/s, P50 78.6 / P95 183.9 / P99 411.0 ms | `benchmarks/api_latency_load_test.py` | **LOCAL-VERIFIED** |
 | F4 | **Production capacity** | The same measurements on the target host, against the pass criteria | Filled-in worksheet | `BENCHMARK_PROCEDURE.md` § 7 | **TARGET — BLOCKED** |
@@ -154,7 +154,8 @@ were measured on this host and **must be re-measured on the target host**:
 
 | Local measurement | Value | Target-host status |
 |---|---|---|
-| 1 GiB / 27.55M rows | 173.14 s, ~159k rows/s, 752.8 MiB peak RSS, footing matched, 0 unaccounted | **Re-measure required** |
+| 1 GiB / 27.55M rows (narrow) | 121.88 s, ~226k rows/s, 837.2 MiB peak RSS, footing matched, 0 unaccounted | **Re-measure required** |
+| 1 GiB / 100 columns × 32 B (wide) | CSV: 61.65 s, 1,115.3 MiB peak; Parquet: 104.71 s, 2,127.3 MiB peak; both matched, 0 unaccounted | **Re-measure required** |
 | API latency | 50/50 verified, ~20.9 req/s at concurrency 2, P50 78.6 ms, P95 183.9 ms, P99 411.0 ms | **Re-measure required** |
 | Backup/restore recovery time | ~0.01 s local restore | **Not an RTO figure** — a local filesystem restore is not a host-level recovery |
 
@@ -218,6 +219,7 @@ an external party, so the verdict is:
 | Tenancy | One tenant |
 | Concurrency | One active processing job; API request concurrency bounded by `MAX_CONCURRENT_REQUESTS` |
 | Formats | CSV, Parquet, JSONL |
+| Schema width | Measured up to 100 columns × 32-byte strings at 1 GiB; wider schemas or cells are outside the measured envelope |
 | Max file size | 1 GiB provisional — **must be set to the measured value** (`MAX_UPLOAD_SIZE_BYTES`) |
 | Storage | Local POSIX filesystem with `fcntl.flock` and atomic `os.replace` |
 | Signing | Ed25519 (public-key verification); HMAC only for an agreed internal trust model |
@@ -225,4 +227,4 @@ an external party, so the verdict is:
 | Authentication | API key + capability RBAC; no SSO/SCIM |
 | Availability | Business-hours operator, defined escalation, no 24×7 SLA |
 | Recovery | Backup interval defines the RPO; drill defines the RTO |
-| Excluded | Multi-replica, HA, SSO/SCIM, live payments, regulatory claims, wide-schema capacity |
+| Excluded | Multi-replica, HA, SSO/SCIM, live payments, regulatory claims, schemas wider than 100 columns, wide files larger than 1 GiB |
