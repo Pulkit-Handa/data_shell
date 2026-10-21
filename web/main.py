@@ -208,6 +208,10 @@ DEMO_TRUST_FORWARDED_HEADERS = _bool_env("DATASHELL_DEMO_TRUST_FORWARDED_HEADERS
 # cap, so a misbehaving run can never exhaust process memory through stdout.
 MAX_CLI_OUTPUT_BYTES = 1024 * 1024
 
+# The certificate excerpt read back from disk for the browser is bounded too;
+# only hashes, names, and reconciliation figures are ever surfaced.
+CERTIFICATE_EXCERPT_MAX_BYTES = 256 * 1024
+
 # Staging copies move uploads in bounded chunks; 1 MiB keeps peak per-request
 # buffer use trivial while staying efficient for 50 MiB files.
 STAGING_CHUNK_BYTES = 1024 * 1024
@@ -903,8 +907,19 @@ async def playground() -> FileResponse:
 
 
 @app.post("/api/demo/run")
-async def run_demo(request: Request) -> JSONResponse:
-    """Run the self-contained ``datashell demo --json`` walkthrough."""
+async def run_demo(
+    request: Request,
+    scenario: str = "full",
+) -> JSONResponse:
+    """Run the self-contained ``datashell demo --json`` walkthrough.
+
+    ``scenario=valid`` runs a clean feed (every row delivered);
+    ``scenario=full`` runs the seeded-defect walkthrough with tamper recovery.
+    The response carries a bounded, path-free excerpt of the signed certificate
+    so the browser can show real evidence from the run it just executed.
+    """
+    if scenario not in ("full", "valid"):
+        raise HTTPException(status_code=422, detail="Unknown demo scenario.")
     _rate_limit_or_raise(request)
     _enforce_demo_storage_quota()
     await _acquire_cli_slot()
@@ -912,7 +927,7 @@ async def run_demo(request: Request) -> JSONResponse:
         staging = _create_staging_dir("datashell_webd_")
         try:
             result = await asyncio.to_thread(
-                _run_cli, ["demo", "--json"],
+                _run_cli, ["demo", "--json", "--scenario", scenario],
                 timeout=DEMO_WALKTHROUGH_TIMEOUT_SECONDS, workdir=staging,
             )
         except _CLITimeout:
@@ -939,7 +954,45 @@ async def run_demo(request: Request) -> JSONResponse:
     if payload is None or payload.get("status") not in ("LOADED", "REJECTED"):
         logger.error("demo walkthrough emitted unparseable output: %s", result.stdout[:200])
         raise HTTPException(status_code=500, detail="The demo walkthrough returned an unreadable result.")
-    return JSONResponse(_public_payload(payload))
+    public = _public_payload(payload)
+    public["certificate"] = _certificate_excerpt(payload.get("audit_path"))
+    return JSONResponse(public)
+
+
+def _certificate_excerpt(audit_path: Any) -> Dict[str, Any]:
+    """Bounded, path-free excerpt of the signed certificate for the browser.
+
+    Only hashes, names, and reconciliation figures are surfaced — never
+    absolute server paths, secrets, or upload contents.
+    """
+    if not isinstance(audit_path, str) or not audit_path:
+        return {}
+    try:
+        with open(audit_path, "rb") as fh:
+            raw = fh.read(CERTIFICATE_EXCERPT_MAX_BYTES)
+        cert = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        logger.warning("demo walkthrough certificate unreadable: %s", audit_path)
+        return {}
+    if not isinstance(cert, dict):
+        return {}
+    manifest = cert.get("cryptographic_manifest")
+    if not isinstance(manifest, dict):
+        manifest = {}
+    excerpt: Dict[str, Any] = {
+        "certificate_version": cert.get("certificate_version"),
+        "contract": cert.get("contract"),
+        "cryptographic_manifest": {
+            "source_payload_sha256": manifest.get("source_payload_sha256"),
+            "delivered_payload_sha256": manifest.get("delivered_payload_sha256"),
+            "delivered_status": manifest.get("delivered_status"),
+            "quarantine_payload_sha256": manifest.get("quarantine_payload_sha256"),
+            "merkle_root": manifest.get("merkle_root"),
+        },
+        "reconciliation": cert.get("reconciliation"),
+        "signature_header": cert.get("signature_header"),
+    }
+    return {key: value for key, value in excerpt.items() if value is not None}
 
 
 @app.post("/api/enforce")
