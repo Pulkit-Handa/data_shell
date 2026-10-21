@@ -93,7 +93,7 @@ class RuleCompiler:
             return col.is_not_null() & col.str.contains(pattern)
 
         elif rule.check == RowRuleCheckType.BETWEEN:
-            if not (isinstance(rule.value, (list, tuple)) and len(rule.value) == 2):
+            if not (isinstance(rule.value, list | tuple) and len(rule.value) == 2):
                 raise ValueError(f"Rule {rule.rule_id} check BETWEEN requires [min, max] list value")
             low: float = float(rule.value[0])
             high: float = float(rule.value[1])
@@ -219,7 +219,7 @@ class BatchRuleCompiler:
 
         elif rule.check == BatchRuleCheckType.SUM_BETWEEN:
             bounds = require_value()
-            if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
+            if not isinstance(bounds, list | tuple) or len(bounds) != 2:
                 raise ValueError(f"Batch rule '{rule.rule_id}' check SUM_BETWEEN requires a [low, high] value")
             low, high = float(bounds[0]), float(bounds[1])
             col = BatchRuleCompiler._quote_identifier(require_column())

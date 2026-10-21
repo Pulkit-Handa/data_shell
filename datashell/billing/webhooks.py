@@ -50,7 +50,7 @@ def verify_stripe_webhook(*, body: bytes, signature_header: str, secret: str,
     anything else fails closed. The signed content is ``<timestamp>.<body>``
     with the secret as the HMAC key, compared in constant time.
     """
-    if not isinstance(body, (bytes, bytearray)):
+    if not isinstance(body, bytes | bytearray):
         raise WebhookVerificationError("webhook body must be bytes")
     if not signature_header or not isinstance(signature_header, str):
         raise WebhookVerificationError("missing signature header")

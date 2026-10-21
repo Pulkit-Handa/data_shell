@@ -154,9 +154,9 @@ class Money:
 
     @classmethod
     def from_major(cls, amount: object, currency: str) -> Money:
-        if isinstance(amount, (int,)) and not isinstance(amount, bool):
+        if isinstance(amount, int) and not isinstance(amount, bool):
             minor = decimal_to_minor_units(Decimal(amount), currency)
-        elif isinstance(amount, (str, Decimal)):
+        elif isinstance(amount, str | Decimal):
             minor = decimal_to_minor_units(Decimal(str(amount)), currency)
         else:
             raise MoneyValidationError(f"cannot construct money from {type(amount).__name__}")

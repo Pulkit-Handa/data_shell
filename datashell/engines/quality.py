@@ -199,7 +199,7 @@ class SemanticQualityEngine:
             if isinstance(dataset_source, pl.DataFrame):
                 arrow_table = dataset_source.to_arrow()
                 con.register("admitted_dataset", arrow_table)
-            elif isinstance(dataset_source, (Path, str)):
+            elif isinstance(dataset_source, Path | str):
                 p = Path(dataset_source)
                 if p.exists() and p.stat().st_size > 0:
                     import pyarrow.dataset as ds

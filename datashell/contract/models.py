@@ -199,7 +199,7 @@ class QualityRule(BaseModel):
         elif self.check == RowRuleCheckType.BETWEEN:
             if not self.column:
                 raise ValueError(f"Rule '{self.rule_id}' with check BETWEEN must supply 'column'")
-            if not isinstance(self.value, (list, tuple)) or len(self.value) != 2:
+            if not isinstance(self.value, list | tuple) or len(self.value) != 2:
                 raise ValueError(f"Rule '{self.rule_id}' with check BETWEEN requires a [min, max] list value")
         elif self.check not in known_row_check_names():
             raise ValueError(
@@ -229,7 +229,7 @@ class BatchRule(BaseModel):
             if not self.sql:
                 raise ValueError(f"Batch rule '{self.rule_id}' with check SQL_ASSERTION must supply 'sql'")
         elif self.check in (BatchRuleCheckType.MIN_ROW_COUNT, BatchRuleCheckType.MAX_ROW_COUNT):
-            if self.value is None or not isinstance(self.value, (int, float)):
+            if self.value is None or not isinstance(self.value, int | float):
                 raise ValueError(f"Batch rule '{self.rule_id}' with check {self.check} requires numeric 'value'")
         elif self.check == BatchRuleCheckType.MAX_NULL_RATE:
             if not self.column:
@@ -252,14 +252,14 @@ class BatchRule(BaseModel):
         elif self.check == BatchRuleCheckType.SUM_EQUALS:
             if not self.column:
                 raise ValueError(f"Batch rule '{self.rule_id}' with check SUM_EQUALS must supply 'column'")
-            if self.value is None or not isinstance(self.value, (int, float)) or isinstance(self.value, bool):
+            if self.value is None or not isinstance(self.value, int | float) or isinstance(self.value, bool):
                 raise ValueError(f"Batch rule '{self.rule_id}' with check SUM_EQUALS requires numeric 'value'")
             if self.tolerance is not None and float(self.tolerance) < 0:
                 raise ValueError(f"Batch rule '{self.rule_id}' SUM_EQUALS 'tolerance' cannot be negative")
         elif self.check == BatchRuleCheckType.SUM_BETWEEN:
             if not self.column:
                 raise ValueError(f"Batch rule '{self.rule_id}' with check SUM_BETWEEN must supply 'column'")
-            if not isinstance(self.value, (list, tuple)) or len(self.value) != 2:
+            if not isinstance(self.value, list | tuple) or len(self.value) != 2:
                 raise ValueError(f"Batch rule '{self.rule_id}' with check SUM_BETWEEN requires a [min, max] list value")
             low, high = self.value
             if float(low) > float(high):
