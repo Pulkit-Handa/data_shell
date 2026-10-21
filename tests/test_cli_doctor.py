@@ -40,6 +40,19 @@ def _distribution_installed(distribution: str) -> bool:
     return True
 
 
+def _is_importable(module_path: str) -> bool:
+    """Whether the module can be imported, treating a missing parent as absent.
+
+    ``find_spec`` raises instead of returning None when a parent package does
+    not exist (``opentelemetry.exporter`` is absent when only the API is
+    installed), so the answer has to handle both.
+    """
+    try:
+        return importlib.util.find_spec(module_path) is not None
+    except ImportError:
+        return False
+
+
 def _doctor_report() -> dict[str, Any]:
     """Run the doctor command and return its machine-readable report."""
     import argparse
@@ -77,7 +90,7 @@ def test_an_installed_extra_is_never_reported_as_missing(
     """
     if not _distribution_installed(distribution):
         pytest.skip(f"{distribution} is not installed in this environment")
-    assert importlib.util.find_spec(module_path) is not None, (
+    assert _is_importable(module_path), (
         f"the doctor probes {module_path!r} for {distribution!r}, but that module "
         f"is not importable although the distribution is installed"
     )
@@ -96,7 +109,7 @@ def test_the_report_matches_what_is_importable() -> None:
     for extra, probes in EXTRA_MODULE_PROBES.items():
         entry = report["extras"][extra]
         for _distribution, module_path in probes:
-            expected = importlib.util.find_spec(module_path) is not None
+            expected = _is_importable(module_path)
             reported = next(
                 value
                 for label, value in entry["modules"].items()
