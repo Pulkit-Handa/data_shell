@@ -1194,6 +1194,9 @@ def command_demo(args: argparse.Namespace) -> int:
             "scenario": args.scenario,
             "run_id": result.run_id,
             "status": result.status.value,
+            # The walkthrough always runs the in-memory records path; the mode
+            # is fixed by construction, not measured.
+            "execution_mode": "in_memory",
             "rows_read": result.ledger.rows_read,
             "rows_refused": result.ledger.refused_structural,
             "rows_held": result.ledger.held_quality,
