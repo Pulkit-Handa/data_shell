@@ -16,7 +16,7 @@ from typing import Any
 
 from datashell_airflow.client import DataShellApiClient, DataShellApiError
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 _EXPORTS = {
     "DataShellHook": ("datashell_airflow.hooks", "DataShellHook"),

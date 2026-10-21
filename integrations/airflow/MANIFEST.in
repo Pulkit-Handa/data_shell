@@ -1,0 +1,14 @@
+# Explicit allowlist for the provider's source distribution (sdist).
+#
+# The provider is a thin operator wrapper, but the sdist must still be
+# independently installable and testable: the code, its license, its metadata
+# and its test suite travel with it.
+include pyproject.toml
+include README.md
+include LICENSE
+
+graft datashell_airflow
+graft tests
+
+global-exclude *.py[cod]
+global-exclude __pycache__

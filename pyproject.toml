@@ -1,13 +1,48 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+# setuptools >= 77 is required for PEP 639 metadata (the SPDX `license`
+# expression and the `license-files` list below). The pinned build backend in
+# requirements-build.lock is newer than this floor; the floor is what the
+# declaration promises to a build that resolves its own backend.
+requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "datashell"
-version = "2.0.0"
+# The PyPI distribution name is deliberately NOT the import package name.
+# `datashell` on PyPI belongs to an unrelated project, so this project
+# publishes as `datashell-engine`; the import package (`import datashell`)
+# and the console script (`datashell`) keep their names.
+name = "datashell-engine"
+version = "2.0.1"
 description = "Contract-driven boundary enforcement engine: Bad data never lands, and never leaves."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Data Shell" }]
+keywords = [
+    "data-contracts",
+    "data-quality",
+    "data-governance",
+    "schema-enforcement",
+    "boundary-enforcement",
+    "data-lineage",
+]
+classifiers = [
+    # Controlled-pilot candidate: the independent security review and the
+    # target-host verification are still outstanding.
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: System :: Archiving :: Backup",
+    "Typing :: Typed",
+]
 dependencies = [
     "polars>=2.0.0,<3.0.0",
     "pyarrow>=14.0.0,<27.0.0",
@@ -16,10 +51,18 @@ dependencies = [
     "prometheus-client>=0.20.0,<1.0.0"
 ]
 
+[project.urls]
+Homepage = "https://github.com/Pulkit-Handa/data_shell"
+Repository = "https://github.com/Pulkit-Handa/data_shell"
+Issues = "https://github.com/Pulkit-Handa/data_shell/issues"
+Changelog = "https://github.com/Pulkit-Handa/data_shell/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/Pulkit-Handa/data_shell/blob/main/README.md"
+
 [project.optional-dependencies]
-# The enforcement pipeline runs on `pip install datashell`. Features live behind
-# extras so service-critical nodes can install a minimal, auditable dependency
-# set (a purely structural-boundary node never pulls a web framework).
+# The enforcement pipeline runs on `pip install datashell-engine`. Features
+# live behind extras so service-critical nodes can install a minimal, auditable
+# dependency set (a purely structural-boundary node never pulls a web
+# framework).
 server = [
     "fastapi>=0.110.0,<1.0.0",
     "uvicorn>=0.28.0,<1.0.0",
@@ -60,7 +103,7 @@ dev = [
 # Explicit union (not a self-referential extra) for older-resolver compatibility.
 # `airflow` is deliberately NOT part of `all`: Apache Airflow pins Python
 # interpreter ranges of its own and is deployed as scheduler infrastructure,
-# not as a library extra; opt in via datashell[airflow].
+# not as a library extra; opt in via datashell-engine[airflow].
 all = [
     "fastapi>=0.110.0,<1.0.0",
     "uvicorn>=0.28.0,<1.0.0",
@@ -78,7 +121,7 @@ python_files = ["test_*.py"]
 addopts = "-ra"
 markers = [
     # End-to-end OpenTelemetry export check: needs a running collector and the
-    # `datashell[otel]` extra, so it is skipped unless DATASHELL_OTEL_E2E=1.
+    # `datashell-engine[otel]` extra, so it is skipped unless DATASHELL_OTEL_E2E=1.
     # Driven by scripts/run_otel_collector_e2e.sh (and the CI job of the same
     # name).
     "otel_e2e: end-to-end OpenTelemetry collector check (requires a running collector)",
@@ -157,7 +200,7 @@ ignore_errors = true
 
 [[tool.mypy.overrides]]
 # The OpenTelemetry SDK and the OTLP gRPC exporter belong to the optional
-# `datashell[otel]` extra; the developer/CI environment installs only
+# `datashell-engine[otel]` extra; the developer/CI environment installs only
 # `opentelemetry-api`. Their imports in datashell/core/observability.py are
 # guarded by `try/except ImportError` at runtime, so strict mode cannot resolve
 # them without a py.typed distribution — an upstream-optional dependency, not a

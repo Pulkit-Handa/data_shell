@@ -1,22 +1,41 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+# setuptools >= 77 is required for PEP 639 metadata (the SPDX `license`
+# expression and the `license-files` list below).
+requires = ["setuptools>=77.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
+# The PyPI distribution name. `datashell-airflow` is available on PyPI, so
+# the provider publishes under its own name; the import package stays
+# `datashell_airflow`.
 name = "datashell-airflow"
-version = "2.0.0"
+version = "2.0.1"
 description = "Apache Airflow provider that gates DAGs on Data Shell boundary enforcement."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Data Shell" }]
 keywords = ["airflow", "data-quality", "data-contracts", "datashell", "boundary"]
 classifiers = [
     "Framework :: Apache Airflow",
-    "License :: OSI Approved :: Apache Software License",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
 ]
 dependencies = ["apache-airflow>=2.7"]
+
+[project.urls]
+Homepage = "https://github.com/Pulkit-Handa/data_shell"
+Repository = "https://github.com/Pulkit-Handa/data_shell"
+Issues = "https://github.com/Pulkit-Handa/data_shell/issues"
+Changelog = "https://github.com/Pulkit-Handa/data_shell/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 tests = ["pytest>=8"]

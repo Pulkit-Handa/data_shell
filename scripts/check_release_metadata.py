@@ -14,14 +14,16 @@ other copy of the version and every dependency claim must match it:
 * historical changelog claims ("removed the unused `x` runtime dependency")
   never contradict the current dependency list.
 
-The distribution name (``datashell`` — matching the import package so
-``pip install datashell`` works directly), and the product name
-(``Data Shell``) are deliberately distinct and both preserved.
+The distribution name (``datashell-engine``), the import package
+(``datashell``) and the product name (``Data Shell``) are deliberately
+distinct and all preserved. The distribution name differs from the import
+package because ``datashell`` on PyPI belongs to an unrelated project; the
+console script stays ``datashell`` so operators' commands never change.
 
 Exit code 0 = consistent, 1 = inconsistency (details printed).
 
     python scripts/check_release_metadata.py
-    python scripts/check_release_metadata.py --tag v2.0.0
+    python scripts/check_release_metadata.py --tag v2.0.1
 """
 
 from __future__ import annotations
@@ -34,11 +36,25 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# The PyPI distribution name. It is intentionally different from the import
+# package: `datashell` on PyPI is an unrelated project, so publishing under
+# that name is impossible. The import package and the console script keep
+# the `datashell` name, so `import datashell` and `datashell <command>` are
+# unaffected by the distribution name. The console script and the import
+# package happen to share a name, but they are separate contracts and are
+# checked separately: renaming one must not silently rename the other.
+EXPECTED_DISTRIBUTION = "datashell-engine"
+EXPECTED_IMPORT_PACKAGE = "datashell"
+EXPECTED_CONSOLE_SCRIPT = "datashell"
+
 _VERSION_INIT_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
 _FASTAPI_VERSION_RE = re.compile(r'FastAPI\([^)]*?version="([^"]+)"', re.DOTALL)
 _CHANGELOG_ENTRY_RE = re.compile(r"^##\s+\[([^\]]+)\]", re.MULTILINE)
 _REMOVED_DEP_RE = re.compile(r"Removed the unused `([A-Za-z0-9_.\-]+)` runtime dependency")
 _SPECIFIER_RE = re.compile(r"^(>=|<=|==|!=|>|<)\s*([0-9][0-9A-Za-z.\-]*)$")
+# PEP 503: a distribution name is lowercase alphanumerics separated by
+# hyphens, dots or underscores, and must start and end alphanumerically.
+_PEP503_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$")
 
 
 def _normalize(name: str) -> str:
@@ -114,20 +130,38 @@ def collect_problems(root: Path = REPO_ROOT, tag: str | None = None) -> list[str
     project = pyproject["project"]
     version = project["version"]
 
-    # --- canonical identity: distribution / import package / product name ---
-    if project["name"] != "datashell":
-        problems.append(f"pyproject project.name is {project['name']!r}, expected 'datashell'")
-    scripts = project.get("scripts", {})
-    if scripts.get("datashell") != "datashell.cli.main:main":
+    # --- canonical identity: distribution / import package / console script ---
+    distribution = project["name"]
+    if distribution != EXPECTED_DISTRIBUTION:
         problems.append(
-            f"console script 'datashell' is {scripts.get('datashell')!r}, "
-            "expected 'datashell.cli.main:main'")
+            f"pyproject project.name is {distribution!r}, expected {EXPECTED_DISTRIBUTION!r}")
+    if not _PEP503_NAME_RE.match(distribution):
+        problems.append(f"distribution name {distribution!r} is not a valid PyPI project name")
+    if distribution == EXPECTED_IMPORT_PACKAGE:
+        problems.append(
+            f"the distribution name must differ from the import package {EXPECTED_IMPORT_PACKAGE!r}: "
+            "that name on PyPI belongs to an unrelated project")
+    scripts = project.get("scripts", {})
+    expected_entry_point = f"{EXPECTED_IMPORT_PACKAGE}.cli.main:main"
+    if scripts.get(EXPECTED_CONSOLE_SCRIPT) != expected_entry_point:
+        problems.append(
+            f"console script {EXPECTED_CONSOLE_SCRIPT!r} is {scripts.get(EXPECTED_CONSOLE_SCRIPT)!r}, "
+            f"expected {expected_entry_point!r}")
+    # The distribution was renamed; the importable package must not be. The
+    # wheel ships `datashell/`, so the import name operators depend on
+    # survives the PyPI rename.
+    find_include = (pyproject.get("tool", {}).get("setuptools", {})
+                    .get("packages", {}).get("find", {}).get("include", []))
+    if not any(str(pattern).startswith(EXPECTED_IMPORT_PACKAGE) for pattern in find_include):
+        problems.append(
+            f"the wheel must ship the import package {EXPECTED_IMPORT_PACKAGE!r}; "
+            f"setuptools.packages.find include is {find_include!r}")
 
     # --- version derivations must all match pyproject --------------------
     # In a source tree the import package version is read from the source; in an
     # installed-only deployment (wheel + `web/`, no `datashell/` source) it is
     # read from the installed distribution metadata.
-    source_init = root / "datashell" / "__init__.py"
+    source_init = root / EXPECTED_IMPORT_PACKAGE / "__init__.py"
     if source_init.is_file():
         match = _VERSION_INIT_RE.search(source_init.read_text(encoding="utf-8"))
         reported, origin = (match.group(1) if match else None), "datashell/__init__.py"
@@ -163,6 +197,29 @@ def collect_problems(root: Path = REPO_ROOT, tag: str | None = None) -> list[str
         expected = f"v{version}"
         if tag != expected:
             problems.append(f"release tag {tag!r} does not match package version (expected {expected!r})")
+
+    # --- the Airflow provider distribution ships the same version --------
+    # The core package and the provider are published together by the same
+    # workflow; a provider that carries a different version is a release
+    # defect, not a curiosity.
+    provider_root = root / "integrations" / "airflow"
+    provider_pyproject = provider_root / "pyproject.toml"
+    if provider_pyproject.is_file():
+        provider = tomllib.loads(provider_pyproject.read_text(encoding="utf-8"))["project"]
+        if provider.get("version") != version:
+            problems.append(
+                f"the Airflow provider distribution is {provider.get('version')!r}, "
+                f"expected {version!r} (both distributions are published together)")
+        provider_init = provider_root / "datashell_airflow" / "__init__.py"
+        if provider_init.is_file():
+            match = _VERSION_INIT_RE.search(provider_init.read_text(encoding="utf-8"))
+            provider_version = match.group(1) if match else None
+            if provider_version != version:
+                problems.append(
+                    f"the Airflow provider import package version is {provider_version!r}, "
+                    f"expected {version!r}")
+    else:
+        problems.append("integrations/airflow/pyproject.toml is missing (the provider distribution is not publishable)")
 
     # --- declared runtime dependencies are pinned with hashes ------------
     declared = [_normalize(re.split(r"[<>=!~;\s]", dep, maxsplit=1)[0]) for dep in project.get("dependencies", [])]
@@ -222,7 +279,7 @@ def collect_problems(root: Path = REPO_ROOT, tag: str | None = None) -> list[str
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=str(REPO_ROOT), help="repository root (defaults to the script's parent)")
-    parser.add_argument("--tag", help="release tag to compare against the package version (e.g. v2.0.0)")
+    parser.add_argument("--tag", help="release tag to compare against the package version (e.g. v2.0.1)")
     args = parser.parse_args(argv)
 
     problems = collect_problems(Path(args.root), tag=args.tag)
@@ -231,10 +288,12 @@ def main(argv: list[str]) -> int:
         for problem in problems:
             print(f"  - {problem}")
         return 1
-    version = tomllib.loads((Path(args.root) / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    project = tomllib.loads((Path(args.root) / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    version = project["version"]
     suffix = f" (tag {args.tag})" if args.tag else ""
-    print(f"Release metadata consistent: datashell {version}{suffix} "
-          "— package, web app, changelog and lockfiles agree")
+    print(f"Release metadata consistent: {project['name']} {version}{suffix} "
+          f"— distribution, import package {EXPECTED_IMPORT_PACKAGE!r}, web app, "
+          "changelog and lockfiles agree")
     return 0
 
 

@@ -124,7 +124,7 @@ async def _lifespan(application: FastAPI):
     yield
 
 
-app = FastAPI(title="Data Shell Demo", version="2.0.0", redoc_url=None, lifespan=_lifespan)
+app = FastAPI(title="Data Shell Demo", version="2.0.1", redoc_url=None, lifespan=_lifespan)
 app.state.cli_slots = asyncio.Semaphore(settings.max_concurrent_runs)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
