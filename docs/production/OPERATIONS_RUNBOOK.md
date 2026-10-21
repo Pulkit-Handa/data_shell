@@ -235,7 +235,7 @@ curl -H "X-API-Key: $KEY" http://127.0.0.1:8000/api/v1/quarantine?run_id=<run_id
 ### 6.4 Tracing Verification
 
 Tracing is off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set **and** the
-`datashell[otel]` extra is installed. `datashell doctor` reports both halves.
+`datashell-engine[otel]` extra is installed. `datashell doctor` reports both halves.
 
 ```bash
 # Which halves are present in this environment?

@@ -35,7 +35,7 @@ try:
 except ImportError as _exc:  # pragma: no cover - exercised only outside the extra
     raise ImportError(
         "The Stripe billing adapter requires the 'billing' extra. "
-        "Install it with: pip install datashell[billing]"
+        "Install it with: pip install datashell-engine[billing]"
     ) from _exc
 
 from datashell.billing.base import (

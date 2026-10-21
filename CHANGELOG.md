@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-22
+
+### Added
+- **The project is publishable on PyPI.** The distribution is now
+  `datashell-engine` (see the rename below), carries complete project
+  metadata (PEP 639 SPDX license expression, license file, authors,
+  keywords, classifiers, project URLs), and is published by a new
+  `publish-pypi.yml` workflow that uses **PyPI Trusted Publishing (OIDC)** —
+  there is no long-lived API token in this repository. The workflow builds
+  the wheel and sdist with the pinned build backend, runs the same
+  distribution-content gate CI runs, and refuses to publish a tag that does
+  not match the package version. The Airflow provider
+  (`datashell-airflow`) is published by the same workflow. See
+  [`docs/PUBLISHING.md`](docs/PUBLISHING.md) for the one-time PyPI
+  publisher registration and the release procedure.
+
 ### Changed
+- **Distribution name `datashell` → `datashell-engine`.** The `datashell`
+  name on PyPI belongs to an unrelated project, so this project could not be
+  published under the name its import package uses — the reason the README
+  said "not published under this name; install from source". The distribution
+  is renamed; **the import package (`import datashell`) and the console
+  script (`datashell <command>`) keep their names**, so no operator command
+  or code change is required. The release-metadata gate now pins all three
+  names and fails if the distribution name ever collides with the import
+  package again, and the distribution-content gate reads the expected
+  metadata directory from `pyproject.toml` instead of carrying a copy of the
+  name.
 - **OpenTelemetry export is now verified end to end in CI.** The previous
   release shipped the tracing bridge with an in-process activation test only:
   the claim "tracing activates" was proven, but "spans reach a collector" was
@@ -28,14 +55,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end-to-end check therefore asserts on the gateway's own span, selected by its
   instrumentation scope (`datashell`).
 - **The tracing extra is now hash-pinned.** `requirements-otel.in` /
-  `requirements-otel.lock` pin the `datashell[otel]` dependency set
+  `requirements-otel.lock` pin the `datashell-engine[otel]` dependency set
   (OpenTelemetry SDK, OTLP/gRPC exporter, gRPC) with sha256 hashes, the same
   way the core and development lockfiles are pinned, and the set is included
-  in the blocking `pip-audit` gate. The core install and the `datashell[otel]`
-  extra are unchanged: tracing still activates only with
-  `OTEL_EXPORTER_OTLP_ENDPOINT` **and** the extra installed.
+  in the blocking `pip-audit` gate. The core install and the
+  `datashell-engine[otel]` extra are unchanged: tracing still activates only
+  with `OTEL_EXPORTER_OTLP_ENDPOINT` **and** the extra installed.
 
 ### Fixed
+- **Install hints no longer point at the wrong PyPI project.** The CLI, the
+  DuckDB engine, the Stripe adapter, the event dispatcher and the tracing
+  bridge all told operators to run `pip install datashell[<extra>]`. On PyPI
+  that name belongs to an unrelated project, so following the project's own
+  instructions installed the wrong software. Every hint now names the
+  distribution that actually exists (`datashell-engine[<extra>]`).
 - **`datashell doctor` no longer misreports installed extras.** The capability
   probes imported distribution names instead of module paths, so
   `python-multipart`, `apache-airflow` and the entire tracing extra were

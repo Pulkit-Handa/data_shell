@@ -73,6 +73,11 @@ jobs:
         run: python -m build --no-isolation --outdir dist
       - name: Verify built distribution contents (wheel + sdist)
         run: python scripts/verify_distribution_contents.py --dist-dir dist
+      - name: Build the Airflow provider distribution
+        working-directory: integrations/airflow
+        run: python -m build --no-isolation --outdir dist
+      - name: Verify built provider distribution contents (wheel + sdist)
+        run: python scripts/verify_provider_distribution_contents.py --dist-dir integrations/airflow/dist
       - name: Generate CycloneDX software bill of materials from the locked release dependencies
         run: |
           python -m pip install "cyclonedx-bom==7.5.0"
@@ -123,6 +128,8 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             dist/*.cyclonedx.json
+            integrations/airflow/dist/*.whl
+            integrations/airflow/dist/*.tar.gz
           if-no-files-found: warn
           retention-days: 30
 

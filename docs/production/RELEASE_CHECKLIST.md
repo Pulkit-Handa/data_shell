@@ -27,6 +27,9 @@
 | Distribution content check | **LOCAL-VERIFIED** | `scripts/verify_distribution_contents.py` passes |
 | Release metadata check | **LOCAL-VERIFIED** | `scripts/check_release_metadata.py` passes |
 | SBOM generation | **LOCAL-VERIFIED** | CycloneDX SBOM generated from lockfile |
+| Provider distribution content check | **LOCAL-VERIFIED** | `scripts/verify_provider_distribution_contents.py` passes |
+| PyPI publisher registration | **REQUIRED** | A pending publisher for `datashell-engine` and `datashell-airflow` (repo `Pulkit-Handa/data_shell`, workflow `publish-pypi.yml`, environment `pypi`) is registered on each PyPI project — see [`PUBLISHING.md`](../PUBLISHING.md) |
+| First publication to PyPI | **REQUIRED** | Tag `v2.0.1`; `.github/workflows/publish-pypi.yml` uploads both distributions |
 
 ### Gate 2: Functional Correctness
 

@@ -21,6 +21,7 @@ The following versions of Data Shell receive security updates:
 
 | Version | Supported |
 | --- | --- |
+| 2.0.1 | ✅ Supported |
 | 2.0.0 | ✅ Supported |
 | < 2.0.0 | ❌ No longer supported |
 

@@ -20,12 +20,15 @@ what is wrong with a dataset. Data Shell decides whether the dataset may cross t
 publication boundary — and produces portable evidence of what was published.
 
 > [!IMPORTANT]
-> **Project status: controlled-pilot candidate (v2.0.0).** The reference topology
+> **Project status: controlled-pilot candidate (v2.0.1).** The reference topology
 > is one process, one worker, one replica, and one trusted storage root. It is not
 > approved for general production. See [Project status and limitations](#project-status-and-limitations).
 >
-> **The package is not yet published on PyPI.** The `datashell` name there belongs
-> to an unrelated project. Install from this repository.
+> **The PyPI distribution is named `datashell-engine`.** The `datashell` name on
+> PyPI belongs to an unrelated project, so the distribution carries its own name.
+> The import package (`import datashell`) and the CLI (`datashell <command>`) are
+> unchanged. Install with `pip install datashell-engine` — or from this
+> repository until the first release is cut.
 
 ---
 
@@ -133,7 +136,18 @@ The core engine needs only `polars`, `pyarrow`, `pydantic`, `cryptography`, and
 `prometheus-client`. The gateway, DuckDB batch rules, billing adapter, and
 OpenTelemetry support are optional extras.
 
-### 1. Install from source
+### 1. Install
+
+```bash
+pip install datashell-engine   # engine only
+# or: pip install "datashell-engine[all]"   # engine + gateway + DuckDB + billing adapter
+```
+
+The distribution is named `datashell-engine` because the `datashell` name on
+PyPI belongs to an unrelated project. The import package (`import datashell`)
+and the CLI (`datashell <command>`) are unchanged.
+
+Until the first release is published to PyPI, install from a source checkout:
 
 ```bash
 git clone https://github.com/Pulkit-Handa/data_shell.git
@@ -219,8 +233,20 @@ explicit secrets and an exact HTTPS origin allowlist; see
 
 ## Installation
 
-Data Shell is currently installed from a source checkout. There is no supported
-PyPI release under this name yet.
+Data Shell is published on PyPI as **`datashell-engine`**: the `datashell`
+name on PyPI belongs to an unrelated project, so the distribution carries its
+own name. The import package (`import datashell`) and the CLI
+(`datashell <command>`) are unchanged — installing the distribution is all a
+new user needs.
+
+```bash
+pip install datashell-engine                    # engine only
+pip install "datashell-engine[server,duckdb]"   # gateway + batch rules
+```
+
+Until the first release is cut, install from a source checkout
+(`pip install -e ".[all]"`). See [docs/PUBLISHING.md](docs/PUBLISHING.md) for
+the release procedure.
 
 ### Dependency extras
 
@@ -466,7 +492,7 @@ issue for an exploitable defect.
   labels to avoid cardinality blow-up.
 - **Webhooks:** when configured, terminal runs emit a signed `run.completed` event
   with bounded retries. Delivery is best-effort and cannot fail a run.
-- **Tracing:** opt-in OpenTelemetry spans via `datashell[otel]` and
+- **Tracing:** opt-in OpenTelemetry spans via `datashell-engine[otel]` and
   `OTEL_EXPORTER_OTLP_ENDPOINT`.
 - **Ledger queries:** CLI and HTTP surfaces expose run history, quarantine search,
   usage, and drift trends, always tenant-scoped.
@@ -549,14 +575,19 @@ pip-audit -r requirements.lock -r requirements-dev.lock -r requirements-otel.loc
 ```
 
 CI runs the suite on Python 3.11, 3.12, and 3.13, verifies the committed OpenAPI
-document, builds the wheel and sdist, checks distribution contents, generates a
-CycloneDX SBOM, exports gateway spans to a real OpenTelemetry collector, and
-builds and exercises the production container with a read-only root filesystem.
-See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+document, builds the wheel and sdist of both distributions, checks distribution
+contents, generates a CycloneDX SBOM, exports gateway spans to a real OpenTelemetry
+collector, and builds and exercises the production container with a read-only root
+filesystem. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+Releases are published to PyPI by
+[`.github/workflows/publish-pypi.yml`](.github/workflows/publish-pypi.yml) on a
+`v*` tag, using PyPI Trusted Publishing (no API token in this repository). The
+procedure is documented in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
 The Airflow provider has its own test suite under
 [`integrations/airflow/tests`](integrations/airflow/tests). The main test suite
-currently contains 539 tests; the provider suite contains 9.
+currently contains 543 tests; the provider suite contains 9.
 
 If you change the OpenAPI surface, regenerate the committed document with
 `python scripts/export_openapi.py --out docs/openapi.yaml`. If you change release
@@ -566,7 +597,7 @@ metadata, run `python scripts/check_release_metadata.py`.
 
 ## Project status and limitations
 
-**Release posture:** controlled-pilot candidate at v2.0.0. Not approved for general
+**Release posture:** controlled-pilot candidate at v2.0.1. Not approved for general
 production.
 
 | Area | Status |
@@ -581,7 +612,7 @@ production.
 | Alert delivery to a human | **Outstanding** — rule definitions exist; delivery has not been exercised on the target. |
 | Live Stripe billing | Not exercised. The adapter is draft-invoice-only; no code path moves money. |
 | OpenTelemetry collector | Export verified end to end against a real collector in CI (`otel-collector-e2e`). Forwarding to a production tracing backend is an operator concern. |
-| PyPI distribution | Not published under this name; install from source. |
+| PyPI distribution | Published under the name `datashell-engine` — the `datashell` name on PyPI belongs to an unrelated project. The import package and the CLI keep their names. |
 | Wide-schema capacity | Measured for 100-column, 32-byte-string feeds at 1 GiB (CSV and Parquet). Wider schemas, wider cell values, and larger wide files remain unmeasured. |
 | Consumer contract | A consumer that reads the delivery target by path without resolving `<target>.generation.json` can observe a superseded generation. |
 
@@ -607,6 +638,7 @@ The full blocker list, owners, and evidence status are maintained in
 | [`docs/SCALING.md`](docs/SCALING.md) | Ingest, batch, codec, concurrency, and disk scaling surfaces. |
 | [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) | Assets, trust boundaries, threats, and mitigations. |
 | [`docs/SDK.md`](docs/SDK.md) | Generated Python/TypeScript clients and OpenAPI versioning. |
+| [`docs/PUBLISHING.md`](docs/PUBLISHING.md) | PyPI release procedure: distribution names, Trusted Publishing setup, tagging, and verification. |
 | [`docs/SETTLEMENT.md`](docs/SETTLEMENT.md) | Settlement architecture, schemas, acceptance, and invariants. |
 | [`docs/SETTLEMENT_OPERATIONS.md`](docs/SETTLEMENT_OPERATIONS.md) | Settlement CLI/API reference, billing, and disputes. |
 | [`examples/README.md`](examples/README.md) | Example contracts, sample data, scripts, and notebook. |

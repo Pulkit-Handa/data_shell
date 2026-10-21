@@ -167,7 +167,7 @@ class SemanticQualityEngine:
         Evaluates batch rules in DuckDB over an Arrow table, Polars DataFrame, or out-of-core Parquet file.
         Uses pyarrow.dataset to stream Parquet data on demand without materializing the full dataset into RAM.
 
-        DuckDB is an optional dependency (``pip install datashell[duckdb]``); contracts
+        DuckDB is an optional dependency (``pip install datashell-engine[duckdb]``); contracts
         that only use row rules run fine without it.
         """
         batch_results: list[BatchRuleResult] = []
@@ -180,7 +180,7 @@ class SemanticQualityEngine:
             import duckdb
         except ImportError as exc:  # pragma: no cover - environment-dependent
             raise ImportError(
-                "Batch rules require the DuckDB engine. Install it with: pip install datashell[duckdb]"
+                "Batch rules require the DuckDB engine. Install it with: pip install datashell-engine[duckdb]"
             ) from exc
 
         con = duckdb.connect(

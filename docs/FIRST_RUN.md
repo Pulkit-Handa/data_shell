@@ -13,10 +13,12 @@ are required for local development.
 ## Prerequisites
 
 - Python 3.11 or newer
-- The repository checked out locally
+- The repository checked out locally (or the `datashell-engine` distribution
+  from PyPI)
 
 ```bash
-pip install -e ".[all]"    # the package is not yet published to PyPI under this name
+pip install "datashell-engine[all]"   # from PyPI
+pip install -e ".[all]"                # or from a source checkout
 ```
 
 ---

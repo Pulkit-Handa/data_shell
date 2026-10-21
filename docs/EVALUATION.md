@@ -3,9 +3,9 @@
 **Audience:** the engineer who will run the evaluation, and the technical
 approver who reviews it.
 
-**Product status at 2.0.0:** controlled-pilot candidate. The enforcement
+**Product status at 2.0.1:** controlled-pilot candidate. The enforcement
 engine, reconciliation, publication, recovery, and certificate stack are
-implemented and covered by 548 automated tests (539 in the main suite plus 9
+implemented and covered by 552 automated tests (543 in the main suite plus 9
 Airflow provider tests). The reference topology is a single replica with process-local
 limits. Horizontal scale and shared credential stores are documented as
 prerequisites, not features (see [Known limitations](#known-limitations-and-open-items)).
@@ -33,10 +33,17 @@ Prerequisites: Python 3.11–3.13. The core engine needs only `polars`,
 DuckDB batch rules, billing adapter, and OpenTelemetry are extras.
 
 ```bash
+pip install "datashell-engine[all]"   # from PyPI (the import package is `datashell`)
+datashell doctor                     # reports which capabilities this environment has
+```
+
+Or, from a source checkout:
+
+```bash
 git clone https://github.com/Pulkit-Handa/data_shell
 cd data_shell
-pip install -e ".[all]"     # the package is not yet published to PyPI under this name
-datashell doctor            # reports which capabilities this environment has
+pip install -e ".[all]"
+datashell doctor
 ```
 
 ### 1. The self-contained walkthrough (~2 seconds)
@@ -158,10 +165,10 @@ your existing landing / orchestration (storage, Airflow, ...)
 
 - **Retries and alerts stay yours.** Data Shell returns an exit code and a
   JSON summary; your scheduler decides what to do with them. The Airflow
-  provider (`pip install -e integrations/airflow`; not yet on PyPI) is a thin operator wrapper over
+  provider (`pip install datashell-airflow`) is a thin operator wrapper over
   the same CLI.
 - **The gateway is optional.** If you prefer HTTP, the authenticated gateway
-  (`datashell[server]`) exposes the same engine with RBAC, rate limits, and
+  (`datashell-engine[server]`) exposes the same engine with RBAC, rate limits, and
   a 20 GiB request ceiling; the generated Python/TypeScript clients track its
   OpenAPI contract.
 - **What the downstream consumer receives:** the delivered artifact only —
@@ -199,7 +206,7 @@ A pilot is one narrowly scoped workflow, not a platform migration.
 - **Limits are process-local:** rate limiting and execution concurrency are
   per worker process, per replica. Size accordingly before running multiple
   replicas; horizontal scale needs shared credential/rate-limit stores first.
-- **Telemetry:** OpenTelemetry spans are opt-in (`datashell[otel]` plus
+- **Telemetry:** OpenTelemetry spans are opt-in (`datashell-engine[otel]` plus
   `OTEL_EXPORTER_OTLP_ENDPOINT`). Without it, the app is silent. The export
   path is proven against a real collector by
   `scripts/run_otel_collector_e2e.sh`.

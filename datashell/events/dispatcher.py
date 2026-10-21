@@ -11,7 +11,7 @@ try:
 except ImportError as _exc:  # pragma: no cover - exercised only outside the extra
     raise ImportError(
         "The webhook dispatcher requires the 'billing' extra "
-        "(it reuses the signed HTTP client). Install it with: pip install datashell[billing]"
+        "(it reuses the signed HTTP client). Install it with: pip install datashell-engine[billing]"
     ) from _exc
 
 from datashell.core.crypto import CryptoEngine

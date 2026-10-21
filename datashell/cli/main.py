@@ -671,7 +671,7 @@ def command_doctor(args: argparse.Namespace) -> int:
         version_note = f" (v{entry['version']})" if entry["available"] else ""
         print(f"  {mark} {label}{version_note}")
     print()
-    print("Optional capabilities (enable with pip install \"datashell[<extra>]\"):")
+    print("Optional capabilities (enable with pip install \"datashell-engine[<extra>]\"):")
     for extra_name, modules in EXTRA_MODULE_PROBES.items():
         entry = extras_status[extra_name]
         mark = "✓" if entry["available"] else "○"
@@ -695,7 +695,7 @@ def command_doctor(args: argparse.Namespace) -> int:
     if not all(v["available"] for v in extras_status.values()):
         print()
         print("○ Optional extras are missing — install the ones your deployment needs, e.g. "
-              "pip install \"datashell[server,duckdb]\"")
+              "pip install \"datashell-engine[server,duckdb]\"")
     else:
         print()
         print("✓ All capabilities available.")

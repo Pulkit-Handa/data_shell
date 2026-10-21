@@ -16,13 +16,15 @@ paths), so a DAG can branch on the outcome.
 ## Install
 
 ```bash
-pip install ".[tests]"        # from integrations/airflow
-# or, once published:
 pip install datashell-airflow
+# or, from a source checkout:
+pip install ".[tests]"        # from integrations/airflow
 ```
 
-The package depends only on `apache-airflow`. The HTTP client itself uses the
-standard library, so it can be unit-tested without Airflow installed.
+The provider is published to PyPI as `datashell-airflow`; its import package
+is `datashell_airflow`. The package depends only on `apache-airflow`. The HTTP
+client itself uses the standard library, so it can be unit-tested without
+Airflow installed.
 
 ## Configure a connection
 
