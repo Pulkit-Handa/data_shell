@@ -1,0 +1,39 @@
+# OpenTelemetry collector configuration for the end-to-end tracing check.
+#
+# Used by scripts/run_otel_collector_e2e.sh (and the `otel-collector-e2e` job
+# in .github/workflows/ci.yml). It lives next to the script that consumes it so
+# the source distribution stays self-contained. The configuration is
+# deliberately minimal and hermetic:
+#
+#   * one OTLP/gRPC receiver on 4317 — the protocol the gateway's exporter
+#     speaks when OTEL_EXPORTER_OTLP_ENDPOINT is set;
+#   * one `file` exporter — captures the received spans as JSON so the test can
+#     assert on structure (span name, resource attributes, span attributes)
+#     rather than on log text;
+#   * one `debug` exporter — human-readable trace dump in the container logs,
+#     which is what a CI failure shows.
+#
+# No external backend (Jaeger, Tempo, Elastic, ...) is required: the check
+# proves that spans leave the gateway, traverse OTLP/gRPC, and are accepted by
+# a real collector. Sending them onward to a production backend remains an
+# operator concern.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+exporters:
+  file:
+    path: /var/lib/datashell-otel/spans.json
+    rotation:
+      max_megabytes: 16
+      max_days: 1
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [file, debug]

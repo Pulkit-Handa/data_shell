@@ -130,6 +130,7 @@ def check_sdist(path: Path) -> tuple[list[str], list[str]]:
         "requirements.lock",
         "requirements-dev.lock",
         "requirements-build.lock",
+        "requirements-otel.lock",
         # shipped code + typing marker
         "datashell/__init__.py",
         "datashell/py.typed",
@@ -147,6 +148,10 @@ def check_sdist(path: Path) -> tuple[list[str], list[str]]:
         # release-engineering scripts invoked by the suite and by CI
         "scripts/check_release_metadata.py",
         "scripts/verify_distribution_contents.py",
+        # the end-to-end OpenTelemetry collector check (script + its config)
+        "scripts/run_otel_collector_e2e.sh",
+        "scripts/otel-collector-ci.yaml",
+        "tests/test_otel_collector_e2e.py",
     ]
     missing = [r for r in required if r not in stripped]
     if not any(n.startswith("tests/") and n.endswith(".py") for n in stripped):

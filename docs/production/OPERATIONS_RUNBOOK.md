@@ -232,6 +232,24 @@ curl -H "X-API-Key: $KEY" http://127.0.0.1:8000/api/v1/runs/<run_id>
 curl -H "X-API-Key: $KEY" http://127.0.0.1:8000/api/v1/quarantine?run_id=<run_id>
 ```
 
+### 6.4 Tracing Verification
+
+Tracing is off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set **and** the
+`datashell[otel]` extra is installed. `datashell doctor` reports both halves.
+
+```bash
+# Which halves are present in this environment?
+datashell doctor | grep -A3 otel
+
+# Does a span actually leave the process and reach a collector?
+# (needs docker; starts a throwaway collector and tears it down)
+scripts/run_otel_collector_e2e.sh
+```
+
+The startup log line `OpenTelemetry tracing enabled` confirms activation. If
+the endpoint is set but the extra is missing, the gateway logs a warning and
+keeps tracing disabled — it never fails a request because of tracing.
+
 ---
 
 ## 7. Incident Response

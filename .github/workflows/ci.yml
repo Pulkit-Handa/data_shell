@@ -48,6 +48,7 @@ jobs:
           python -m pip install "pip-audit==2.10.1"
           pip-audit -r requirements.lock --progress-spinner off
           pip-audit -r requirements-dev.lock --progress-spinner off
+          pip-audit -r requirements-otel.lock --progress-spinner off
           pip-audit -r sdks/python-client/requirements.txt --progress-spinner off
       - name: Verify pre-commit configuration is parseable
         run: |
@@ -108,7 +109,7 @@ jobs:
       - name: Audit the resolved dependency sets
         run: |
           python -m pip install "pip-audit==2.10.1"
-          pip-audit -r requirements.lock -r requirements-dev.lock -r requirements-build.lock
+          pip-audit -r requirements.lock -r requirements-dev.lock -r requirements-build.lock -r requirements-otel.lock
       - name: Static security scan (Bandit)
         run: |
           python -m pip install "bandit==1.9.4"
@@ -122,6 +123,43 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             dist/*.cyclonedx.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  otel-collector-e2e:
+    name: OpenTelemetry collector (end-to-end)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.lock
+            requirements-otel.lock
+      - name: Install locked dependencies (hash-verified)
+        run: |
+          python -m pip install --require-hashes -r requirements-dev.lock
+          # The tracing SDK and the OTLP/gRPC exporter are an optional extra;
+          # this job is the only place they are installed, and it installs the
+          # exact hash-pinned set from the otel lockfile.
+          python -m pip install --require-hashes -r requirements-otel.lock
+          python -m pip install --no-deps --no-build-isolation --editable .
+      - name: Verify installed dependency consistency
+        run: python -m pip check
+      - name: Export gateway spans to a real collector and assert the capture
+        env:
+          OTEL_E2E_EVIDENCE_DIR: ${{ github.workspace }}/otel-e2e-evidence
+        run: bash scripts/run_otel_collector_e2e.sh
+      - name: Archive collector evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: otel-collector-e2e-evidence
+          path: otel-e2e-evidence/
           if-no-files-found: warn
           retention-days: 30
 

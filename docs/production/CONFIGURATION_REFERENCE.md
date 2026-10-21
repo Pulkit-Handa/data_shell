@@ -28,6 +28,10 @@ This document is the **authoritative source** for all Data Shell configuration. 
 | `DATASHELL_TMP_DIR` | System temp | Scratch space for spooled uploads and DuckDB spills. Point at durable storage volume. |
 | `TMPDIR` | — | Fallback for `DATASHELL_TMP_DIR` if not set. |
 
+The tracing half of the configuration is verifiable: `scripts/run_otel_collector_e2e.sh`
+starts a real collector, points the gateway at it, and asserts the exported
+span arrives. The same check runs in CI as the `otel-collector-e2e` job.
+
 ### 1.2 Security Credentials
 
 | Variable | Default | Description |

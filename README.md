@@ -471,8 +471,11 @@ issue for an exploitable defect.
 - **Ledger queries:** CLI and HTTP surfaces expose run history, quarantine search,
   usage, and drift trends, always tenant-scoped.
 
-The OpenTelemetry activation path is tested in-process; an end-to-end run against a
-real collector is not part of the automated suite.
+The OpenTelemetry activation path is verified end to end in CI: the
+`otel-collector-e2e` job starts a real OpenTelemetry collector, drives a
+gateway exchange, and asserts the exported span arrives at the collector over
+OTLP/gRPC. Reproduce it locally with
+[`scripts/run_otel_collector_e2e.sh`](scripts/run_otel_collector_e2e.sh).
 
 ---
 
@@ -534,21 +537,26 @@ pip install -e ".[dev]"
 ENVIRONMENT=test pytest -q
 ENVIRONMENT=test pytest integrations/airflow/tests -q
 
+# End-to-end OpenTelemetry export (needs docker and the otel extra)
+pip install --require-hashes -r requirements-otel.lock
+scripts/run_otel_collector_e2e.sh
+
 # Static gates
 ruff check .
 mypy datashell/
 bandit -r datashell -q
-pip-audit -r requirements.lock -r requirements-dev.lock
+pip-audit -r requirements.lock -r requirements-dev.lock -r requirements-otel.lock
 ```
 
 CI runs the suite on Python 3.11, 3.12, and 3.13, verifies the committed OpenAPI
 document, builds the wheel and sdist, checks distribution contents, generates a
-CycloneDX SBOM, and builds and exercises the production container with a read-only
-root filesystem. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+CycloneDX SBOM, exports gateway spans to a real OpenTelemetry collector, and
+builds and exercises the production container with a read-only root filesystem.
+See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 The Airflow provider has its own test suite under
 [`integrations/airflow/tests`](integrations/airflow/tests). The main test suite
-currently contains 525 tests; the provider suite contains 9.
+currently contains 528 tests; the provider suite contains 9.
 
 If you change the OpenAPI surface, regenerate the committed document with
 `python scripts/export_openapi.py --out docs/openapi.yaml`. If you change release
@@ -572,7 +580,7 @@ production.
 | Production backup/restore (RPO/RTO) | **Outstanding** — the local drill is not a production drill. |
 | Alert delivery to a human | **Outstanding** — rule definitions exist; delivery has not been exercised on the target. |
 | Live Stripe billing | Not exercised. The adapter is draft-invoice-only; no code path moves money. |
-| OpenTelemetry collector | Activation path tested in-process; no end-to-end collector run in CI. |
+| OpenTelemetry collector | Export verified end to end against a real collector in CI (`otel-collector-e2e`). Forwarding to a production tracing backend is an operator concern. |
 | PyPI distribution | Not published under this name; install from source. |
 | Wide-schema capacity | Measured for 100-column, 32-byte-string feeds at 1 GiB (CSV and Parquet). Wider schemas, wider cell values, and larger wide files remain unmeasured. |
 | Consumer contract | A consumer that reads the delivery target by path without resolving `<target>.generation.json` can observe a superseded generation. |

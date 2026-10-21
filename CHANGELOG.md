@@ -5,6 +5,29 @@ All notable changes to Data Shell are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **OpenTelemetry export is now verified end to end in CI.** The previous
+  release shipped the tracing bridge with an in-process activation test only:
+  the claim "tracing activates" was proven, but "spans reach a collector" was
+  not. The new `otel-collector-e2e` CI job starts a real OpenTelemetry
+  collector (pinned `otel/opentelemetry-collector-contrib` image, OTLP/gRPC
+  receiver, file exporter), points the gateway at it through the standard
+  `OTEL_EXPORTER_OTLP_ENDPOINT`, drives one gateway exchange, and asserts the
+  collector received the span with the expected name, route, status code, and
+  `service.name` resource attribute. The check fails when the endpoint is not a
+  real collector, so it cannot pass vacuously. `scripts/run_otel_collector_e2e.sh`
+  runs the identical check locally, and the collector log plus the captured
+  spans are archived as CI evidence.
+- **The tracing extra is now hash-pinned.** `requirements-otel.in` /
+  `requirements-otel.lock` pin the `datashell[otel]` dependency set
+  (OpenTelemetry SDK, OTLP/gRPC exporter, gRPC) with sha256 hashes, the same
+  way the core and development lockfiles are pinned, and the set is included
+  in the blocking `pip-audit` gate. The core install and the `datashell[otel]`
+  extra are unchanged: tracing still activates only with
+  `OTEL_EXPORTER_OTLP_ENDPOINT` **and** the extra installed.
+
 ## [2.0.0] - 2026-10-20
 
 Production-readiness release: everything below was shipped incrementally and

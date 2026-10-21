@@ -9,6 +9,8 @@ other copy of the version and every dependency claim must match it:
 * the newest ``## [x.y.z]`` entry in ``CHANGELOG.md``,
 * the release tag when one is supplied (``--tag v1.2.3``),
 * every declared runtime dependency pinned **with hashes** in the lockfiles,
+* every dependency of the optional ``otel`` extra pinned **with hashes** in
+  ``requirements-otel.lock`` and inside the bounds the extra declares,
 * historical changelog claims ("removed the unused `x` runtime dependency")
   never contradict the current dependency list.
 
@@ -36,10 +38,50 @@ _VERSION_INIT_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"', re.MULTILINE)
 _FASTAPI_VERSION_RE = re.compile(r'FastAPI\([^)]*?version="([^"]+)"', re.DOTALL)
 _CHANGELOG_ENTRY_RE = re.compile(r"^##\s+\[([^\]]+)\]", re.MULTILINE)
 _REMOVED_DEP_RE = re.compile(r"Removed the unused `([A-Za-z0-9_.\-]+)` runtime dependency")
+_SPECIFIER_RE = re.compile(r"^(>=|<=|==|!=|>|<)\s*([0-9][0-9A-Za-z.\-]*)$")
 
 
 def _normalize(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    """Comparable numeric prefix of a version string ("1.45.1" -> (1, 45, 1))."""
+    parts: list[int] = []
+    for chunk in version.split("."):
+        match = re.match(r"^(\d+)", chunk)
+        if not match:
+            break
+        parts.append(int(match.group(1)))
+    return tuple(parts)
+
+
+def _satisfies(version: str, specifier: str) -> bool:
+    """Evaluate the plain version specifiers this project declares.
+
+    Only the operators used in ``pyproject.toml`` are supported; anything else
+    raises, so a stricter specifier can never be silently accepted.
+    """
+    for raw in specifier.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        match = _SPECIFIER_RE.match(raw)
+        if not match:
+            raise ValueError(f"unsupported version specifier: {raw!r}")
+        operator, bound = match.group(1), match.group(2)
+        left, right = _version_key(version), _version_key(bound)
+        holds = {
+            ">=": left >= right,
+            "<=": left <= right,
+            ">": left > right,
+            "<": left < right,
+            "==": left == right,
+            "!=": left != right,
+        }[operator]
+        if not holds:
+            return False
+    return True
 
 
 def _locked_packages(lock_path: Path) -> dict[str, str]:
@@ -137,6 +179,35 @@ def collect_problems(root: Path = REPO_ROOT, tag: str | None = None) -> list[str
                 problems.append(f"{lock_name} does not pin declared dependency {dep!r}")
             elif dep not in hashed:
                 problems.append(f"{lock_name} pins {dep!r} without a sha256 hash")
+
+    # --- the optional tracing extra is pinned with hashes too ------------
+    # The end-to-end collector job installs this lockfile, so a pin that
+    # drifts from the extra's declaration (or from its bounds) is a release
+    # defect, not a curiosity.
+    otel_extra = project.get("optional-dependencies", {}).get("otel", [])
+    otel_lock = root / "requirements-otel.lock"
+    if otel_extra:
+        if not otel_lock.is_file():
+            problems.append("requirements-otel.lock is missing (the otel extra must be hash-pinned)")
+        else:
+            otel_text = otel_lock.read_text(encoding="utf-8")
+            otel_pins = _locked_packages(otel_lock)
+            otel_hashed = _pinned_with_hashes(otel_text)
+            for dep in otel_extra:
+                parsed = re.match(r"^\s*([A-Za-z0-9_.\-]+)\s*(.*)$", dep)
+                if not parsed:
+                    problems.append(f"cannot parse the otel extra dependency {dep!r}")
+                    continue
+                name, specifier = parsed.group(1), parsed.group(2).strip()
+                normalized = _normalize(name)
+                if normalized not in otel_pins:
+                    problems.append(f"requirements-otel.lock does not pin the otel extra dependency {normalized!r}")
+                elif normalized not in otel_hashed:
+                    problems.append(f"requirements-otel.lock pins {normalized!r} without a sha256 hash")
+                elif not _satisfies(otel_pins[normalized], specifier):
+                    problems.append(
+                        f"requirements-otel.lock pins {normalized}=={otel_pins[normalized]}, "
+                        f"which does not satisfy the declared bound {dep!r}")
 
     # --- changelog dependency claims must not contradict pyproject -------
     for claimed_removed in _REMOVED_DEP_RE.findall(changelog):

@@ -5,12 +5,11 @@ approver who reviews it.
 
 **Product status at 2.0.0:** controlled-pilot candidate. The enforcement
 engine, reconciliation, publication, recovery, and certificate stack are
-implemented and covered by 534 automated tests (525 in the main suite plus 9
+implemented and covered by 537 automated tests (528 in the main suite plus 9
 Airflow provider tests). The reference topology is a single replica with process-local
-limits. Horizontal scale, shared credential stores, and real-collector
-OpenTelemetry export are documented as prerequisites, not features (see
-[Known limitations](#known-limitations-and-open-items)). Nothing here is a
-certification claim.
+limits. Horizontal scale and shared credential stores are documented as
+prerequisites, not features (see [Known limitations](#known-limitations-and-open-items)).
+Nothing here is a certification claim.
 
 ---
 
@@ -201,7 +200,9 @@ A pilot is one narrowly scoped workflow, not a platform migration.
   per worker process, per replica. Size accordingly before running multiple
   replicas; horizontal scale needs shared credential/rate-limit stores first.
 - **Telemetry:** OpenTelemetry spans are opt-in (`datashell[otel]` plus
-  `OTEL_EXPORTER_OTLP_ENDPOINT`). Without it, the app is silent.
+  `OTEL_EXPORTER_OTLP_ENDPOINT`). Without it, the app is silent. The export
+  path is proven against a real collector by
+  `scripts/run_otel_collector_e2e.sh`.
 - **Settlement scope:** the settlement ledger calculates obligations and
   records draft billing instructions. It never moves money.
 
@@ -211,8 +212,11 @@ A pilot is one narrowly scoped workflow, not a platform migration.
 
 - Horizontal scale beyond the single-replica reference topology: not
   established.
-- Real-collector OpenTelemetry export: activation path is tested in-process;
-  an end-to-end collector run is not part of the automated suite.
+- OpenTelemetry export is verified end to end against a real collector in CI
+  (`otel-collector-e2e`): the gateway's spans must arrive over OTLP/gRPC. What
+  is *not* covered is the onward path — exporting to a production tracing
+  backend (Tempo, Jaeger, Elastic) and operating it remains an operator
+  responsibility.
 - Billing adapter: draft billing instructions only; live payment provider
   integration is out of scope.
 - The volumetric and streaming benchmarks are reproducible, but they measure

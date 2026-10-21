@@ -25,6 +25,8 @@ include requirements.lock
 include requirements-dev.lock
 include requirements-build.lock
 include requirements-build.in
+include requirements-otel.lock
+include requirements-otel.in
 
 # --- fixtures and tests (the sdist must be independently testable) ---------
 graft examples

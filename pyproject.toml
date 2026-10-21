@@ -76,6 +76,13 @@ datashell = "datashell.cli.main:main"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-ra"
+markers = [
+    # End-to-end OpenTelemetry export check: needs a running collector and the
+    # `datashell[otel]` extra, so it is skipped unless DATASHELL_OTEL_E2E=1.
+    # Driven by scripts/run_otel_collector_e2e.sh (and the CI job of the same
+    # name).
+    "otel_e2e: end-to-end OpenTelemetry collector check (requires a running collector)",
+]
 
 [tool.ruff]
 # Enterprise contributor gate: repository-wide lint must pass with zero warnings.
