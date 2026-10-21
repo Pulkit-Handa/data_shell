@@ -15,7 +15,7 @@
 # This is the local twin of the `otel-collector-e2e` CI job, so a failing
 # check can be reproduced on a workstation with the same command CI uses.
 #
-# Requirements: docker, a Python environment with the `datashell[otel]` extra
+# Requirements: docker, a Python environment with the `datashell-engine[otel]` extra
 # and pytest installed, and the repository checked out.
 #
 # Usage:

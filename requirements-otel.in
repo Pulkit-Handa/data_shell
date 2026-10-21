@@ -1,4 +1,4 @@
-# Optional tracing extra (`datashell[otel]`) — hash-pinned for the end-to-end
+# Optional tracing extra (`datashell-engine[otel]`) — hash-pinned for the end-to-end
 # OpenTelemetry collector check (scripts/run_otel_collector_e2e.sh).
 #
 # The core install and the development environment deliberately do NOT carry the

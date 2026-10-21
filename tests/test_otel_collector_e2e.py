@@ -8,7 +8,7 @@ real collector process that has to accept the gateway's spans.
 The check is opt-in because it needs two things a plain ``pytest`` run does not
 have:
 
-* the ``datashell[otel]`` extra installed (SDK + gRPC exporter), and
+* the ``datashell-engine[otel]`` extra installed (SDK + gRPC exporter), and
 * a running collector whose captured spans are readable on the host.
 
 ``scripts/run_otel_collector_e2e.sh`` provides both and is what CI runs (job
@@ -206,7 +206,7 @@ def test_gateway_spans_reach_a_real_collector(monkeypatch: pytest.MonkeyPatch) -
             OTLPSpanExporter,
         )
     except ImportError as exc:  # pragma: no cover - environment guard
-        pytest.fail(f"the datashell[otel] extra is required for the end-to-end check: {exc}")
+        pytest.fail(f"the datashell-engine[otel] extra is required for the end-to-end check: {exc}")
 
     _wait_for_collector(endpoint)
 

@@ -1,11 +1,11 @@
-"""OpenTelemetry bridge for the gateway (optional ``datashell[otel]`` extra).
+"""OpenTelemetry bridge for the gateway (optional ``datashell-engine[otel]`` extra).
 
 Tracing activates only when *both* conditions hold:
 
 1. the operator expressed the intent through the standard
    ``OTEL_EXPORTER_OTLP_ENDPOINT`` environment variable (optionally with
    ``DATASHELL_OTEL_SERVICE_NAME`` for the resource name), and
-2. the ``opentelemetry`` packages are importable — the ``datashell[otel]``
+2. the ``opentelemetry`` packages are importable — the ``datashell-engine[otel]``
    extra installs them.
 
 Every helper degrades to a no-op otherwise, so the tracing decision stays in
@@ -70,7 +70,7 @@ def configure_otel() -> bool:
             "OpenTelemetry requested via OTEL_EXPORTER_OTLP_ENDPOINT but the "
             "opentelemetry packages are not importable; tracing stays disabled",
             env=ENDPOINT_ENV,
-            hint="install datashell[otel]",
+            hint="install datashell-engine[otel]",
         )
         return False
 
