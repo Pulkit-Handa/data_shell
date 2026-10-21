@@ -359,6 +359,7 @@ memory stays bounded by the streaming batch size rather than the input size.
 ## Documentation
 
 * `docs/FIRST_RUN.md` — a five-minute guided first run using the sample dataset.
+* `docs/EVALUATION.md` — the adoption path: quickstart, integration patterns, a controlled-pilot checklist, and known limitations.
 * `docs/production/RELEASE_CHECKLIST.md` — pilot release gates, acceptance evidence, and remaining blockers.
 * `docs/production/OPERATIONS_RUNBOOK.md` — runbook: startup, health checks, backup/restore, monitoring, rollback.
 * `docs/production/CONFIGURATION_REFERENCE.md` — every environment variable, CLI option, API endpoint, role, and certificate field.
