@@ -29,6 +29,7 @@ or system outside this repository.
 | Rollback and recovery | `DEPLOYMENT_VERIFICATION.md` § 13 + [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) | Rollback procedure, trigger conditions, per-incident recovery |
 | Independent security review | [`SECURITY_REVIEW_PACKAGE.md`](SECURITY_REVIEW_PACKAGE.md) | Architecture, trust boundaries, authz matrix, data flow, crypto model, key lifecycle, dependencies, test map, reviewer output template |
 | Publication semantics | [`GENERATION_CONTRACT.md`](GENERATION_CONTRACT.md) | The commit point, the reader contract, and what is explicitly not claimed |
+| Release and publication | [`PUBLISHING.md`](../PUBLISHING.md) | Distribution names, PyPI Trusted Publishing setup, tagging, and the publish verification steps |
 | Residual risks | [`RESIDUAL_RISK_REGISTER.md`](RESIDUAL_RISK_REGISTER.md) | Every open risk with severity, consequence, evidence gap, owner dependency |
 
 ---
@@ -101,6 +102,7 @@ requires a party or system outside this repository.
 | F7 | Reproducible build | Wheel + sdist from the pinned backend; contents verified | Build + content check | `python -m build --no-isolation`; `scripts/verify_distribution_contents.py` | **LOCAL-VERIFIED** |
 | F8 | Release metadata consistency | Package, app, changelog, locks agree | Metadata check | `scripts/check_release_metadata.py` | **LOCAL-VERIFIED** |
 | F9 | Supported topology documented and enforced | One replica, one job, one tenant | Manifests + docs | `k8s-deployment.yaml`, `docker-compose.yml`, `Dockerfile` | **LOCAL-VERIFIED** |
+| F10 | Distribution is publishable | The wheel and sdist of both distributions exist, carry the right name, and pass their content gate; a tag publishes them to PyPI | Build + content checks + publish workflow | `scripts/verify_distribution_contents.py`; `scripts/verify_provider_distribution_contents.py`; `.github/workflows/publish-pypi.yml` | **LOCAL-VERIFIED** (build) / **EXTERNAL** (PyPI publisher registration + first upload) |
 
 ---
 
