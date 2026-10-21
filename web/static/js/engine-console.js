@@ -127,6 +127,30 @@
       }
     }
 
+    // Real certificate evidence from the run that just executed (hashes, names,
+    // reconciliation figures only — the server never sends paths or secrets).
+    const cert = data.certificate;
+    if (cert && typeof cert === 'object') {
+      const manifest = cert.cryptographic_manifest || {};
+      const recon = cert.reconciliation || {};
+      const sig = cert.signature_header || {};
+      const shortHash = (v) =>
+        typeof v === 'string' && v.length > 24 ? `${v.slice(0, 24)}…` : String(v == null ? '' : v);
+      const footing = recon.footing_matched === true
+        ? '<span class="cert__v--pass">matched</span>'
+        : '<span class="cert__v--refuse">mismatch</span>';
+      html += `<p class="cert__label">signed certificate — real values from this run</p>
+      <div class="cert">
+        <div class="cert__row"><span class="cert__k">certificate_version</span><span class="cert__v">${esc(cert.certificate_version || '')}</span></div>
+        <div class="cert__row"><span class="cert__k">contract</span><span class="cert__v">${esc((cert.contract && cert.contract.name) || '')} v${esc((cert.contract && cert.contract.version) || '')}</span></div>
+        <div class="cert__row"><span class="cert__k">merkle_root</span><span class="cert__v cert__hash">${esc(shortHash(manifest.merkle_root))}</span></div>
+        <div class="cert__row"><span class="cert__k">delivered_payload_sha256</span><span class="cert__v cert__hash">${esc(shortHash(manifest.delivered_payload_sha256))}</span></div>
+        <div class="cert__row"><span class="cert__k">quarantine_payload_sha256</span><span class="cert__v">${esc(String(manifest.quarantine_payload_sha256 ?? ''))}</span></div>
+        <div class="cert__row"><span class="cert__k">signature</span><span class="cert__v">${esc(sig.algorithm || '')} · key ${esc(sig.key_id || '')} · third_party_verifiable: ${esc(String(sig.third_party_verifiable))}</span></div>
+        <div class="cert__row"><span class="cert__k">reconciliation</span><span class="cert__v">${esc(String(recon.rows_read ?? ''))} read · ${esc(String(recon.rows_delivered ?? ''))} delivered · unaccounted ${esc(String(recon.unaccounted_for ?? ''))} · footing ${footing}</span></div>
+      </div>`;
+    }
+
     const paths = [
       ['target', data.target_path],
       ['quarantine', data.quarantine_path],

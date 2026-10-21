@@ -1,6 +1,6 @@
 # Data Shell — Enterprise Perimeter Gateway
 
-[![Tests](https://img.shields.io/badge/tests-519%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-522%20passing-brightgreen.svg)]()
 [![Security](https://img.shields.io/badge/security-hardened%20RBAC%20%2B%20sandboxed-blueviolet.svg)]()
 [![Cryptography](https://img.shields.io/badge/crypto-Ed25519%20%2B%20HMAC--SHA256-blue.svg)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-Prometheus%20metrics-orange.svg)]()
@@ -359,6 +359,7 @@ memory stays bounded by the streaming batch size rather than the input size.
 ## Documentation
 
 * `docs/FIRST_RUN.md` — a five-minute guided first run using the sample dataset.
+* `docs/EVALUATION.md` — the adoption path: quickstart, integration patterns, a controlled-pilot checklist, and known limitations.
 * `docs/production/RELEASE_CHECKLIST.md` — pilot release gates, acceptance evidence, and remaining blockers.
 * `docs/production/OPERATIONS_RUNBOOK.md` — runbook: startup, health checks, backup/restore, monitoring, rollback.
 * `docs/production/CONFIGURATION_REFERENCE.md` — every environment variable, CLI option, API endpoint, role, and certificate field.

@@ -32,6 +32,23 @@ def test_demo_json_reports_refusal_tamper_and_recovery(capsys):
     assert payload["rule_breakdown"] == {"amount-positive": 35, "currency-settled": 25}
 
 
+def test_demo_valid_scenario_delivers_every_clean_row(capsys):
+    code = _run(["demo", "--json", "--scenario", "valid"])
+    assert code == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["scenario"] == "valid"
+    assert payload["status"] == "LOADED"
+    assert payload["rows_read"] == 900
+    assert payload["rows_refused"] == 0
+    assert payload["rows_held"] == 0
+    assert payload["rows_delivered"] == 900
+    assert payload["footing_matched"] is True
+    assert payload["verify_status"] == "AUTHENTIC_AND_UNMODIFIED"
+    assert payload["tamper_status"] == "TAMPERED_UNDERLYING_ARTIFACTS"
+    assert payload["restored_status"] == "AUTHENTIC_AND_UNMODIFIED"
+
+
 def test_demo_human_output_shows_the_full_narrative(capsys):
     assert _run(["demo"]) == 0
     out = capsys.readouterr().out

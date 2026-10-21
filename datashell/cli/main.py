@@ -124,6 +124,13 @@ def build_parser() -> argparse.ArgumentParser:
     # demo command
     demo_parser = subparsers.add_parser("demo", help="Run a self-contained refusal/tamper/verify walkthrough")
     demo_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    demo_parser.add_argument(
+        "--scenario",
+        choices=("full", "valid"),
+        default="full",
+        help="full: seeded-defect feed (refusals, quarantine, tamper recovery); "
+             "valid: clean feed (every row delivered)",
+    )
 
     # rules command (check-type catalog)
     rules_parser = subparsers.add_parser(
@@ -908,7 +915,7 @@ _DEMO_CONTRACT: dict[str, Any] = {
 }
 
 
-def _demo_records() -> list[dict[str, Any]]:
+def _demo_records(scenario: str = "full") -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for i in range(1, 901):
         records.append({
@@ -916,6 +923,9 @@ def _demo_records() -> list[dict[str, Any]]:
             "amount": round(10.0 + (i * 1.5), 2),
             "currency": "USD" if i % 2 == 0 else "EUR",
         })
+    if scenario == "valid":
+        # Clean feed: no seeded defects, every row survives the contract.
+        return records
     for i in range(1, 21):
         records.append({"settlement_id": f"SETTLE-BAD-AMT-{i}", "amount": "NOT_A_FLOAT", "currency": "USD"})
     for _ in range(21, 41):
@@ -1119,7 +1129,7 @@ def command_demo(args: argparse.Namespace) -> int:
         audit = workspace / "run_audit.json"
 
     contract = DataContract(**_demo_contract_payload(workspace, target, quarantine))
-    records = _demo_records()
+    records = _demo_records(args.scenario)
 
     if not args.json:
         print("=" * 68)
@@ -1129,7 +1139,10 @@ def command_demo(args: argparse.Namespace) -> int:
         print(f"\n[1] Contract '{contract.metadata.name}' v{contract.metadata.version}")
         print(f"    Row rules:   {[r.rule_id for r in contract.spec.quality.rules]}")
         print(f"    Batch rules: {[b.rule_id for b in contract.spec.quality.batch_rules]}")
-        print(f"\n[2] Generated {len(records):,} feed records (900 valid, 100 seeded defects)")
+        if args.scenario == "valid":
+            print(f"\n[2] Generated {len(records):,} feed records (clean — no seeded defects)")
+        else:
+            print(f"\n[2] Generated {len(records):,} feed records (900 valid, 100 seeded defects)")
 
     pipeline = DataShellPipeline(contract, tenant_id=demo_tenant)
     result = pipeline.run_records(
@@ -1178,8 +1191,12 @@ def command_demo(args: argparse.Namespace) -> int:
 
     if args.json:
         print(json.dumps({
+            "scenario": args.scenario,
             "run_id": result.run_id,
             "status": result.status.value,
+            # The walkthrough always runs the in-memory records path; the mode
+            # is fixed by construction, not measured.
+            "execution_mode": "in_memory",
             "rows_read": result.ledger.rows_read,
             "rows_refused": result.ledger.refused_structural,
             "rows_held": result.ledger.held_quality,

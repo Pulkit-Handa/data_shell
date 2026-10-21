@@ -786,6 +786,39 @@ def test_demo_walkthrough_failure_is_a_controlled_500(demo, monkeypatch):
     assert "internal detail" not in response.json()["detail"]
 
 
+def test_demo_walkthrough_valid_scenario_and_certificate_excerpt(demo):
+    with demo.client() as client:
+        response = client.post("/api/demo/run?scenario=valid")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["scenario"] == "valid"
+    assert body["rows_read"] == 900
+    assert body["rows_delivered"] == 900
+    cert = body["certificate"]
+    assert cert["certificate_version"] == "2.0-enterprise"
+    assert cert["reconciliation"]["unaccounted_for"] == 0
+    assert cert["reconciliation"]["footing_matched"] is True
+    assert cert["signature_header"]["algorithm"] == "HMAC-SHA256"
+    assert cert["cryptographic_manifest"]["merkle_root"]
+    # The excerpt never carries absolute server paths.
+    assert "audit_path" in body  # basename-sanitized by _public_payload
+    assert not any(str(value).startswith("/") for value in _flatten(cert.values()))
+
+
+def test_demo_unknown_scenario_is_rejected(demo):
+    with demo.client() as client:
+        response = client.post("/api/demo/run?scenario=wild-guess")
+    assert response.status_code == 422
+
+
+def _flatten(values):
+    for value in values:
+        if isinstance(value, dict):
+            yield from _flatten(value.values())
+        else:
+            yield value
+
+
 def test_health_endpoint(demo):
     with demo.client() as client:
         response = client.get("/health")
