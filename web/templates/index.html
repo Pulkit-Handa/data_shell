@@ -3,683 +3,363 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Data Shell — the write gate for data that crosses a boundary</title>
+  <title>Data Shell — the publication boundary for external data</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230a0a0b'/%3E%3Cpath d='M7 12h10M12 7v10' stroke='%23fff' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E" />
-  <meta name="description" content="Data Shell is a contract-driven write gate at the edge of your systems. Validate partner and vendor feeds before they land; rejected records are never published, and every delivery ships with a verifiable certificate." />
-  <meta property="og:title" content="Data Shell — bad data never lands, and never leaves." />
-  <meta property="og:description" content="Contract-driven boundary enforcement: strict casting, row + batch rules, zero-deficit reconciliation, and a signed certificate per run." />
+  <meta name="description" content="Data Shell enforces the rules before external data reaches the systems that depend on it. Every record is cast, checked, and reconciled; refused and held rows never publish. Every delivery ships with signed, offline-verifiable evidence." />
+  <meta property="og:title" content="Data Shell — bad data stops here." />
+  <meta property="og:description" content="A contract-driven publication boundary: strict casting, row and batch rules, zero-deficit reconciliation, atomic delivery, and a signed certificate per run." />
   <meta property="og:type" content="website" />
+  <meta name="theme-color" content="#ffffff" id="themeColor" />
+  <script>
+    // Theme must be resolved before first paint: no flash, no hydration gap.
+    (function () {
+      try {
+        var saved = localStorage.getItem('datashell-theme');
+        var theme = (saved === 'light' || saved === 'dark')
+          ? saved
+          : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {
+        document.documentElement.setAttribute('data-theme', 'light');
+      }
+      document.documentElement.classList.add('js');
+      // Failsafe: if the reveal script never boots, the content must still
+      // become readable. landing.js clears this timer when it initializes.
+      window.__dsRevealFailsafe = window.setTimeout(function () {
+        var nodes = document.querySelectorAll('.reveal');
+        for (var i = 0; i < nodes.length; i += 1) nodes[i].classList.add('in');
+      }, 2500);
+    })();
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Inter+Tight:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/landing.css" />
 </head>
 <body>
-  <div class="scroll-progress" aria-hidden="true"><span class="scroll-progress__bar"></span></div>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="progress" aria-hidden="true"><span class="progress__bar" id="progressBar"></span></div>
 
-  <!-- ============================================================ nav -->
-  <header class="site-nav">
-    <div class="shell site-nav__inner">
-      <a class="wordmark" href="/">
-        <svg class="wordmark__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="1" y="1" width="22" height="22" rx="6" fill="#0a0a0b"/>
-          <path d="M7 12h10M12 7v10" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
+  <!-- ================================================================ nav -->
+  <header class="nav">
+    <div class="shell nav__inner">
+      <a class="brand" href="/" aria-label="Data Shell home">
+        <svg class="brand__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="1" y="1" width="22" height="22" rx="6"/>
+          <path d="M7 12h10M12 7v10" stroke-width="1.7" stroke-linecap="round"/>
         </svg>
-        Data Shell
+        <span class="brand__name">Data Shell</span>
       </a>
-      <nav class="nav-links">
-        <a class="nav-link" href="#problem">The problem</a>
-        <a class="nav-link" href="#product">Product</a>
-        <a class="nav-link" href="#demo">Demo</a>
-        <a class="nav-link" href="#numbers">Numbers</a>
-        <a class="nav-link" href="#trust">Trust</a>
-        <a class="nav-link" href="#evaluate">Evaluate</a>
+
+      <nav class="nav__links" aria-label="Primary">
+        <a class="nav__link" href="#problem">Problem</a>
+        <a class="nav__link" href="#how">How it works</a>
+        <a class="nav__link" href="#demo">Demo</a>
+        <a class="nav__link" href="#evidence">Evidence</a>
+        <a class="nav__link" href="#evaluate">Evaluate</a>
       </nav>
-      <div class="nav-actions">
-        <a class="nav-gh" href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">GitHub ↗</a>
-        <a class="btn btn--sm" href="/playground">Open the playground</a>
+
+      <div class="nav__actions">
+        <div class="theme-switch" role="group" aria-label="Color theme">
+          <button type="button" class="theme-switch__btn" data-theme-btn="light" aria-pressed="false" aria-label="Light theme" title="Light">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+          </button>
+          <button type="button" class="theme-switch__btn" data-theme-btn="system" aria-pressed="true" aria-label="System theme" title="System">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4" stroke-linecap="round"/></svg>
+          </button>
+          <button type="button" class="theme-switch__btn" data-theme-btn="dark" aria-pressed="false" aria-label="Dark theme" title="Dark">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <a class="nav__gh" href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">GitHub ↗</a>
+        <a class="btn btn--primary btn--sm" href="#demo">Run the live demo</a>
       </div>
     </div>
   </header>
 
-  <main>
-    <!-- ========================================================= hero -->
+  <main id="main">
+    <!-- =============================================================== hero -->
     <section class="hero">
       <div class="shell hero__grid">
-        <div>
-          <p class="hero__eyebrow"><span class="dot"></span> Open source · Apache-2.0 · self-hosted</p>
-          <h1>Bad data never lands,<br />and never leaves.</h1>
+        <div class="hero__copy">
+          <p class="hero__eyebrow"><span class="dot" aria-hidden="true"></span> Open source · Apache-2.0 · Self-hosted</p>
+          <h1 class="hero__title">Bad data stops here.</h1>
           <p class="hero__lede">
-            Data Shell is a <strong>contract-driven write gate</strong> for the edge of your systems.
-            It validates partner and vendor feeds before they land, and regulatory submissions before
-            they are filed. Rejected records are never published — and every delivery ships with a
-            certificate you can verify.
-          </p>
-          <p class="hero__lede" style="margin-top:14px;color:var(--muted)">
-            For data platform and payment engineering teams that receive external feeds
-            they cannot fully trust — where one defective row reaching settlement, a filing,
-            or a partner costs real money and real investigation time.
+            Data Shell is the <strong>publication boundary</strong> for external feeds. Enforce the rules
+            before records reach the systems that depend on them: cast strictly, reconcile every row, and
+            publish only what can be accounted for. Every delivery ships with signed evidence you can
+            verify offline.
           </p>
           <div class="hero__actions">
             <a class="btn btn--primary" href="#demo">Run the live demo</a>
-            <a class="btn" href="#quickstart">Try the quickstart</a>
+            <a class="btn" href="#evidence">Inspect the evidence</a>
           </div>
-          <div class="hero__meta">
-            <span><b>CLI · HTTP · SDKs</b></span>
-            <span><b>Airflow</b> provider</span>
+          <p class="hero__facts">
+            <span><b>CLI</b> · HTTP · SDKs</span>
             <span><b>CSV</b> · JSONL · Parquet</span>
-            <span><b>20 GiB</b> ceiling</span>
-            <span><b>5M rows</b> streamed in 1.0 s</span>
-          </div>
+            <span><b>20 GiB</b> upload ceiling</span>
+            <span><b>5M rows</b> streamed out-of-core</span>
+          </p>
         </div>
 
-        <div class="console">
-          <div class="console__bar">
-            <div class="console__lights"><i></i><i></i><i></i></div>
-            <span class="console__title">bash — datashell</span>
-            <span class="spacer"></span>
-            <span class="console__title">v2.0.0</span>
-          </div>
-          <div class="console__body">
-<pre class="term"><span class="t-p">$</span> datashell run <span class="t-dim">\</span>
-    <span class="t-dim">--contract</span> vendor_settlements.json <span class="t-dim">\</span>
-    <span class="t-dim">--source</span>   /mnt/landing/settlements.jsonl
+        <div class="hero__visual">
+          <div class="boundary" role="img" aria-label="Diagram: an external feed of 1,000 records enters the Data Shell boundary; 900 rows are delivered, 60 held, and 40 refused, with the footing 1,000 equals 900 plus 60 plus 40, and a signed certificate binds the delivered artifact.">
+            <div class="boundary__head">
+              <b>publication boundary</b>
+              <span class="spacer"></span>
+              <span class="boundary__run">run · vendor-settlements</span>
+            </div>
+            <div class="boundary__body">
+              <div class="boundary__io">
+                <span class="boundary__io-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M4 12h16M4 17h10" stroke-linecap="round"/></svg>
+                </span>
+                <span class="boundary__io-text">
+                  <span class="boundary__io-title">External feed</span>
+                  <span class="boundary__io-meta">vendor_settlements.jsonl · 1,000 records</span>
+                </span>
+              </div>
 
-<span class="t-dim">▶</span> Enforcing boundary on <span class="t-dim">'/mnt/landing/settlements.jsonl'</span>
-  against contract <span class="t-dim">'vendor-settlements'</span>...
-  Mode: out-of-core streaming <span class="t-dim">(chunk 100,000 rows)</span>
+              <p class="boundary__link">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 4v16M6 14l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                structural cast → row + batch rules
+              </p>
 
-  rows read      <span class="t-num">1,000</span>
-  refused            <span class="t-warn">40</span>   structural
-  held               <span class="t-warn">60</span>   quality rules
-  delivered        <span class="t-ok">900</span>   <span class="t-dim">→ curated/settlements.parquet</span>
-  <span class="t-dim">──────────────────────────────────────────────</span>
-  footing        <span class="t-ok">✓</span> read = refused + held + delivered
-  certificate    <span class="t-ok">✓</span> run_9f3c7a21 <span class="t-dim">(HMAC-SHA256 · Merkle root)</span></pre>
+              <div class="boundary__gate">
+                <p class="boundary__gate-title"><b>Data Shell enforcement</b><span class="badge">fail-closed</span></p>
+                <p class="boundary__stages">
+                  <span>strict cast</span><i>·</i>
+                  <span>rules</span><i>·</i>
+                  <span>reconciliation</span><i>·</i>
+                  <span>atomic publish</span>
+                </p>
+              </div>
+
+              <div class="boundary__outs">
+                <div class="boundary__out boundary__out--pass">
+                  <p class="boundary__out-k">Published</p>
+                  <p class="boundary__out-v"><b>900</b> rows → settlements.parquet</p>
+                </div>
+                <div class="boundary__out boundary__out--hold">
+                  <p class="boundary__out-k">Blocked at the boundary</p>
+                  <p class="boundary__out-v"><b>100</b> rows · 60 held · 40 refused</p>
+                </div>
+              </div>
+
+              <div class="boundary__foot">
+                <span class="ok">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m5 12 5 5L20 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  read 1,000 = 900 + 60 + 40
+                </span>
+                <span class="sep">·</span>
+                <span>certificate signed · merkle root</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ==================================================== spec strip -->
+    <!-- ======================================================== spec strip -->
     <div class="specstrip">
       <div class="shell specstrip__inner">
         <span>License <b>Apache-2.0</b></span>
         <span>Runtime <b>Python 3.11–3.13</b></span>
-        <span>Tests <b>522 passing</b></span>
+        <span>Tests <b>522 collected</b></span>
+        <span>Rule checks <b>19 built-in</b></span>
         <span>Formats <b>CSV · JSONL · Parquet</b></span>
-        <span>Orchestrate <b>CLI · HTTP · Airflow</b></span>
-        <span>Security <b>bandit 0 · OSV 0</b></span>
-        <span>SDKs <b>Python · TypeScript</b></span>
+        <span>Surfaces <b>CLI · HTTP · SDKs · Airflow</b></span>
       </div>
     </div>
 
-    <!-- ======================================================== problem -->
+    <!-- ============================================================ problem -->
     <section class="section" id="problem">
       <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">The recurring failure</p>
-          <h2 class="sec-title">A feed publishes defective rows. Afterwards, nobody can prove what happened.</h2>
-          <p class="sec-desc">
-            It is the same incident shape, every quarter: a vendor or partner feed lands, the
-            pipeline copies it through, and somewhere downstream a settlement, a filing, or a
-            partner reconciliation turns out wrong. The investigation is archaeology — which rows
-            were bad, when they were received, who delivered them, and whether the published file
-            matches what anyone claims was delivered.
+        <div class="section__head reveal">
+          <p class="eyebrow">The failure</p>
+          <h2 class="section__title">A pipeline succeeded. The published data was still wrong.</h2>
+          <p class="section__desc">
+            Most ingestion failures are not crashes. The job completes, the file lands, and a defective
+            record reaches a settlement, a filing, or a partner reconciliation. Nothing at the boundary
+            made a publication decision — and nothing recorded one.
           </p>
         </div>
 
-        <div class="compare reveal">
-          <div class="compare__cell">
-            <p class="compare__k">What exists</p>
-            <p class="compare__t">Detect after delivery</p>
-            <p class="compare__d">Validation libraries (Great Expectations, pandera) produce a report about rows that have already been written. The write is not stopped.</p>
-          </div>
-          <div class="compare__cell">
-            <p class="compare__k">What exists</p>
-            <p class="compare__t">Alert an operator</p>
-            <p class="compare__d">Dashboards and monitors flag anomalies after the batch crossed the boundary. Someone still has to decide, and the batch already landed.</p>
-          </div>
-          <div class="compare__cell">
-            <p class="compare__k">What exists</p>
-            <p class="compare__t">Reconcile in finance</p>
-            <p class="compare__d">Totals are compared after the fact. Per-row provenance — which row, which rule, which file version — is reconstructed by hand.</p>
-          </div>
-          <div class="compare__cell compare__cell--own">
-            <p class="compare__k">Data Shell</p>
-            <p class="compare__t">Refuse the write, seal the decision</p>
-            <p class="compare__d">The boundary refuses to publish rows it cannot account for, quarantines the rest with the exact rule that held them, and signs a certificate binding feed, decision, and delivered bytes.</p>
-          </div>
+        <div class="paths reveal">
+          <article class="path-card">
+            <p class="path-card__k">Copy-through pipeline</p>
+            <h3 class="path-card__t">The job copies what it received.</h3>
+            <p class="path-card__d">A successful process is treated as a trusted artifact.</p>
+            <ul class="path-steps">
+              <li><span class="mark">×</span><span>A validation report describes bad rows after the write; the write is not stopped.</span></li>
+              <li><span class="mark">×</span><span>Rows that fail a check and rows that pass land in the same delivered file.</span></li>
+              <li><span class="mark">×</span><span>There is no per-record decision trail: which rule held which row, from which feed.</span></li>
+              <li><span class="mark">×</span><span>Proving what was delivered means reconstructing history by hand.</span></li>
+            </ul>
+          </article>
+
+          <article class="path-card path-card--boundary">
+            <p class="path-card__k">Data Shell boundary</p>
+            <h3 class="path-card__t">Nothing publishes until every row is accounted for.</h3>
+            <p class="path-card__d">The publication decision moves to the last point where it can be enforced.</p>
+            <ul class="path-steps">
+              <li><span class="mark">✓</span><span>Strict per-row casting refuses values that cannot be realized instead of coercing them.</span></li>
+              <li><span class="mark">✓</span><span>Row and batch rules quarantine records with the exact rule that stopped them.</span></li>
+              <li><span class="mark">✓</span><span>Zero-deficit reconciliation gates the run: read = refused + held + delivered.</span></li>
+              <li><span class="mark">✓</span><span>Atomic publication commits the target, lineage, and a signed certificate together.</span></li>
+            </ul>
+          </article>
         </div>
 
-        <p class="table__note reveal">
-          The distinction is not “better validation.” It is that the <em>publication decision</em>
-          moves to the one place where it can still be enforced — and that the decision leaves
-          evidence an operator, an auditor, or a counterparty can verify without trusting anyone’s
-          recollection.
+        <p class="note reveal">
+          The distinction is not better validation. It is <em>where the publication decision is made</em> —
+          and whether that decision leaves evidence an operator, an auditor, or a counterparty can verify
+          without trusting anyone’s account.
         </p>
       </div>
     </section>
 
-    <!-- ======================================================= product -->
-    <section class="section section--alt" id="product">
+    <!-- ================================================================ how -->
+    <section class="section section--subtle" id="how">
+      <span id="product" aria-hidden="true"></span>
       <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">The boundary</p>
-          <h2 class="sec-title">A write gate, not a report.</h2>
-          <p class="sec-desc">
-            Most data-quality tooling observes after the fact: a dashboard lights up, a Slack alert
-            fires, and someone backfills a warehouse that has already served bad rows downstream.
-            Data Shell moves the check to the boundary — the last place where you still control
-            whether a record is written.
+        <div class="section__head reveal">
+          <p class="eyebrow">The mechanism</p>
+          <h2 class="section__title">Four checks. One decision. Any stage can stop the run.</h2>
+          <p class="section__desc">
+            Records pass through four sequential gates. If one fails, the run terminates before a partial
+            dataset is published, and the terminal outcome is recorded.
           </p>
         </div>
 
-        <div class="proof reveal">
-          <div class="proof__cell">
-            <h4>Rejected records are never published</h4>
-            <p>
-              Every record is cast and validated before anything is written. A record that fails is
-              quarantined to a tenant-scoped location and indexed with the exact rule that held it —
-              “drop the row” is a decision you declare, not an accident you discover.
-            </p>
-          </div>
-          <div class="proof__cell">
-            <h4>Every run is sealed</h4>
-            <p>
-              The active target, an immutable lineage artifact, and a certificate commit together.
-              The certificate binds the contract, source bytes, delivered bytes, and every quarantine
-              file by content hash and path, then signs the result with HMAC-SHA256 — or Ed25519, so
-              third parties can verify from a public key alone.
-            </p>
-          </div>
-        </div>
-
-        <div class="sec-head reveal" style="margin-top:48px">
-          <h2 class="sec-title" style="font-size:1.4rem">Why not Great Expectations?</h2>
-        </div>
-        <table class="table reveal">
-          <thead><tr><th>Great Expectations</th><th>Data Shell</th></tr></thead>
-          <tbody>
-            <tr><td class="how">Executes expectations and hands you a report to act on.</td><td class="how">The gate itself refuses: held/refused accounting, zero-deficit reconciliation, atomic delivery — enforcement is the engine, not your code.</td></tr>
-            <tr><td class="how">Reports are plain artifacts; nothing binds a run to its delivered bytes.</td><td class="how">Every delivery is bound to a Merkle-rooted, signed certificate plus a durable forensic ledger; a flipped byte fails <code>datashell verify</code>.</td></tr>
-            <tr><td class="how">A library you wire into a pipeline you build, secure, and audit.</td><td class="how">The boundary ships as a system: API gateway with key-based roles and capabilities, upload refusals, metrics, console — the same engine as a library and pluggable rule checks.</td></tr>
-            <tr><td class="how">Vast expectation ecosystem, profiling, data docs.</td><td class="how">Deliberately narrower: 19 built-in checks plus your own. If you want a data catalog/observability stack, GX is a reasonable choice — this is for controlled perimeters with inputs you have reason not to trust.</td></tr>
-          </tbody>
-        </table>
-
-        <div class="sec-head reveal" style="margin-top:56px">
-          <h2 class="sec-title" style="font-size:1.4rem">Built for the feeds that can hurt you.</h2>
-          <p class="sec-desc">
-            Teams whose inputs arrive from outside their trust boundary — partner feeds, vendor
-            payouts, claims and filings — where a bad row is expensive and “prove it” is a
-            compliance requirement, not a preference.
-          </p>
-        </div>
-
-        <div class="hgrid reveal">
-          <div class="hgrid__cell">
-            <p class="hgrid__k">Vendor settlements &amp; payouts</p>
-            <p class="hgrid__d">
-              The engine ships a settlement ledger, not just checks: exact minor-unit calculation
-              bound to one immutable contract version, dispute and billing-instruction flows, and
-              acceptance/pricing semantics your counterparties can be held to.
-            </p>
-          </div>
-          <div class="hgrid__cell">
-            <p class="hgrid__k">Partner &amp; affiliate data onboarding</p>
-            <p class="hgrid__d">
-              One versioned contract per partner — reviewed, diffed, rolled back like code. Every
-              rejected record lands in tenant-scoped quarantine with the exact rule that held it,
-              and the gateway rate-limits and refuses oversized payloads before they touch the
-              pipeline.
-            </p>
-          </div>
-          <div class="hgrid__cell">
-            <p class="hgrid__k">Claims &amp; regulatory submissions</p>
-            <p class="hgrid__d">
-              Batch gates — row-count floors, composite uniqueness, out-of-core SQL assertions —
-              plus zero-deficit footing, and a signed certificate an auditor can verify offline,
-              from content hashes alone.
-            </p>
-          </div>
-        </div>
-
-        <p class="table__note reveal">
-          Boundary honesty cuts both ways: if your inputs are first-party and already inside your
-          trust perimeter, a validation library is the better-shaped tool. This page is written for
-          the controlled-perimeter case.
-        </p>
-      </div>
-    </section>
-
-    <!-- =================================================== how it works -->
-    <section class="section" id="how">
-      <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">How it works</p>
-          <h2 class="sec-title">Four stages. Any stage can stop the run.</h2>
-          <p class="sec-desc">
-            Records pass through four sequential checks. If one fails, the run terminates before a
-            single row is published — and the terminal outcome is recorded.
-          </p>
-        </div>
-
-        <ol class="flow">
-          <li class="flow__step reveal">
-            <span class="flow__n">01 / STRUCTURAL</span>
-            <h3 class="flow__title">Strict cast at the door</h3>
-            <p class="flow__desc">Each record is cast against the declared schema per-row. A value that cannot be realized is refused and indexed — never silently coerced into something it is not.</p>
+        <ol class="stages reveal">
+          <li class="stage">
+            <span class="stage__n">01 / STRUCTURAL</span>
+            <h3 class="stage__t">Strict cast at the door</h3>
+            <p class="stage__d">Each record is cast against the declared schema, per row. A value that cannot be realized is refused and indexed — never silently coerced into something it is not.</p>
           </li>
-          <li class="flow__step reveal">
-            <span class="flow__n">02 / SEMANTIC</span>
-            <h3 class="flow__title">Rules inside</h3>
-            <p class="flow__desc">Row rules run vectorized (Polars); batch rules run out-of-core (DuckDB). The fast path only engages on chunks that already match the schema, so strictness is never traded for speed.</p>
+          <li class="stage">
+            <span class="stage__n">02 / SEMANTIC</span>
+            <h3 class="stage__t">Row and batch rules</h3>
+            <p class="stage__d">Vectorized row rules run on Polars; batch rules run on DuckDB, out-of-core in streaming mode. The fast path engages only on chunks that already match the schema.</p>
           </li>
-          <li class="flow__step reveal">
-            <span class="flow__n">03 / RECONCILIATION</span>
-            <h3 class="flow__title">The arithmetic must foot</h3>
-            <p class="flow__desc">A single unaccounted-for row refuses the entire run instead of publishing a partial dataset.</p>
+          <li class="stage">
+            <span class="stage__n">03 / RECONCILIATION</span>
+            <h3 class="stage__t">The arithmetic must foot</h3>
+            <p class="stage__d">Read = refused + held + delivered, with <code>unaccounted_for</code> as a hard zero. A single unaccounted row refuses the run instead of publishing a partial dataset.</p>
           </li>
-          <li class="flow__step reveal">
-            <span class="flow__n">04 / PUBLISH</span>
-            <h3 class="flow__title">Atomic &amp; crash-recoverable</h3>
-            <p class="flow__desc">Target, lineage, and certificate commit through a write-ahead journal and are recovered at startup. Quarantine evidence survives the rejection.</p>
+          <li class="stage">
+            <span class="stage__n">04 / PUBLISH</span>
+            <h3 class="stage__t">Atomic and crash-recoverable</h3>
+            <p class="stage__d">Target, lineage, and certificate commit through a write-ahead journal and are recovered at startup. Quarantine evidence survives the rejection.</p>
           </li>
         </ol>
 
-        <div class="proof proof--code reveal">
-          <div class="proof__cell" style="padding:0">
-<pre class="code" style="border:0;border-radius:0;height:100%"><span class="c">// vendor_settlements.json</span>
+        <div class="verdicts reveal" aria-label="Exit code semantics">
+          <div class="verdict">
+            <span class="verdict__code pass">exit 0</span>
+            <span class="verdict__l">Published. Reconciled and delivered with a certificate.</span>
+          </div>
+          <div class="verdict">
+            <span class="verdict__code hold">exit 2</span>
+            <span class="verdict__l">Refused by policy. No rows published.</span>
+          </div>
+          <div class="verdict">
+            <span class="verdict__code refuse">exit 1</span>
+            <span class="verdict__l">Engine failure. Nothing published; your scheduler sees a failed job.</span>
+          </div>
+        </div>
+
+        <div class="split reveal">
+          <div class="split__cell split__cell--code">
+<pre class="code"><span class="c">// contract: vendor_settlements.json (trimmed from examples/)</span>
 {
-  <span class="k">"apiVersion"</span>: "daas/v1",
-  <span class="k">"kind"</span>: "DataProduct",
-  <span class="k">"metadata"</span>: { "name": "vendor-settlements", "owner": "finance-data" },
+  <span class="k">"apiVersion"</span>: <span class="s">"daas/v1"</span>,
+  <span class="k">"kind"</span>: <span class="s">"DataProduct"</span>,
+  <span class="k">"metadata"</span>: { <span class="k">"name"</span>: <span class="s">"vendor-settlements"</span>, <span class="k">"version"</span>: <span class="s">"1.0.0"</span> },
   <span class="k">"spec"</span>: {
     <span class="k">"sources"</span>: [{
-      "type": "LOCAL", "path": "/mnt/landing/settlements.jsonl",
-      "format": "jsonl",
+      <span class="k">"type"</span>: <span class="s">"LOCAL"</span>, <span class="k">"format"</span>: <span class="s">"jsonl"</span>,
       <span class="k">"schema"</span>: [
-        { "name": "settlement_id", "polars_type": "Utf8",    "nullable": false },
-        { "name": "amount",        "polars_type": "Float64", "nullable": false },
-        { "name": "currency",      "polars_type": "Utf8",    "nullable": false }
+        { <span class="k">"name"</span>: <span class="s">"settlement_id"</span>, <span class="k">"polars_type"</span>: <span class="s">"Utf8"</span>,    <span class="k">"nullable"</span>: <span class="k">false</span> },
+        { <span class="k">"name"</span>: <span class="s">"amount"</span>,        <span class="k">"polars_type"</span>: <span class="s">"Float64"</span>, <span class="k">"nullable"</span>: <span class="k">false</span> },
+        { <span class="k">"name"</span>: <span class="s">"currency"</span>,      <span class="k">"polars_type"</span>: <span class="s">"Utf8"</span>,    <span class="k">"nullable"</span>: <span class="k">false</span> }
       ]
     }],
     <span class="k">"quality"</span>: {
-      "behavior": "DROP_ROW",
+      <span class="k">"behavior"</span>: <span class="s">"DROP_ROW"</span>,
       <span class="k">"rules"</span>: [
-        { "rule_id": "amount-positive",  "check": "GREATER_THAN",
-          "column": "amount", "value": 0 },
-        { "rule_id": "currency-settled", "check": "ALLOWED_VALUES",
-          "column": "currency", "value": ["USD","EUR","GBP"] }
+        { <span class="k">"rule_id"</span>: <span class="s">"amount-positive"</span>,  <span class="k">"check"</span>: <span class="s">"GREATER_THAN"</span>,
+          <span class="k">"column"</span>: <span class="s">"amount"</span>, <span class="k">"value"</span>: 0 },
+        { <span class="k">"rule_id"</span>: <span class="s">"currency-settled"</span>, <span class="k">"check"</span>: <span class="s">"ALLOWED_VALUES"</span>,
+          <span class="k">"column"</span>: <span class="s">"currency"</span>, <span class="k">"value"</span>: [<span class="s">"USD"</span>, <span class="s">"EUR"</span>, <span class="s">"GBP"</span>] }
       ],
       <span class="k">"batch_rules"</span>: [
-        { "rule_id": "not-partial", "check": "MIN_ROW_COUNT", "value": 3 }
+        { <span class="k">"rule_id"</span>: <span class="s">"not-partial"</span>, <span class="k">"check"</span>: <span class="s">"MIN_ROW_COUNT"</span>, <span class="k">"value"</span>: 3 }
       ]
     }
   }
 }</pre>
           </div>
-          <div class="proof__cell">
+          <div class="split__cell">
             <h4>What the contract buys you</h4>
             <ul class="facts">
-              <li><span class="facts__k">Reproducible</span> A versioned artifact your team reviews, diffs, and rolls back — not application logic buried in a service.</li>
-              <li><span class="facts__k">Portable</span> The same contract runs from the CLI, the HTTP gateway, or an Airflow task. Identical verdict.</li>
-              <li><span class="facts__k">Auditable</span> Every held row names its rule; every refused row names its structural reason.</li>
-              <li><span class="facts__k">Extensible</span> Ship your own row/batch check types as plugins — built-ins stay closed and cannot be shadowed.</li>
-              <li><span class="facts__k">Fail-closed</span> If the feed cannot be accounted for, nothing is delivered.</li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="sec-head reveal" style="margin-top:56px">
-          <h2 class="sec-title" style="font-size:1.4rem">Evidence your auditors can hold.</h2>
-          <p class="sec-desc">
-            Every delivery ships a certificate that binds contract, source bytes, delivered bytes,
-            and quarantine artifacts together — Merkle-rooted and signed. This is the actual
-            reconciliation and signature header from a live 5,000,000-row streaming run of this
-            repository (hashes abbreviated). <code>datashell verify</code> recomputes every hash and
-            the signature offline; flipping one byte in any bound artifact fails it.
-          </p>
-        </div>
-
-        <div class="proof proof--code reveal">
-          <div class="proof__cell" style="padding:0">
-<pre class="code" style="border:0;border-radius:0;height:100%"><span class="c">// streamed_audit_certificate.json — values from a real run</span>
-{
-  <span class="k">"certificate_version"</span>: "2.0-enterprise",
-  <span class="k">"run_id"</span>: "dm_run_8ac8db1eb5d9",
-  <span class="k">"timestamp"</span>: "2026-10-20T17:43:56.783374+00:00",
-  <span class="k">"contract"</span>: { "name": "vendor-settlements", "version": "1.0.0",
-                "sha256": "8518c50b25f7cbc4…" },
-  <span class="k">"cryptographic_manifest"</span>: {
-    "source_payload_sha256":    "6f47ec5ac8c4424f…",
-    "delivered_payload_sha256": "7ed8cf047ba8ab50…",
-    "delivered_status": "DELIVERED",
-    "quarantine_payload_sha256": "NONE_NO_VIOLATIONS",
-    "merkle_root": "54667d66a95b5102ff03ae37…"
-  },
-  <span class="k">"reconciliation"</span>: {
-    "rows_read":          5000000,
-    "refused_structural": 0,    "held_quality": 0,
-    "rows_delivered":     5000000,
-    "unaccounted_for":    0,    "footing_matched": true
-  },
-  <span class="k">"signature_header"</span>: {
-    "algorithm": "HMAC-SHA256",
-    "integrity_type": "SYMMETRIC_HMAC_AUTHENTICATION",
-    "third_party_verifiable": false,
-    "requires_shared_secret": true,
-    "tamper_evident": true
-  }
-}</pre>
-          </div>
-          <div class="proof__cell">
-            <h4>What the certificate gives you</h4>
-            <ul class="facts">
-              <li><span class="facts__k">Arithmetic, not claims</span> The reconciliation block is a zero-deficit equation: rows read = delivered + held + refused, with <code>unaccounted_for</code> as a hard-zero field.</li>
-              <li><span class="facts__k">Offline verification</span> <code>datashell verify</code> recomputes hashes and the signature locally — you never have to trust the reporter.</li>
-              <li><span class="facts__k">Third-party verifiable</span> Provision an Ed25519 key and the header becomes <code>third_party_verifiable: true</code>: any holder of the public key can verify without a shared secret.</li>
-              <li><span class="facts__k">Durable</span> The boundary ledger persists delivered, rejected, and failed runs per tenant — queryable and machine-readable.</li>
-              <li><span class="facts__k">Complete even when refused</span> Quarantine artifacts are hashed into the same Merkle root; a run that rejects still ships proof of what it rejected.</li>
+              <li><b>Reproducible</b>A versioned artifact your team reviews, diffs, and rolls back — not application logic buried in a service.</li>
+              <li><b>Portable</b>The same contract runs from the CLI, the HTTP gateway, or an Airflow task. Identical verdict.</li>
+              <li><b>Auditable</b>Every held row names its rule; every refused row names its structural reason.</li>
+              <li><b>Fail-closed</b>If the feed cannot be accounted for, nothing is delivered.</li>
+              <li><b>Extensible</b>Ship your own row and batch check types as plugins; built-ins cannot be shadowed.</li>
             </ul>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ==================================================== architecture -->
-    <section class="section section--alt" id="arch">
+    <!-- =============================================================== demo -->
+    <section class="section" id="demo">
       <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">Where it fits</p>
-          <h2 class="sec-title">One boundary call in a workflow you already run.</h2>
-          <p class="sec-desc">
-            Data Shell does not replace your orchestrator, storage, or alerting. It sits between an
-            incoming feed and the write you currently perform, and owns exactly one decision:
-            <em>does this batch cross the boundary, and with what evidence?</em>
-          </p>
-        </div>
-
-        <div class="arch">
-          <div class="arch__col">
-            <div class="arch__box reveal">
-              <p class="arch__label">Producer</p>
-              <p class="arch__t">External partner / vendor feed</p>
-              <p class="arch__d">CSV, JSONL, or Parquet — delivered on your existing schedule or landing path.</p>
-            </div>
-            <div class="arch__box reveal">
-              <p class="arch__label">Your workflow</p>
-              <p class="arch__t">Landing zone · Airflow · storage</p>
-              <p class="arch__d">Unchanged. The scheduler decides when to call the boundary; retries and alerts stay yours.</p>
-            </div>
-          </div>
-          <div class="arch__arrow reveal">→</div>
-          <div class="arch__col">
-            <div class="arch__box arch__box--dark reveal">
-              <span class="arch__tag">the boundary</span>
-              <p class="arch__t">Data Shell enforcement</p>
-              <p class="arch__d">strict cast → row + batch rules → zero-deficit footing → atomic publish</p>
-              <p class="arch__d" style="margin-top:8px">exit <b>0</b> published · exit <b>2</b> refused by policy · exit <b>1</b> engine failure</p>
-            </div>
-          </div>
-          <div class="arch__arrow reveal">→</div>
-          <div class="arch__col">
-            <div class="arch__box reveal">
-              <p class="arch__label">Accepted</p>
-              <p class="arch__t">Delivered artifact only</p>
-              <p class="arch__d">The downstream consumer receives the published file — never a partial batch.</p>
-            </div>
-            <div class="arch__box reveal">
-              <p class="arch__label">Evidence</p>
-              <p class="arch__t">Signed certificate + ledger + quarantine</p>
-              <p class="arch__d">Verifiable offline. Quarantine names the exact rule that held each row.</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="qa reveal" style="margin-top:32px">
-          <div class="qa__cell">
-            <p class="qa__q">Does it replace an existing component?</p>
-            <p class="qa__a">No. It replaces the moment you copy or load a feed straight through. Orchestration, storage, and alerting keep their jobs.</p>
-          </div>
-          <div class="qa__cell">
-            <p class="qa__q">What happens when the data is invalid?</p>
-            <p class="qa__a">Refused rows never enter the delivered file; held rows are quarantined with the rule that caught them; the run exits <code>2</code> under <code>REJECT_RUN</code> policy with zero rows published.</p>
-          </div>
-          <div class="qa__cell">
-            <p class="qa__q">What happens when Data Shell itself fails?</p>
-            <p class="qa__a">Fail-closed: nothing is published, the exit code is <code>1</code>, and your existing alerting sees a failed job — the same shape as any other pipeline failure. Write-ahead journals recover interrupted publications at startup.</p>
-          </div>
-          <div class="qa__cell">
-            <p class="qa__q">Can we keep control of retries and alerts?</p>
-            <p class="qa__a">Yes. The boundary returns an exit code and a JSON summary; your scheduler owns every subsequent decision.</p>
-          </div>
-          <div class="qa__cell">
-            <p class="qa__q">How do we remove it during evaluation?</p>
-            <p class="qa__a">Point <code>--source</code>/<code>--target</code> back at the legacy path. The CLI is stateless apart from the durable ledger; nothing about adopting it changes your storage layout.</p>
-          </div>
-          <div class="qa__cell">
-            <p class="qa__q">What does the downstream consumer receive?</p>
-            <p class="qa__a">The delivered artifact only. The certificate, ledger entry, and quarantine are evidence for operators and auditors — not pipeline inputs.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ================================================ for engineers -->
-    <section class="section" id="engineers">
-      <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">For engineers</p>
-          <h2 class="sec-title">Built to live where your pipelines live.</h2>
-          <p class="sec-desc">
-            One engine, five surfaces. Drive it from a shell, a scheduler, a service, an SDK, or a
-            DAG — and get the same terminal record back, with the same exit semantics.
-          </p>
-        </div>
-
-        <div class="tabs reveal" data-tabs>
-          <div class="tabs__bar" role="tablist">
-            <button class="tabs__btn is-active" data-tab="cli">CLI</button>
-            <button class="tabs__btn" data-tab="airflow">Airflow</button>
-            <button class="tabs__btn" data-tab="http">HTTP API</button>
-            <button class="tabs__btn" data-tab="sdk">Python SDK</button>
-            <button class="tabs__btn" data-tab="verify">Verify</button>
-          </div>
-
-<div class="tabs__panel" data-panel="cli">
-<pre class="code"><span class="c"># enforce a contract; exit 0 = delivered, 2 = rejected by policy, 1 = engine failure</span>
-datashell run <span class="k">--contract</span> vendor_settlements.json \
-              <span class="k">--source</span>   /mnt/landing/settlements.jsonl \
-              <span class="k">--target</span>   /mnt/curated/settlements.parquet \
-              <span class="k">--json</span>
-
-<span class="c"># fail fast in CI before a contract ever reaches production</span>
-datashell validate-contract <span class="k">--contract</span> vendor_settlements.json
-
-<span class="c"># every rule check type, built-in plus any installed plugins</span>
-datashell rules <span class="k">--json</span>
-
-<span class="c"># honest throughput on your own hardware, through the real delivery gate</span>
-datashell benchmark <span class="k">--rows</span> 1000000 <span class="k">--json</span>
-
-<span class="c"># query the durable boundary ledger for a tenant</span>
-datashell ledger summary <span class="k">--tenant</span> finance
-datashell ledger quarantine <span class="k">--tenant</span> finance <span class="k">--kind</span> held_quality</pre>
-</div>
-
-<div class="tabs__panel" data-panel="airflow" hidden>
-<pre class="code"><span class="c"># pip install datashell-airflow</span>
-<span class="k">from</span> datashell_airflow <span class="k">import</span> DataShellLocalEnforceOperator
-
-enforce = DataShellLocalEnforceOperator(
-    task_id=<span class="t-str">"enforce_boundary"</span>,
-    contract=<span class="t-str">"/etc/datashell/vendor_settlements.json"</span>,
-    source=<span class="t-str">"/mnt/landing/settlements_{{ ds }}.csv"</span>,
-    target=<span class="t-str">"/mnt/curated/settlements.parquet"</span>,
-    tenant=<span class="t-str">"finance"</span>,
-    fail_on_rejection=<span class="k">True</span>,   <span class="c"># fail the task if the boundary rejects the run</span>
-)
-
-<span class="c"># the task returns the terminal ledger record, so a DAG can branch on the outcome</span>
-<span class="c"># { "status", "rows_read", "rows_refused", "rows_held", "rows_delivered", ... }</span></pre>
-</div>
-
-<div class="tabs__panel" data-panel="http" hidden>
-<pre class="code"><span class="c"># the hardened gateway: multi-tenant, RBAC, rate-limited, 20 GiB ceiling,</span>
-<span class="c"># optional OTel spans when datashell[otel] + OTEL_EXPORTER_OTLP_ENDPOINT are set</span>
-curl -X POST https://datashell.internal/api/v1/enforce \
-  -H <span class="t-str">"X-API-Key: $DATASHELL_API_KEY"</span> \
-  -F contract_name=vendor-settlements \
-  -F file=@settlements.jsonl \
-  -F streaming=<span class="k">true</span>
-
-<span class="c"># → { "run_id": "...", "status": "LOADED", "footing_matched": true, ... }</span>
-
-<span class="c"># fetch and re-verify the immutable certificate for that run</span>
-curl https://datashell.internal/api/v1/runs/$RUN_ID/certificate \
-  -H <span class="t-str">"X-API-Key: $DATASHELL_API_KEY"</span></pre>
-</div>
-
-<div class="tabs__panel" data-panel="sdk" hidden>
-<pre class="code"><span class="c"># generated from the CI-synced docs/openapi.yaml — cannot drift from the gateway</span>
-<span class="c"># (sdks/python-client; TypeScript client in sdks/typescript-client)</span>
-<span class="k">from</span> datashell_client <span class="k">import</span> ApiClient, Configuration
-<span class="k">from</span> datashell_client.api.default_api <span class="k">import</span> DefaultApi
-
-configuration = Configuration(host=<span class="t-str">"https://datashell.internal"</span>)
-configuration.api_key[<span class="t-str">"X-API-Key"</span>] = <span class="t-str">"dm_live_..."</span>
-api = DefaultApi(ApiClient(configuration=configuration))
-
-<span class="c"># every one of the 28 gateway operations, fully typed (py.typed included)</span>
-runs = api.list_ledger_runs_api_v1_runs_get(limit=10)
-certificate = api.get_run_certificate_api_v1_runs_run_id_certificate_get(run_id)</pre>
-</div>
-
-<div class="tabs__panel" data-panel="verify" hidden>
-<pre class="code"><span class="c"># recompute the signature and every underlying artifact, offline</span>
-datashell verify run_9f3c7a21_audit.json
-
-  certificate     <span class="t-ok">AUTHENTIC_AND_UNMODIFIED</span>
-  contract        <span class="t-ok">✓</span> hash matches
-  delivered       <span class="t-ok">✓</span> sha256 matches · 900 rows
-  quarantine      <span class="t-ok">✓</span> 100 artifacts accounted for
-
-<span class="c"># flip one byte in the delivered Parquet, then re-run — it fails closed</span>
-<span class="t-warn">TAMPERED_UNDERLYING_ARTIFACTS</span></pre>
-</div>
-        </div>
-
-        <div class="hgrid hgrid--4 reveal" style="margin-top:32px">
-          <div class="hgrid__cell">
-            <p class="hgrid__k">Exit codes</p>
-            <p class="hgrid__d"><code>0</code> delivered · <code>2</code> rejected · <code>1</code> engine failure. The verdict is legible to any scheduler.</p>
-          </div>
-          <div class="hgrid__cell">
-            <p class="hgrid__k">Machine output</p>
-            <p class="hgrid__d">Every verb accepts <code>--json</code> with a stable schema, so results pipe straight into automation.</p>
-          </div>
-          <div class="hgrid__cell">
-            <p class="hgrid__k">No server required</p>
-            <p class="hgrid__d">Local runs need nothing but Python. The gateway is optional and deploy-anywhere.</p>
-          </div>
-          <div class="hgrid__cell">
-            <p class="hgrid__k">Ledger as system of record</p>
-            <p class="hgrid__d">Delivered, rejected, and failed runs are all persisted — queryable per tenant.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ====================================================== numbers -->
-    <section class="section" id="numbers">
-      <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">By the numbers</p>
-          <h2 class="sec-title">Measured, not marketed.</h2>
-          <p class="sec-desc">Each figure is asserted by the test suite or reproduced by a benchmark in the repository.</p>
-        </div>
-
-        <table class="table reveal">
-          <thead>
-            <tr><th>Metric</th><th>Value</th><th>How it is verified</th></tr>
-          </thead>
-          <tbody>
-            <tr><td class="metric">Automated tests</td><td class="num" data-count="522">522</td><td class="how"><code>pytest</code> on the main suite, plus 14 for the Airflow provider</td></tr>
-            <tr><td class="metric">Rows published on a footing mismatch</td><td class="num" data-count="0">0</td><td class="how">Reconciliation is a hard gate, not a warning</td></tr>
-            <tr><td class="metric">In-memory path, 1M-row feed</td><td class="num">3.3M rows/s</td><td class="how"><code>python benchmarks/volumetric_stress_test.py</code> — delivered counts, file contents, and footing asserted at every scale; peak RSS 782 MB</td></tr>
-            <tr><td class="metric">Out-of-core stream, 5M-row Parquet feed</td><td class="num">&lt; 1.1 s</td><td class="how"><code>python benchmarks/streaming_profile.py --rows 5000000 --format parquet</code> — vectorized fast path, footing asserted, ~4.9M rows/s, peak RSS 989 MiB</td></tr>
-            <tr><td class="metric">Out-of-core stream, 5M-row CSV feed</td><td class="num">158k rows/s</td><td class="how">Same harness with <code>--format csv</code> — chunk columns arrive as strings, so the strict per-row caster runs by design (exact rejection diagnostics); memory grows with feed size on this build</td></tr>
-            <tr><td class="metric">Zero-deficit accounting, 5M-row feed</td><td class="num">5,000,000 = 5,000,000</td><td class="how">The certificate above is a real certificate: read = delivered + held + refused, zero unaccounted, footing matched</td></tr>
-            <tr><td class="metric">Gateway latency, 1k-row uploads</td><td class="num">P50 137 · P95 238 · P99 594 ms</td><td class="how"><code>python benchmarks/api_latency_load_test.py</code> — 50/50 HTTP 200 and business-verified at the configured concurrency ceiling; in-process gateway</td></tr>
-            <tr><td class="metric">Upload ceiling</td><td class="num" data-count="20" data-suffix=" GiB">20 GiB</td><td class="how">Derived request-body limit — 21,474,836,480 bytes</td></tr>
-            <tr><td class="metric">Access model</td><td class="num">4 × 9</td><td class="how">RBAC roles × capabilities, enforced at every endpoint</td></tr>
-            <tr><td class="metric">API surface</td><td class="num" data-count="28" data-suffix=" operations">28 operations</td><td class="how">Every route scope-checked at startup; CI keeps <code>docs/openapi.yaml</code> (27 paths) in sync</td></tr>
-            <tr><td class="metric">Built-in rule checks</td><td class="num" data-count="19">19</td><td class="how">11 row + 8 batch — <code>datashell rules</code>; extend more via entry-point plugins</td></tr>
-            <tr><td class="metric">Static security + dependency audit</td><td class="num">0 + 0</td><td class="how">bandit zero-findings policy; OSV audit on every push</td></tr>
-            <tr><td class="metric">Streaming formats</td><td class="num" data-count="3">3</td><td class="how">CSV, JSONL/NDJSON, Parquet — chunked staging, one row group per batch (<code>STREAM_CHUNK_ROWS</code>)</td></tr>
-            <tr><td class="metric">Python versions in CI</td><td class="num">3.11–3.13</td><td class="how">Test, wheel build, and container jobs</td></tr>
-          </tbody>
-        </table>
-        <p class="table__note reveal">
-          The throughput, latency, and memory figures above were measured on a single-node
-          development machine (13 GB RAM, Python 3.14) by the repository's own harnesses —
-          <code>python benchmarks/volumetric_stress_test.py</code>,
-          <code>python benchmarks/streaming_profile.py</code>, and
-          <code>python benchmarks/api_latency_load_test.py</code> — all of which assert expected
-          delivered counts and the reconciliation footing, so a run that silently drops rows
-          <em>fails</em> instead of reporting a flattering number. The gateway latency is measured
-          in-process (TestClient), not over a network. Measure on your own hardware — and at your
-          own scale — before capacity planning.
-        </p>
-      </div>
-    </section>
-
-    <!-- ========================================================= demo -->
-    <section class="section section--alt" id="demo">
-      <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">Interactive demo</p>
-          <h2 class="sec-title">Watch the gate decide — three real runs.</h2>
-          <p class="sec-desc">
-            Each scenario below runs the actual engine in a fresh subprocess, on deterministic
-            sample data — nothing is canned. Pick a scenario, run it, and inspect the evidence the
-            run leaves behind.
+        <div class="section__head reveal">
+          <p class="eyebrow">Live demo</p>
+          <h2 class="section__title">Run the boundary. Inspect what it publishes.</h2>
+          <p class="section__desc">
+            Each scenario executes the real engine in a fresh subprocess against deterministic sample
+            data. Nothing is canned: the counts, rule breakdowns, and certificate values below come from
+            the run you start.
           </p>
         </div>
 
         <div class="demo reveal">
-          <div class="demo__scenarios" role="tablist" aria-label="Demo scenarios">
-            <button class="demo__sc is-active" data-scenario="valid" data-focus="clean" role="tab" aria-selected="true">
+          <div class="demo__scenarios" role="group" aria-label="Demo scenarios">
+            <button class="demo__sc is-active" data-scenario="valid" data-focus="clean" aria-pressed="true" id="scenario-clean" aria-controls="demoResult">
               <span class="demo__sc-n">Scenario A</span>
-              <span class="demo__sc-t">Clean feed</span>
-              <span class="demo__sc-d">every row delivered, footing proven</span>
+              <span class="demo__sc-t">Clean delivery</span>
+              <span class="demo__sc-d">Every row is delivered and the footing is proven.</span>
             </button>
-            <button class="demo__sc" data-scenario="full" data-focus="quarantine" role="tab" aria-selected="false">
+            <button class="demo__sc" data-scenario="full" data-focus="quarantine" aria-pressed="false" id="scenario-defective" aria-controls="demoResult">
               <span class="demo__sc-n">Scenario B</span>
-              <span class="demo__sc-t">Defective feed</span>
-              <span class="demo__sc-d">refused and held rows never reach the delivered file</span>
+              <span class="demo__sc-t">Defective delivery</span>
+              <span class="demo__sc-d">100 seeded defects: 60 held, 40 refused, 900 delivered.</span>
             </button>
-            <button class="demo__sc" data-scenario="full" data-focus="tamper" role="tab" aria-selected="false">
+            <button class="demo__sc" data-scenario="full" data-focus="tamper" aria-pressed="false" id="scenario-tamper" aria-controls="demoResult">
               <span class="demo__sc-n">Scenario C</span>
-              <span class="demo__sc-t">Tamper &amp; recovery</span>
-              <span class="demo__sc-d">one flipped byte fails offline verification; restore recovers</span>
+              <span class="demo__sc-t">Integrity verification</span>
+              <span class="demo__sc-d">One flipped byte fails verification; restore recovers it.</span>
             </button>
           </div>
 
           <div class="console">
             <div class="console__bar">
-              <div class="console__lights"><i></i><i></i><i></i></div>
+              <div class="console__lights" aria-hidden="true"><i></i><i></i><i></i></div>
               <span class="console__title">Data Shell — boundary console</span>
               <span class="spacer"></span>
-              <button class="btn btn--sm" id="runDemo" style="height:26px">Run scenario</button>
+              <span class="console__actions">
+                <button class="btn btn--sm" id="resetDemo" type="button" disabled>Reset</button>
+                <button class="btn btn--sm" id="runDemo" type="button">Run scenario</button>
+              </span>
             </div>
             <div class="console__body">
-              <div id="demoResult">
-                <p class="console-label" style="margin:0">
-                  awaiting run — select a scenario and run it; typically 2–5 s per run
-                </p>
+              <div id="demoResult" role="region" aria-label="Demo result" aria-live="polite" aria-busy="false">
+                <p class="console-label" style="margin:0">awaiting run — select a scenario and run it; typically 2–5 s per run</p>
               </div>
               <details class="raw" id="demoRawWrap" hidden>
                 <summary>raw engine output</summary>
@@ -695,75 +375,363 @@ datashell verify run_9f3c7a21_audit.json
       </div>
     </section>
 
-    <!-- ========================================================= path -->
-    <section class="section" id="path">
+    <!-- =========================================================== evidence -->
+    <section class="section section--subtle" id="evidence">
       <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">The adoption path</p>
-          <h2 class="sec-title">From first visit to a controlled pilot, in six stages.</h2>
-          <p class="sec-desc">
-            Each stage has a concrete artifact and an honest time estimate. No stage requires
-            contacting anyone before you have established technical credibility for yourself.
+        <div class="section__head reveal">
+          <p class="eyebrow">Evidence</p>
+          <h2 class="section__title">Bounded by arithmetic and a signature.</h2>
+          <p class="section__desc">
+            Three guarantees matter when an external feed crosses into systems you are accountable for.
+            Each is implemented in the engine and observable from a run you can reproduce.
           </p>
         </div>
 
-        <div class="journey reveal">
-          <div class="journey__step">
-            <p class="journey__n">Stage 1 · Understand</p>
-            <p class="journey__t">What the boundary enforces</p>
-            <p class="journey__d">The problem, the enforcement model, and the evidence it produces. ~5 minutes on this page.</p>
-            <p class="journey__a"><a href="#problem">Read the problem</a></p>
+        <div class="proofs reveal">
+          <article class="proof">
+            <p class="proof__k">01 · Reconciliation</p>
+            <h3 class="proof__t">Nothing publishes unaccounted for.</h3>
+            <p class="proof__d">Rows read must equal delivered + held + refused. If a single row cannot be accounted for, the run refuses to publish rather than ship a partial dataset.</p>
+            <p class="proof__e"><b>Reproduce:</b> <code>datashell demo --scenario full</code><br />1,000 = 900 delivered + 60 held + 40 refused · unaccounted 0</p>
+          </article>
+          <article class="proof">
+            <p class="proof__k">02 · Publication</p>
+            <h3 class="proof__t">No partial batches, even after a crash.</h3>
+            <p class="proof__d">The target, an immutable lineage artifact, and the certificate commit together through a write-ahead journal. Interrupted publications are recovered at startup.</p>
+            <p class="proof__e"><b>Verify:</b> publication atomicity and recovery paths are covered by the test suite — <code>pytest</code> collects 522 tests.</p>
+          </article>
+          <article class="proof">
+            <p class="proof__k">03 · Integrity</p>
+            <h3 class="proof__t">A flipped byte fails verification.</h3>
+            <p class="proof__d">A Merkle root binds the contract, source bytes, delivered bytes, and quarantine artifacts; the certificate is signed with HMAC-SHA256, or Ed25519 for third-party verification.</p>
+            <p class="proof__e"><b>Reproduce:</b> <code>datashell demo</code><br />AUTHENTIC → TAMPERED_UNDERLYING_ARTIFACTS → AUTHENTIC</p>
+          </article>
+        </div>
+
+        <div class="cert-shape reveal">
+          <div class="cert-shape__side cert-shape__side--code">
+<pre class="code"><span class="c">// certificate shape — hashes abbreviated</span>
+<span class="c">// the live demo prints real values from your run</span>
+{
+  <span class="k">"certificate_version"</span>: <span class="s">"2.0-enterprise"</span>,
+  <span class="k">"contract"</span>: { <span class="k">"name"</span>: <span class="s">"vendor-settlements"</span>, <span class="k">"version"</span>: <span class="s">"1.0.0"</span>, <span class="k">"sha256"</span>: <span class="s">"…"</span> },
+  <span class="k">"cryptographic_manifest"</span>: {
+    <span class="k">"source_payload_sha256"</span>:     <span class="s">"…"</span>,
+    <span class="k">"delivered_payload_sha256"</span>:  <span class="s">"…"</span>,
+    <span class="k">"quarantine_payload_sha256"</span>: <span class="s">"…"</span>,
+    <span class="k">"delivered_status"</span>: <span class="s">"DELIVERED"</span>,
+    <span class="k">"merkle_root"</span>: <span class="s">"…"</span>
+  },
+  <span class="k">"reconciliation"</span>: {
+    <span class="k">"rows_read"</span>: 1000, <span class="k">"refused_structural"</span>: 40, <span class="k">"held_quality"</span>: 60,
+    <span class="k">"rows_delivered"</span>: 900, <span class="k">"unaccounted_for"</span>: 0,
+    <span class="k">"footing_matched"</span>: <span class="k">true</span>
+  },
+  <span class="k">"signature_header"</span>: {
+    <span class="k">"algorithm"</span>: <span class="s">"HMAC-SHA256"</span>,
+    <span class="k">"tamper_evident"</span>: <span class="k">true</span>,
+    <span class="k">"third_party_verifiable"</span>: <span class="k">false</span>
+  }
+}</pre>
           </div>
-          <div class="journey__step">
-            <p class="journey__n">Stage 2 · Verify</p>
-            <p class="journey__t">Inspect real behavior</p>
-            <p class="journey__d">Run the interactive demo; read the benchmark methodology and its limitations. ~5 minutes.</p>
-            <p class="journey__a"><a href="#demo">Open the demo</a> · <a href="#numbers">Benchmarks</a></p>
+          <div class="cert-shape__side">
+            <h4>What the certificate proves — and what it does not</h4>
+            <ul class="facts">
+              <li><b>Integrity</b>The delivered bytes are the bytes the engine validated. <code>datashell verify</code> recomputes every hash and the signature offline; a single modified byte fails it.</li>
+              <li><b>Authorship under a key</b>HMAC-SHA256 proves possession of the shared secret. Provision an Ed25519 key and any holder of the public key can verify without sharing one.</li>
+              <li><b>Not sender identity</b>The certificate does not prove who sent the feed. Pair it with your own trust anchor and review process.</li>
+              <li><b>Real values, not marketing copy</b>The live demo above renders the actual certificate excerpt from the run you start — merkle root, payload hashes, and reconciliation included.</li>
+            </ul>
           </div>
-          <div class="journey__step">
-            <p class="journey__n">Stage 3 · Evaluate</p>
-            <p class="journey__t">Run it on your machine</p>
-            <p class="journey__d">The tested quickstart: install, demo, a real contract run, a refusal, evidence inspection. ~10 minutes.</p>
-            <p class="journey__a"><a href="#quickstart">Quickstart</a> · <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/EVALUATION.md" target="_blank" rel="noopener">Full guide</a></p>
+        </div>
+
+        <div class="section__head reveal" style="margin-top:64px;margin-bottom:28px">
+          <h2 class="section__title" id="numbers" style="font-size:1.45rem">Measured, not marketed.</h2>
+          <p class="section__desc">
+            Figures below were re-measured for this page on a single development machine. The harnesses
+            assert delivered counts and reconciliation footing, so a run that silently drops rows fails
+            instead of reporting a flattering number.
+          </p>
+        </div>
+
+        <div class="table-scroll reveal">
+          <table class="table">
+            <thead>
+              <tr><th scope="col">Metric</th><th scope="col">Measured</th><th scope="col">How it is verified</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="table__metric">Automated tests</td>
+                <td class="table__value">522 collected</td>
+                <td class="table__how"><code>pytest --collect-only -q</code> on the main suite; the Airflow provider suite runs separately in CI.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Rows published on a footing mismatch</td>
+                <td class="table__value">0</td>
+                <td class="table__how">Reconciliation is a hard gate, not a warning.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">In-memory path, 1M rows</td>
+                <td class="table__value">1.95M rows/s · 713 MB RSS</td>
+                <td class="table__how"><code>python benchmarks/volumetric_stress_test.py</code> — delivered counts, file contents, and footing asserted at 10k, 100k, 500k, and 1M rows.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Out-of-core stream, 5M-row Parquet</td>
+                <td class="table__value">1.51 s · 3.31M rows/s · 857 MiB RSS</td>
+                <td class="table__how"><code>python benchmarks/streaming_profile.py --rows 5000000 --format parquet</code> — vectorized fast path; footing matched.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Out-of-core stream, 5M-row CSV</td>
+                <td class="table__value">33.9 s · 147k rows/s · 3.0 GiB RSS</td>
+                <td class="table__how">Same harness with <code>--format csv</code> — the strict per-row caster runs by design for exact rejection diagnostics; memory grows with feed size on this build.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Gateway latency, 1k-row uploads</td>
+                <td class="table__value">P50 90 · P95 150 · P99 561 ms</td>
+                <td class="table__how"><code>python benchmarks/api_latency_load_test.py</code> — 50/50 HTTP 200 and business-verified, in-process gateway at configured concurrency 2.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Built-in rule checks</td>
+                <td class="table__value">19 (11 row · 8 batch)</td>
+                <td class="table__how"><code>datashell rules --json</code>; extend with entry-point plugins.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Gateway surface</td>
+                <td class="table__value">27 paths · 28 operations</td>
+                <td class="table__how"><code>docs/openapi.yaml</code>, with every route scope-checked at startup.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Upload ceiling</td>
+                <td class="table__value">20 GiB</td>
+                <td class="table__how">Default <code>MAX_UPLOAD_SIZE_BYTES</code> (21,474,836,480 bytes); the request-body limit derives from it.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Static security and dependency audit</td>
+                <td class="table__value">CI-enforced</td>
+                <td class="table__how">Bandit zero-findings policy on <code>datashell</code> and <code>web</code>; OSV dependency audit on every push.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details class="disclosure reveal">
+          <summary>Benchmark methodology and limitations</summary>
+          <div class="disclosure__body">
+            <p>
+              Measurements were taken on 2026-10-21 on one development machine (13 GB RAM,
+              Python 3.14.8, single node) using the repository’s own harnesses:
+              <code>benchmarks/volumetric_stress_test.py</code>,
+              <code>benchmarks/streaming_profile.py</code>, and
+              <code>benchmarks/api_latency_load_test.py</code>. Each harness asserts expected delivered
+              counts and the reconciliation footing. Gateway latency is measured in-process
+              (TestClient), not over a network. CI runs the supported interpreter range, 3.11–3.13.
+              Throughput and memory vary materially with hardware, feed shape, and row width —
+              measure on your own hardware and at your own scale before capacity planning.
+            </p>
           </div>
-          <div class="journey__step">
-            <p class="journey__n">Stage 4 · Integrate</p>
-            <p class="journey__t">Wire it into one job</p>
-            <p class="journey__d">Replace the copy-through step of one scheduled job with the boundary call. Exit codes and JSON stay in your scheduler’s hands.</p>
-            <p class="journey__a"><a href="#arch">Integration patterns</a></p>
+        </details>
+      </div>
+    </section>
+
+    <!-- ========================================================= engineers -->
+    <section class="section" id="engineers">
+      <span id="arch" aria-hidden="true"></span>
+      <div class="shell">
+        <div class="section__head reveal">
+          <p class="eyebrow">For engineers</p>
+          <h2 class="section__title">One engine. The same verdict from every surface.</h2>
+          <p class="section__desc">
+            Data Shell does not replace your orchestrator, storage, or alerting. It owns exactly one
+            decision — does this batch cross the boundary, and with what evidence — and returns the same
+            terminal record whether you call it from a shell, a scheduler, a service, or an SDK.
+          </p>
+        </div>
+
+        <div class="tabs reveal" data-tabs>
+          <div class="tabs__bar" role="tablist" aria-label="Integration surfaces">
+            <button class="tabs__btn is-active" data-tab="cli" role="tab" aria-selected="true" id="tab-cli" aria-controls="panel-cli">CLI</button>
+            <button class="tabs__btn" data-tab="airflow" role="tab" aria-selected="false" id="tab-airflow" aria-controls="panel-airflow">Airflow</button>
+            <button class="tabs__btn" data-tab="http" role="tab" aria-selected="false" id="tab-http" aria-controls="panel-http">HTTP API</button>
+            <button class="tabs__btn" data-tab="sdk" role="tab" aria-selected="false" id="tab-sdk" aria-controls="panel-sdk">Python SDK</button>
+            <button class="tabs__btn" data-tab="verify" role="tab" aria-selected="false" id="tab-verify" aria-controls="panel-verify">Verify</button>
           </div>
-          <div class="journey__step">
-            <p class="journey__n">Stage 5 · Pilot</p>
-            <p class="journey__t">One feed, named operator, criteria</p>
-            <p class="journey__d">A narrowly scoped pilot with measurable acceptance criteria, rollback conditions, and a decision rule. Checklist in the evaluation guide.</p>
-            <p class="journey__a"><a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/EVALUATION.md#stage-5-pilot-checklist" target="_blank" rel="noopener">Pilot checklist</a></p>
+
+<div class="tabs__panel" data-panel="cli" id="panel-cli" role="tabpanel" aria-labelledby="tab-cli">
+<pre class="code"><span class="c"># enforce a contract; exit 0 = delivered, 2 = rejected by policy, 1 = engine failure</span>
+datashell run <span class="k">--contract</span> vendor_settlements.json \
+              <span class="k">--source</span>   /mnt/landing/settlements.jsonl \
+              <span class="k">--target</span>   /mnt/curated/settlements.parquet \
+              <span class="k">--json</span>
+
+<span class="c"># fail fast in CI before a contract ever reaches production</span>
+datashell validate-contract <span class="k">--contract</span> vendor_settlements.json
+
+<span class="c"># every rule check type, built-in plus installed plugins</span>
+datashell rules <span class="k">--json</span>
+
+<span class="c"># throughput on your own hardware, through the real delivery gate</span>
+datashell benchmark <span class="k">--rows</span> 1000000 <span class="k">--json</span>
+
+<span class="c"># query the durable boundary ledger</span>
+datashell ledger summary <span class="k">--tenant</span> finance
+datashell ledger quarantine <span class="k">--tenant</span> finance <span class="k">--kind</span> held_quality</pre>
+</div>
+
+<div class="tabs__panel" data-panel="airflow" id="panel-airflow" role="tabpanel" aria-labelledby="tab-airflow" hidden>
+<pre class="code"><span class="c"># pip install datashell-airflow  (integrations/airflow)</span>
+<span class="k">from</span> datashell_airflow <span class="k">import</span> DataShellLocalEnforceOperator
+
+enforce = DataShellLocalEnforceOperator(
+    task_id=<span class="s">"enforce_boundary"</span>,
+    contract=<span class="s">"/etc/datashell/vendor_settlements.json"</span>,
+    source=<span class="s">"/mnt/landing/settlements_{{ ds }}.csv"</span>,
+    target=<span class="s">"/mnt/curated/settlements.parquet"</span>,
+    tenant=<span class="s">"finance"</span>,
+    fail_on_rejection=<span class="k">True</span>,   <span class="c"># fail the task if the boundary rejects the run</span>
+)
+
+<span class="c"># the task returns the terminal ledger record, so a DAG can branch on the outcome</span></pre>
+</div>
+
+<div class="tabs__panel" data-panel="http" id="panel-http" role="tabpanel" aria-labelledby="tab-http" hidden>
+<pre class="code"><span class="c"># the hardened gateway: multi-tenant, RBAC, rate-limited, 20 GiB ceiling</span>
+curl -X POST https://datashell.internal/api/v1/enforce \
+  -H <span class="s">"X-API-Key: $DATASHELL_API_KEY"</span> \
+  -F contract_name=vendor-settlements \
+  -F file=@settlements.jsonl
+
+<span class="c"># → { "run_id": "...", "status": "LOADED", "footing_matched": true, ... }</span>
+
+<span class="c"># fetch and re-verify the immutable certificate for that run</span>
+curl https://datashell.internal/api/v1/runs/$RUN_ID/certificate \
+  -H <span class="s">"X-API-Key: $DATASHELL_API_KEY"</span></pre>
+</div>
+
+<div class="tabs__panel" data-panel="sdk" id="panel-sdk" role="tabpanel" aria-labelledby="tab-sdk" hidden>
+<pre class="code"><span class="c"># generated from the CI-synced docs/openapi.yaml</span>
+<span class="c"># sdks/python-client · sdks/typescript-client</span>
+<span class="k">from</span> datashell_client <span class="k">import</span> ApiClient, Configuration
+<span class="k">from</span> datashell_client.api.default_api <span class="k">import</span> DefaultApi
+
+configuration = Configuration(host=<span class="s">"https://datashell.internal"</span>)
+configuration.api_key[<span class="s">"X-API-Key"</span>] = <span class="s">"dm_live_..."</span>
+api = DefaultApi(ApiClient(configuration=configuration))
+
+runs = api.list_ledger_runs_api_v1_runs_get(limit=10)
+certificate = api.get_run_certificate_api_v1_runs_run_id_certificate_get(run_id)</pre>
+</div>
+
+<div class="tabs__panel" data-panel="verify" id="panel-verify" role="tabpanel" aria-labelledby="tab-verify" hidden>
+<pre class="code"><span class="c"># recompute the signature and every underlying artifact, offline</span>
+datashell verify run_audit.json
+
+  certificate     <span class="ok">AUTHENTIC_AND_UNMODIFIED</span>
+  contract        <span class="ok">✓</span> hash matches
+  delivered       <span class="ok">✓</span> sha256 matches · 900 rows
+  quarantine      <span class="ok">✓</span> 100 artifacts accounted for
+
+<span class="c"># flip one byte in the delivered Parquet, then re-run — it fails closed</span>
+<span class="warn">TAMPERED_UNDERLYING_ARTIFACTS</span></pre>
+</div>
+        </div>
+
+        <div class="mini-grid reveal">
+          <div class="mini">
+            <p class="mini__k">Exit codes</p>
+            <p class="mini__d"><code>0</code> delivered · <code>2</code> rejected · <code>1</code> engine failure. Legible to any scheduler.</p>
           </div>
-          <div class="journey__step">
-            <p class="journey__n">Stage 6 · Expand</p>
-            <p class="journey__t">Only after the pilot passes</p>
-            <p class="journey__d">Additional feeds, the HTTP gateway, or the settlement ledger — in that order, each with its own acceptance run.</p>
-            <p class="journey__a"><a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/EVALUATION.md#decision-criteria" target="_blank" rel="noopener">Decision criteria</a></p>
+          <div class="mini">
+            <p class="mini__k">Machine output</p>
+            <p class="mini__d">Every verb accepts <code>--json</code> with a stable schema, so results pipe straight into automation.</p>
+          </div>
+          <div class="mini">
+            <p class="mini__k">No server required</p>
+            <p class="mini__d">Local runs need nothing but Python. The gateway is optional and deployable anywhere.</p>
+          </div>
+          <div class="mini">
+            <p class="mini__k">Ledger as record</p>
+            <p class="mini__d">Delivered, rejected, and failed runs are persisted and queryable per tenant.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ==================================================== quickstart -->
-    <section class="section section--alt" id="quickstart">
+    <!-- ============================================================= trust -->
+    <section class="section section--subtle" id="trust">
       <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">Stage 3 · Evaluate</p>
-          <h2 class="sec-title">The quickstart, tested line by line.</h2>
-          <p class="sec-desc">
-            Every command below was executed in the documented environment to produce the values
-            shown. Full walkthrough — including the refusal variant and cleanup — in the
-            <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/EVALUATION.md" target="_blank" rel="noopener">evaluation guide</a>.
+        <div class="section__head reveal">
+          <p class="eyebrow">Deployment maturity</p>
+          <h2 class="section__title">What is tested, what is designed, and what is still an assumption.</h2>
+          <p class="section__desc">
+            The boundary is explicit about its operating envelope. An approver should know these facts
+            before a pilot, not after one.
           </p>
         </div>
 
-        <div class="proof proof--code reveal">
-          <div class="proof__cell" style="padding:0">
-<pre class="code" style="border:0;border-radius:0;height:100%"><span class="c"># 1 · install and check the environment (~2 min)</span>
+        <div class="table-scroll reveal">
+          <table class="table table--trust">
+            <thead><tr><th scope="col">Area</th><th scope="col">Status</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="table__metric">Enforcement behavior</td>
+                <td class="table__value">Tested in CI: casting refusals, rule holds, footing gates, <code>REJECT_RUN</code> parity, publication atomicity, recovery, tamper detection, RBAC, sandboxing, and rate limits. 522 collected tests; bandit zero-findings policy; OSV dependency audit.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Reconciliation &amp; atomicity</td>
+                <td class="table__value">Hard gates, not warnings: zero-deficit accounting and write-ahead publication. Observable in every certificate and covered by the suite.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Deployment topology</td>
+                <td class="table__value">The reference deployment is intentionally <strong>single replica and single worker</strong>. The credential registry, rate limiter, and demo concurrency limits are process-local; scale-out requires shared stores before running multiple replicas.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Resource limits</td>
+                <td class="table__value">20 GiB per upload (configurable), bounded request bodies, disk-headroom preflight, and a demo artifact quota. Concurrency is bounded per worker and per replica.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Performance envelope</td>
+                <td class="table__value">Measured on one development machine by committed harnesses. Reproducible by you; not a guarantee for your environment.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Certificate semantics</td>
+                <td class="table__value">Proves integrity and authorship under the signing key; it does not prove sender identity. Use Ed25519 with a published key for third-party verification, and pair it with your own trust anchor.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Not yet established</td>
+                <td class="table__value">Production hardening beyond the reference topology: multi-replica operation, live billing integration, real-collector OpenTelemetry export, and your deployment-specific threat model. A pilot exists to establish them.</td>
+              </tr>
+              <tr>
+                <td class="table__metric">Certification</td>
+                <td class="table__value">None claimed. Code-level checks are not a substitute for a deployment-specific threat model and independent review.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="hero__actions reveal" style="margin-top:24px">
+          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/THREAT_MODEL.md" target="_blank" rel="noopener">Threat model</a>
+          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/production/RELEASE_CHECKLIST.md" target="_blank" rel="noopener">Release checklist</a>
+          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/production/OPERATIONS_RUNBOOK.md" target="_blank" rel="noopener">Operations runbook</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================================================== evaluate -->
+    <section class="section" id="evaluate">
+      <span id="quickstart" aria-hidden="true"></span>
+      <div class="shell">
+        <div class="section__head reveal">
+          <p class="eyebrow">Evaluate</p>
+          <h2 class="section__title">From first run to a controlled pilot.</h2>
+          <p class="section__desc">
+            The fastest evaluation is one real feed and one explicit acceptance criterion. Every command
+            below exists in the repository and was executed to verify this page.
+          </p>
+        </div>
+
+        <div class="quickstart reveal">
+          <div class="quickstart__code">
+<pre class="code"><span class="c"># 1 · install and check the environment (~2 min)</span>
 git clone https://github.com/Pulkit-Handa/data_shell
 cd data_shell &amp;&amp; pip install -e .     <span class="c"># or: pip install datashell</span>
 datashell doctor
@@ -776,8 +744,6 @@ datashell demo
 datashell demo --scenario valid
 
 <span class="c"># 4 · a real contract against the repository's sample feed</span>
-<span class="c">#    (the sample contains 100 seeded defects, so you see quarantine</span>
-<span class="c">#    on files you own: 1000 read = 40 refused + 60 held + 900 delivered)</span>
 datashell run \
   --contract examples/vendor_settlements_contract.json \
   --source   examples/samples/vendor_settlements_1k.jsonl \
@@ -789,196 +755,75 @@ datashell run \
 datashell verify ./output/eval/settlements_audit.json
 datashell ledger summary --tenant eval-demo</pre>
           </div>
-          <div class="proof__cell">
-            <h4>What each step proves</h4>
+          <div class="quickstart__side">
+            <h4>Acceptance criteria for a first pilot</h4>
             <ul class="facts">
-              <li><span class="facts__k">doctor</span> Reports exactly which capabilities this environment has — core engine, gateway extras, DuckDB, OpenTelemetry — so nothing is assumed.</li>
-              <li><span class="facts__k">demo</span> The whole story in two seconds: enforcement, quarantine, atomic publish, tamper detection, recovery.</li>
-              <li><span class="facts__k">run</span> Your first real artifact: a delivered file that contains only rows the contract accepted, plus a certificate binding them.</li>
-              <li><span class="facts__k">verify</span> Recomputes every hash and the signature locally — the evidence survives without the service.</li>
-              <li><span class="facts__k">ledger</span> The durable record of every run per tenant — the system of record for audits.</li>
+              <li><b>Reconciliation</b>Every run reports <code>read = delivered + held + refused</code> with zero unaccounted rows.</li>
+              <li><b>Attribution</b>Each held record names its rule; each refused record names its structural reason.</li>
+              <li><b>Evidence</b><code>datashell verify</code> returns <code>AUTHENTIC_AND_UNMODIFIED</code> for the certificate you just produced.</li>
+              <li><b>Fail-closed</b>A deliberately tampered artifact fails verification, and a footing mismatch refuses the run.</li>
+              <li><b>Integration</b>One scheduled job is replaced with the boundary call; exit codes and JSON stay in your scheduler’s hands.</li>
             </ul>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ====================================================== economics -->
-    <section class="section section--alt" id="economics">
-      <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">The cost of the problem</p>
-          <h2 class="sec-title">Estimate what defective deliveries cost you — not what Data Shell saves you.</h2>
-          <p class="sec-desc">
-            We will not show you a fabricated savings number. This calculator estimates the
-            <em>current</em> investigation burden from inputs only you can supply. The reduction
-            slider is your own scenario assumption — Data Shell’s actual effect is something you
-            measure during the pilot, not something we promise here.
-          </p>
-        </div>
-
-        <div class="calc reveal">
-          <div class="calc__in">
-            <p class="calc__label">Your inputs — all estimates, all yours</p>
-            <div class="calc__row">
-              <label for="calcDeliveries">External deliveries per week <output id="outDeliveries">20</output></label>
-              <input type="number" id="calcDeliveries" min="1" max="1000" value="20" inputmode="numeric">
-            </div>
-            <div class="calc__row">
-              <label for="calcProblemRate">Share with a defect worth investigating <output id="outProblemRate">30%</output></label>
-              <input type="range" id="calcProblemRate" min="1" max="100" value="30">
-            </div>
-            <div class="calc__row">
-              <label for="calcHours">Investigation hours per problematic delivery <output id="outHours">2.0</output></label>
-              <input type="number" id="calcHours" min="0.5" max="100" step="0.5" value="2" inputmode="decimal">
-            </div>
-            <div class="calc__row">
-              <label for="calcPeople">People typically involved <output id="outPeople">1.5</output></label>
-              <input type="number" id="calcPeople" min="1" max="20" step="0.5" value="1.5" inputmode="decimal">
-            </div>
-            <div class="calc__row">
-              <label for="calcRate">Fully loaded engineering cost, $/hour <output id="outRate">$85</output></label>
-              <input type="number" id="calcRate" min="20" max="400" step="5" value="85" inputmode="decimal">
-            </div>
-            <div class="calc__row">
-              <label for="calcReduction">Your scenario: share of investigation time you expect to remove <output id="outReduction">50%</output></label>
-              <input type="range" id="calcReduction" min="0" max="100" value="50">
-              <p class="calc__hint">This is your assumption, not a measured Data Shell benefit.</p>
-            </div>
-          </div>
-          <div class="calc__out">
-            <p class="calc__label">Current burden — calculated from your inputs</p>
-            <div class="calc__figure">
-              <span>Investigation hours per year</span>
-              <b id="figHours">—</b>
-            </div>
-            <div class="calc__figure">
-              <span>Current annual burden</span>
-              <b id="figBurden">—</b>
-            </div>
-            <p class="calc__label" style="margin-top:10px">Hypothetical scenario — your reduction applied</p>
-            <div class="calc__figure calc__figure--hl">
-              <span>Scenario annual savings</span>
-              <b id="figSavings">—</b>
-            </div>
-            <p class="calc__note">
-              Formula: deliveries/week × 52 × defect share × hours × people × rate. Every input is
-              supplied by you and stays in this browser — nothing is transmitted. A scenario savings
-              figure is not a guarantee; the pilot exists to measure the real number.
+            <p style="margin-top:18px;font-size:12.5px;color:var(--muted)">
+              Full walkthrough, refusal variant, cleanup, and the pilot checklist:
+              <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/EVALUATION.md" target="_blank" rel="noopener" style="color:var(--accent)">docs/EVALUATION.md</a>
             </p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ====================================================== posture -->
-    <section class="section" id="trust">
+    <!-- ================================================================ cta -->
+    <section class="cta">
       <div class="shell">
-        <div class="sec-head reveal">
-          <p class="sec-label">Trust &amp; deployment maturity</p>
-          <h2 class="sec-title">What is tested, what is designed, and what is still an assumption.</h2>
-          <p class="sec-desc">We would rather be precise than flattering. Here is exactly where the system stands, and what an approver should validate before a pilot.</p>
-        </div>
-
-        <table class="table reveal">
-          <thead><tr><th>Area</th><th>Status</th></tr></thead>
-          <tbody>
-            <tr><td class="metric">Security posture</td><td class="how">Hardened — startup rejects weak/seeded secrets, RBAC on every route, rate limiting, non-root read-only container, artifact paths validated before use. CI enforces a zero-findings bandit policy and an OSV dependency audit on every push.</td></tr>
-            <tr><td class="metric">Behavior when Data Shell fails</td><td class="how">Fail-closed: nothing is published, the process exits <code>1</code>, and write-ahead journals recover interrupted publications at startup. Your scheduler sees a normal failed job and routes it to your existing alerting.</td></tr>
-            <tr><td class="metric">Reconciliation invariants</td><td class="how">Zero-deficit accounting is a hard gate: rows read = delivered + held + refused; one unaccounted row refuses the run instead of publishing a partial dataset. Enforced across 522 tests, including streaming and REJECT_RUN parity.</td></tr>
-            <tr><td class="metric">Publication atomicity</td><td class="how">Target, lineage artifact, and certificate commit together through the journal; a crash mid-publication leaves no half-written target, and recovery is verified by tests.</td></tr>
-            <tr><td class="metric">Resource limits</td><td class="how">20 GiB per-upload ceiling (override <code>MAX_UPLOAD_SIZE_BYTES</code>); concurrency and rate limits are <em>process-local</em> per worker and per replica — size hosts accordingly before scaling horizontally.</td></tr>
-            <tr><td class="metric">Reference topology</td><td class="how">Single replica and single worker. The credential registry and rate limiter are process-local by design.</td></tr>
-            <tr><td class="metric">Scaling surfaces</td><td class="how">Five documented, environment-tunable surfaces — ingest backend (auto/memory/stream), batch size, SQL threads, delivery codec, concurrency/disk — in <code>docs/SCALING.md</code> with worked profiles. <code>benchmarks/streaming_profile.py</code> measures the out-of-core path's wall time and peak RSS on your hardware.</td></tr>
-            <tr><td class="metric">Deployment prerequisites</td><td class="how">Python 3.11–3.13; core engine needs 5 dependencies (gateway, DuckDB, billing, OpenTelemetry are extras); delivery targets and audit certificates must share a storage root; HMAC key by default, Ed25519 optional for third-party-verifiable certificates.</td></tr>
-            <tr><td class="metric">Certification</td><td class="how">None claimed. Code-level checks are not a substitute for a deployment-specific threat model and independent review.</td></tr>
-            <tr><td class="metric">Horizontal scale</td><td class="how">Beyond the reference topology — requires shared credential/rate-limit stores before running multiple replicas.</td></tr>
-            <tr><td class="metric">Certificate semantics</td><td class="how">Proves integrity and authorship; it does not prove sender identity. Pair it with your own trust anchor.</td></tr>
-          </tbody>
-        </table>
-
-        <div class="compare reveal" style="margin-top:32px">
-          <div class="compare__cell">
-            <p class="compare__k">Tested in CI</p>
-            <p class="compare__t">Enforcement behavior</p>
-            <p class="compare__d">522 tests: casting refusals, rule holds, footing gates, REJECT_RUN parity, publication atomicity, recovery, tamper detection, RBAC, sandboxing, rate limits. Bandit zero-findings; OSV-clean dependency audit.</p>
-          </div>
-          <div class="compare__cell">
-            <p class="compare__k">Designed, internally verified</p>
-            <p class="compare__t">Performance envelope</p>
-            <p class="compare__d">Throughput, latency, and peak-RSS figures from committed harnesses on reference hardware. Reproducible by you; not a guarantee for your environment.</p>
-          </div>
-          <div class="compare__cell">
-            <p class="compare__k">Requires your validation</p>
-            <p class="compare__t">Production readiness</p>
-            <p class="compare__d">Real-collector OpenTelemetry export, multi-replica operation, live billing integration, and your own threat model. Not established at 2.0.0 — the pilot exists to measure them.</p>
-          </div>
-          <div class="compare__cell compare__cell--own">
-            <p class="compare__k">Where to verify</p>
-            <p class="compare__t">Every claim is inspectable</p>
-            <p class="compare__d">Harnesses in <code>benchmarks/</code>, methodology in <code>docs/EVALUATION.md</code>, threat boundaries in <code>docs/THREAT_MODEL.md</code>, operational gates in <code>docs/production/RELEASE_CHECKLIST.md</code>.</p>
-          </div>
-        </div>
-
-        <div class="hero__actions reveal" style="margin-top:26px">
-          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/production/RELEASE_CHECKLIST.md" target="_blank" rel="noopener">Release checklist</a>
-          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/THREAT_MODEL.md" target="_blank" rel="noopener">Threat model</a>
-          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/production/OPERATIONS_RUNBOOK.md" target="_blank" rel="noopener">Operations runbook</a>
-        </div>
-      </div>
-    </section>
-
-    <!-- ======================================================= start -->
-    <section class="section section--alt" id="evaluate">
-      <div class="shell" style="max-width:820px;text-align:center">
-        <p class="sec-label">Next step</p>
-        <h2 class="sec-title" style="margin-top:0">Start a technical evaluation.</h2>
-        <p class="sec-desc" style="margin:0 auto 28px">
-          Two minutes to a real run, ten minutes to a real decision. No registration, no contact
-          form — the quickstart is the evaluation.
+        <p class="eyebrow" style="justify-content:center">Next step</p>
+        <h2 class="cta__title" style="margin-top:14px">Put a boundary in front of one feed.</h2>
+        <p class="cta__desc">
+          Run the demo, then run the quickstart against a feed you own. Start with one contract, one
+          acceptance criterion, and a rollback path.
         </p>
-        <div class="hero__actions" style="justify-content:center;margin-top:26px">
-          <a class="btn btn--primary" href="#quickstart">Run the quickstart</a>
-          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/EVALUATION.md" target="_blank" rel="noopener">Read the evaluation guide</a>
-          <a class="btn" href="/playground">Try the playground</a>
+        <div class="cta__actions">
+          <a class="btn btn--primary" href="#demo">Run the live demo</a>
+          <a class="btn" href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/EVALUATION.md" target="_blank" rel="noopener">Evaluation guide</a>
+          <a class="btn" href="/playground">Open the playground</a>
         </div>
-        <p class="table__note" style="margin-top:22px">
-          Pilot conversations, deployment questions, and integration reviews: open a
-          <a href="https://github.com/Pulkit-Handa/data_shell/discussions" target="_blank" rel="noopener">GitHub discussion</a>
-          once you have run the demo — that is the point at which a conversation is useful.
+        <p class="cta__note">
+          Deployment questions and pilot reviews belong in
+          <a href="https://github.com/Pulkit-Handa/data_shell/issues" target="_blank" rel="noopener" style="color:var(--text-2);text-decoration:underline;text-underline-offset:2px">GitHub Issues</a>
+          — after you have run the demo.
         </p>
       </div>
     </section>
   </main>
 
-  <footer class="site-footer">
-    <div class="shell site-footer__inner">
-      <div class="wordmark">
-        <svg class="wordmark__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <rect x="1" y="1" width="22" height="22" rx="6" fill="#0a0a0b"/>
-          <path d="M7 12h10M12 7v10" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>
-        </svg>
-        Data Shell
+  <!-- ============================================================== footer -->
+  <footer class="footer">
+    <div class="shell footer__inner">
+      <div class="footer__brand">
+        <span class="brand">
+          <svg class="brand__mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="1" y="1" width="22" height="22" rx="6"/>
+            <path d="M7 12h10M12 7v10" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+          Data Shell
+        </span>
+        <p class="footer__note">Open source · Apache-2.0 · Self-hosted</p>
       </div>
-      <nav class="site-footer__links">
+      <nav class="footer__links" aria-label="Footer">
         <a href="/playground">Playground</a>
         <a href="https://github.com/Pulkit-Handa/data_shell" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/README.md" target="_blank" rel="noopener">Docs</a>
+        <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/README.md" target="_blank" rel="noopener">Documentation</a>
         <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/EVALUATION.md" target="_blank" rel="noopener">Evaluation guide</a>
         <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/THREAT_MODEL.md" target="_blank" rel="noopener">Threat model</a>
         <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/docs/production/OPERATIONS_RUNBOOK.md" target="_blank" rel="noopener">Operations</a>
         <a href="https://github.com/Pulkit-Handa/data_shell/blob/main/LICENSE" target="_blank" rel="noopener">Apache-2.0</a>
       </nav>
-      <p class="site-footer__note">each and everywhere</p>
     </div>
   </footer>
 
-  <script src="/static/vendor/gsap.min.js"></script>
-  <script src="/static/vendor/ScrollTrigger.min.js"></script>
   <script src="/static/js/engine-console.js"></script>
-  <script src="/static/js/site.js"></script>
-  <script src="/static/js/motion.js"></script>
+  <script src="/static/js/theme.js"></script>
+  <script src="/static/js/landing.js"></script>
   <script src="/static/js/demo.js"></script>
-  <script src="/static/js/calculator.js"></script>
 </body>
 </html>
