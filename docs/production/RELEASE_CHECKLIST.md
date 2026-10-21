@@ -93,6 +93,7 @@
 | Health checks | **LOCAL-VERIFIED** | `/health` and `/ready` endpoints |
 | Metrics endpoint | **LOCAL-VERIFIED** | Authenticated `/metrics` |
 | Alert rules and metrics defined | **LOCAL-VERIFIED** | `deploy/prometheus-alerts.yaml`; `scripts/alert_signal_test.py` — 10/10 signals verified |
+| OpenTelemetry export reaches a real collector | **LOCAL-VERIFIED** | `scripts/run_otel_collector_e2e.sh` (CI job `otel-collector-e2e`) — the collector receives the gateway's span over OTLP/gRPC |
 | Rollback procedure | **LOCAL-VERIFIED** | `DEPLOYMENT_VERIFICATION.md` § 13 + `INCIDENT_RESPONSE.md` |
 | **Alert delivery to a human** | **TARGET — BLOCKED** | A generated signal is not a delivered alert. Confirm receipt in the on-call channel. |
 | **Rollback rehearsal** | **TARGET — BLOCKED** | Redeploy the previous image on the target host and confirm readiness. |

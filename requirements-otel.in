@@ -1,0 +1,23 @@
+# Optional tracing extra (`datashell[otel]`) — hash-pinned for the end-to-end
+# OpenTelemetry collector check (scripts/run_otel_collector_e2e.sh).
+#
+# The core install and the development environment deliberately do NOT carry the
+# tracing SDK: tracing stays off until an operator asks for it. This lockfile
+# exists so the CI job that runs against a real collector installs the exact,
+# hash-verified dependency set the `otel` extra declares — no floating
+# resolution, no surprise upgrade between runs.
+#
+# The two pins that overlap `requirements-dev.lock` (opentelemetry-api and
+# typing-extensions) are held at the versions the development lockfile
+# already resolves, so both lockfiles can be installed together without a
+# resolution conflict.
+#
+# Regenerate with:
+#
+#    pip-compile --generate-hashes \
+#        --output-file=requirements-otel.lock requirements-otel.in
+#
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-grpc==1.45.1
+opentelemetry-api==1.45.1
+typing-extensions==4.16.0

@@ -17,7 +17,7 @@ This document is the **authoritative source** for all Data Shell configuration. 
 | `ENVIRONMENT` | `development` | Environment mode. Production values: `production`, `prod`, `live`. Development values: `development`, `dev`, `local`. |
 | `LOG_LEVEL` | `INFO` | Logging verbosity. |
 | `LOG_FORMAT` | `structured` | Log line format: `structured` (one JSON object per line for log shippers) or `pretty` (`docker logs -f`-friendly human lines with `key=value` context). Must be one of the two. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | *(unset)* | Standard OpenTelemetry endpoint. When set **and** the `datashell[otel]` extra is installed, every gateway request is traced (server spans named after the resolved route, status attributes, batched OTLP/gRPC export). Without the env or the extra, tracing is a no-op — the decision lives in configuration, not code. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | *(unset)* | Standard OpenTelemetry endpoint. When set **and** the `datashell[otel]` extra is installed, every gateway request is traced (server spans named after the resolved route, status attributes, batched OTLP/gRPC export). The pinned FastAPI contributes its own `fastapi.*` spans to the same trace. Without the env or the extra, tracing is a no-op — the decision lives in configuration, not code. |
 | `DATASHELL_OTEL_SERVICE_NAME` | `datashell` | `service.name` resource attribute for exported traces (only meaningful with `OTEL_EXPORTER_OTLP_ENDPOINT`). |
 | `DATASHELL_STORAGE_ROOT` | `.` | Root directory for all persistent storage. All other paths derive from this. |
 | `DATASHELL_DATA_DIR` | `<storage_root>/data` | Directory for uploaded source files. |
@@ -27,6 +27,10 @@ This document is the **authoritative source** for all Data Shell configuration. 
 | `DATASHELL_QUARANTINE_DIR` | `<storage_root>/output/quarantine` | Root directory for quarantine artifacts. |
 | `DATASHELL_TMP_DIR` | System temp | Scratch space for spooled uploads and DuckDB spills. Point at durable storage volume. |
 | `TMPDIR` | — | Fallback for `DATASHELL_TMP_DIR` if not set. |
+
+The tracing half of the configuration is verifiable: `scripts/run_otel_collector_e2e.sh`
+starts a real collector, points the gateway at it, and asserts the exported
+span arrives. The same check runs in CI as the `otel-collector-e2e` job.
 
 ### 1.2 Security Credentials
 
