@@ -16,7 +16,7 @@ are required for local development.
 - The repository checked out locally
 
 ```bash
-pip install -e .        # or: pip install datashell, or datashell[all] for every extra
+pip install -e ".[all]"    # the package is not yet published to PyPI under this name
 ```
 
 ---

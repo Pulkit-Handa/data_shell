@@ -1,6 +1,6 @@
-# Data Shell — Enterprise Perimeter Gateway
+# Data Shell — Contract-Driven Boundary Gateway
 
-[![Tests](https://img.shields.io/badge/tests-522%20passing-brightgreen.svg)]()
+[![CI](https://github.com/Pulkit-Handa/data_shell/actions/workflows/ci.yml/badge.svg)](https://github.com/Pulkit-Handa/data_shell/actions/workflows/ci.yml)
 [![Security](https://img.shields.io/badge/security-hardened%20RBAC%20%2B%20sandboxed-blueviolet.svg)]()
 [![Cryptography](https://img.shields.io/badge/crypto-Ed25519%20%2B%20HMAC--SHA256-blue.svg)]()
 [![Telemetry](https://img.shields.io/badge/telemetry-Prometheus%20metrics-orange.svg)]()
@@ -9,7 +9,7 @@
 
 > **"Bad data never lands, and never leaves."**
 
-**Data Shell** is a contract-driven perimeter gateway that enforces data quality *at the boundary* — checking partner/vendor feeds before they land in internal systems (inbound), and validating regulatory/partner submissions before they are filed (outbound).
+**Data Shell** is a contract-driven publication boundary for external data — checking partner/vendor feeds before they land in internal systems (inbound), and validating regulatory/partner submissions before they are filed (outbound).
 
 It is a **write gate, not a report**. Rejected records are never published. A four-stage pipeline casts and validates every record, a zero-deficit reconciliation gate refuses to publish unless every input row is accounted for, and a successful delivery is committed atomically and bound to a signed, independently verifiable certificate. Every terminal outcome is written to a durable forensic ledger.
 
@@ -35,7 +35,7 @@ it delivered is exactly what it validated**.
 3. **The boundary ships as a system.** GX is a library you wire into a pipeline
    program you also have to build, secure, and audit. Data Shell ships that
    pipeline side as an API gateway: key-based roles and capabilities, upload
-   size/format refusals, Prometheus metrics, a signed run ledger, and a
+   size/format refusals, Prometheus metrics, a durable run ledger, and a
    production console — with the same engine available as a library
    (`DataShellPipeline`) and pluggable rule checks.
 4. **Honest trade-off.** GX has a far larger expectation ecosystem, profiling,
@@ -53,9 +53,14 @@ it delivered is exactly what it validated**.
 
 ![Data Shell quickstart](docs/demo.gif)
 
+> The `datashell` name on PyPI currently belongs to an unrelated project. Install
+> from this repository until this package is published under its own name.
+
 ```bash
-pip install datashell          # core enforcement engine (polars + pyarrow only)
-pip install "datashell[all]"   # + HTTP gateway, DuckDB batch rules, billing adapter
+git clone https://github.com/Pulkit-Handa/data_shell.git
+cd data_shell
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[all]"        # or `pip install -e .` for the engine only
 datashell doctor               # report which capabilities the environment has
 datashell demo                 # refuse poisoned rows, publish clean ones, detect tampering
 ```
@@ -208,15 +213,22 @@ runbook/SIEM endpoint as a signed `run.completed` event (HMAC-SHA256 over
 `timestamp.body`, with bounded retries). Emission is best-effort and can never fail a run.
 
 ### 4. Multi-tenant RBAC & physical isolation
-Four roles (`ADMIN`, `DATA_ENGINEER`, `PRODUCER`, `AUDITOR`) and six capabilities.
+Four roles (`ADMIN`, `DATA_ENGINEER`, `PRODUCER`, `AUDITOR`) and nine capabilities spanning
+contracts, enforcement, audit, metrics, settlement, and billing.
 Delivery roots are partitioned under `output/tenants/<tenant_id>/`; cross-tenant
 delivery attempts, cross-tenant certificate reads, and production temporary-directory
 writes are rejected with an explicit denial.
 
-### 5. Bounded memory and disk at scale
-The out-of-core streaming engine (`run_streaming`) streams Parquet, CSV, and
-JSONL/NDJSON in configurable micro-batches so application memory stays bounded by the
-batch size, not the file size. The **built-in upload ceiling is 20 GiB**, and the
+### 5. Streaming backend and resource envelope
+The streaming backend (`run_streaming`) reads Parquet, CSV, and JSONL/NDJSON in
+configurable micro-batches and flushes admission, rule evaluation, and staged output per
+batch. It is **not a constant-memory guarantee** on this build: measured peak RSS grows
+with the number of rows processed, and format matters. Reference-machine runs of 5M rows
+peaked at ~857 MiB for Parquet and ~3.0 GiB for CSV, where the strict per-row caster runs
+to preserve exact rejection diagnostics. Convert large CSV feeds to Parquet where
+possible, and measure your own envelope before sizing hosts (see `docs/SCALING.md`).
+
+The **built-in upload ceiling is 20 GiB**, and the
 request-body limit derives from it automatically. A run preflights free space and
 refuses to start (rather than failing mid-run) when the storage volume cannot hold its
 transient footprint. `STREAM_AUTO_THRESHOLD_BYTES` (default 64 MiB) selects streaming
@@ -230,7 +242,7 @@ Real-time telemetry at `/metrics`: `datashell_rows_read_total`,
 rule IDs are excluded from metric labels to avoid cardinality blow-up and data leakage.
 
 ### 7. Orchestration integrations
-A local CLI (`datashell run|validate-contract|verify|ledger|demo|contract|settlement`) and an
+A local CLI (`datashell run|validate-contract|verify|ledger|demo|rules|benchmark|doctor|contract|settlement`) and an
 Apache Airflow provider (`integrations/airflow`) with `DataShellEnforceOperator` (gateway API)
 and `DataShellLocalEnforceOperator` (CLI, for multi-gigabyte inputs on the worker).
 
@@ -256,7 +268,9 @@ python examples/settlement_demo.py                   # 1M rows → USD 49,250.00
 Billing providers are an abstraction: the default **dry-run** adapter is offline and
 deterministic; an opt-in **Stripe** adapter creates *draft* invoices only
 (`auto_advance=false`), records a timeout as `UNRESOLVED` rather than "not created", and
-refuses blind retries. Read more in
+refuses blind retries. The Stripe adapter is exercised against a faked HTTP transport; it
+has **not** been run against live Stripe test-mode credentials, and no code path moves
+money. Read more in
 [docs/SETTLEMENT.md](docs/SETTLEMENT.md) and
 [docs/SETTLEMENT_OPERATIONS.md](docs/SETTLEMENT_OPERATIONS.md).
 
@@ -268,7 +282,7 @@ refuses blind retries. Read more in
 ```bash
 pip install --require-hashes -r requirements-dev.lock   # hash-pinned dependency set
 pip install -e .                                        # the package itself
-pytest -q                                               # 466 tests in tests/, plus 9 Airflow provider tests
+pytest -q                                               # 522 tests in tests/, plus 9 Airflow provider tests
 ```
 The lockfiles are the reproducible dependency sets used by CI and the container images.
 Regenerate them on the lowest supported interpreter (3.11), not the developer's.
@@ -300,7 +314,9 @@ in production.
 
 ## Deploy
 
-* **Docker Compose:** `docker compose up --build` (persistent volume, non-root container).
+* **Docker Compose:** `cp .env.example .env`, replace the required secrets and
+  `ALLOWED_ORIGINS`, then `docker compose up --build` (persistent volume, non-root
+  container). Compose refuses to start with placeholders.
 * **Render (demo UI):** click **New + → Blueprint** and select the repository;
   `render.yaml` serves the landing page + interactive playground on the free plan.
 * **Render (gateway):** `render-api.yaml` is the hardened API blueprint (120 GB disk,
@@ -350,9 +366,9 @@ datashell benchmark --rows 1000000             # synthetic feed, JSON with --jso
 
 The harnesses assert expected delivered counts and inspect the resulting files, so a
 "fast" run that silently drops rows fails rather than reporting a flattering number.
-Separately, the out-of-core streaming path has been exercised end-to-end on a
-20-million-row CSV with a peak RSS of roughly 369 MB, confirming that application
-memory stays bounded by the streaming batch size rather than the input size.
+Streaming memory is workload-dependent, not constant: reference-machine runs of 5M rows
+peaked at ~857 MiB for Parquet and ~3.0 GiB for CSV. See `docs/SCALING.md` for the
+measured envelope, the Parquet-versus-CSV trade-off, and sizing guidance.
 
 ---
 

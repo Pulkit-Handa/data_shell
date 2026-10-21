@@ -5,8 +5,8 @@ approver who reviews it.
 
 **Product status at 2.0.0:** controlled-pilot candidate. The enforcement
 engine, reconciliation, publication, recovery, and certificate stack are
-implemented and covered by 522 automated tests (main suite plus the Airflow
-provider). The reference topology is a single replica with process-local
+implemented and covered by 531 automated tests (522 in the main suite plus 9
+Airflow provider tests). The reference topology is a single replica with process-local
 limits. Horizontal scale, shared credential stores, and real-collector
 OpenTelemetry export are documented as prerequisites, not features (see
 [Known limitations](#known-limitations-and-open-items)). Nothing here is a
@@ -36,7 +36,7 @@ DuckDB batch rules, billing adapter, and OpenTelemetry are extras.
 ```bash
 git clone https://github.com/Pulkit-Handa/data_shell
 cd data_shell
-pip install -e .            # or: pip install datashell
+pip install -e ".[all]"     # the package is not yet published to PyPI under this name
 datashell doctor            # reports which capabilities this environment has
 ```
 
@@ -159,7 +159,7 @@ your existing landing / orchestration (storage, Airflow, ...)
 
 - **Retries and alerts stay yours.** Data Shell returns an exit code and a
   JSON summary; your scheduler decides what to do with them. The Airflow
-  provider (`pip install datashell-airflow`) is a thin operator wrapper over
+  provider (`pip install -e integrations/airflow`; not yet on PyPI) is a thin operator wrapper over
   the same CLI.
 - **The gateway is optional.** If you prefer HTTP, the authenticated gateway
   (`datashell[server]`) exposes the same engine with RBAC, rate limits, and
@@ -221,7 +221,7 @@ A pilot is one narrowly scoped workflow, not a platform migration.
 
 ---
 
-Next steps: [README](../../README.md) ·
-[Scaling surfaces](../SCALING.md) · [Threat model](../THREAT_MODEL.md) ·
-[Operations runbook](../production/OPERATIONS_RUNBOOK.md) ·
-[Release checklist](../production/RELEASE_CHECKLIST.md)
+Next steps: [README](../README.md) ·
+[Scaling surfaces](SCALING.md) · [Threat model](THREAT_MODEL.md) ·
+[Operations runbook](production/OPERATIONS_RUNBOOK.md) ·
+[Release checklist](production/RELEASE_CHECKLIST.md)
