@@ -180,3 +180,26 @@ def test_streaming_execution_persists_metrics_and_fires_metric_drift(tmp_path, m
         d for d in second.audit_certificate["drift_evaluations"] if "avg_amount" in d["rule_id"]
     ]
     assert metric_checks and metric_checks[0]["passed"] is False
+
+
+def test_parquet_metrics_match_in_memory_metrics_across_row_batches(tmp_path):
+    """The batched parquet scanner must not change metric values."""
+    import polars as pl
+
+    from datashell.engines.metrics import compute_metrics, compute_metrics_from_parquet
+
+    frame = pl.DataFrame(
+        {
+            "id": [1, 2, 3, None, 5],
+            "amount": [10.0, None, 30.0, 40.0, 50.0],
+            "all_null_amount": [None, None, None, None, None],
+            "currency": ["USD", None, "EUR", "GBP", "USD"],
+        }
+    )
+    source = tmp_path / "metrics.parquet"
+    frame.write_parquet(source)
+
+    expected = compute_metrics(frame)
+    actual = compute_metrics_from_parquet(source, max_cells_per_batch=3)
+
+    assert actual == pytest.approx(expected)

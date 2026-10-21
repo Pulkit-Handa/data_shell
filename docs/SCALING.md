@@ -17,7 +17,7 @@ out-of-core micro-batches is configuration, not caller code.
 | # | Surface | Variable(s) | Effect |
 |---|---|---|---|
 | 1 | Ingest backend selection | `DATASHELL_INGEST_MODE`, `STREAM_AUTO_THRESHOLD_BYTES` | in-memory vs out-of-core micro-batches |
-| 2 | Micro-batch size | `STREAM_CHUNK_ROWS` | streaming granularity (chunk scratch; see the measured envelope below) |
+| 2 | Micro-batch size | `STREAM_CHUNK_ROWS`, `STREAM_CHUNK_CELL_BUDGET` | streaming granularity (chunk scratch; the cell budget caps wide-schema batches) |
 | 3 | SQL evaluation parallelism | `DATASHELL_DUCKDB_THREADS`, `DUCKDB_MEMORY_LIMIT` | batch-rule throughput and spill |
 | 4 | Delivered artifact codec | `DATASHELL_DELIVERY_COMPRESSION` | delivered size vs CPU |
 | 5 | Concurrent work & disk | `MAX_CONCURRENT_RUNS`, `MAX_CONCURRENT_REQUESTS`, `DATASHELL_DISK_HEADROOM_MULTIPLIER`, `MIN_FREE_DISK_BYTES` | how many feeds at once, and the staging footprint |
@@ -82,8 +82,28 @@ all flush per micro-batch, one Parquet row group each.
 write batch size for the streaming backend's incremental Parquet writers.
 Larger chunks amortize per-batch dispatch across more rows (throughput ↑,
 RSS ↑); smaller chunks lower the memory ceiling for constricted nodes.
-250 000 rows/batch on wide schemas ≈ 100–200 MB of columnar scratch — keep
-total peak ≤ `DUCKDB_MEMORY_LIMIT` + chunk scratch.
+
+Rows alone are not a memory bound. The runner also caps the effective batch at
+`STREAM_CHUNK_CELL_BUDGET / declared_column_count` (default 1,000,000 cells).
+For a 100-column feed the effective batch is 10,000 rows even if
+`STREAM_CHUNK_ROWS=100000`; for a 4-column feed the 100,000-row default still
+applies. Set `STREAM_CHUNK_CELL_BUDGET=0` only when you have deliberately sized
+the host for the literal row chunk.
+
+The measured wide-schema envelope on the reference host (1 GiB source, 100
+columns, 32-byte strings) is:
+
+| Format | Wall time | Peak RSS | Footing |
+| --- | ---: | ---: | --- |
+| CSV | ~62 s | ~1.1 GiB | MATCHED, 0 unaccounted |
+| Parquet | ~105 s | ~2.1 GiB | MATCHED, 0 unaccounted |
+
+The Parquet run falls to ~1.9 GiB with `MIMALLOC_PURGE_DELAY=0`; the default
+number is the conservative one. Budget at least 3 GiB of free RAM per active
+wide-schema Parquet run. A 4 GiB node can run a wide feed with
+`STREAM_CHUNK_CELL_BUDGET=500000` (5,000 rows at 100 columns), but that
+combination is a deployment choice, not a measured result. The earlier
+unmeasured "250,000 wide rows ≈ 100–200 MB" guidance has been removed.
 
 ## 5. Batch-rule (SQL) evaluation scale
 
@@ -132,11 +152,12 @@ stay truthful regardless of codec.
   body limit follows automatically.
 
 Measured envelope on the reference host (see
-`production/BENCHMARK_PROCEDURE.md`): a 1 GiB CSV enforces with **~753 MB
-peak RSS**, correct footing, and 0 unaccounted rows; the gateway sustained
-**20.9 req/s at concurrency 2** (P50 78.6 ms / P95 183.9 ms / P99 411 ms). Do
-not extrapolate "50 GB in memory" from the default upload ceiling — § 8 tells
-you how to measure *your* envelope.
+`production/BENCHMARK_PROCEDURE.md`): a 1 GiB narrow CSV enforces with
+**~837 MB peak RSS**, and a 1 GiB 100-column feed uses **~1.1 GiB (CSV)** or
+**~2.1 GiB (Parquet)**, both with correct footing and 0 unaccounted rows. The
+gateway sustained **20.9 req/s at concurrency 2** (P50 78.6 ms / P95 183.9 ms
+/ P99 411 ms). Do not extrapolate "50 GB in memory" from the default upload
+ceiling — § 8 tells you how to measure *your* envelope.
 
 ## 8. Worked examples
 
@@ -147,6 +168,7 @@ DATASHELL_STORAGE_ROOT=/srv/datashell
 DATASHELL_TMP_DIR=/srv/datashell/tmp          # same block volume as root
 DATASHELL_INGEST_MODE=stream                   # 50 GiB ≫ RAM headroom
 STREAM_CHUNK_ROWS=250000
+STREAM_CHUNK_CELL_BUDGET=5000000               # 50k rows at 100 cols; measure RSS first
 DATASHELL_DUCKDB_THREADS=16                    # rule evaluation only
 DUCKDB_MEMORY_LIMIT=16GB                       # ~12 % of RAM
 DATASHELL_DELIVERY_COMPRESSION=zstd
@@ -164,6 +186,8 @@ env:
     value: stream
   - name: STREAM_CHUNK_ROWS
     value: "50000"
+  - name: STREAM_CHUNK_CELL_BUDGET
+    value: "500000"               # 5,000 rows at 100 columns
   - name: DATASHELL_DUCKDB_THREADS
     value: "2"
   - name: DUCKDB_MEMORY_LIMIT

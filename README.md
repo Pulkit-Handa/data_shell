@@ -347,6 +347,7 @@ placeholder or weak secrets, wildcard origins, and untrusted proxy settings.
 | `DUCKDB_MEMORY_LIMIT` | DuckDB operator memory envelope | `1GB` |
 | `STREAM_AUTO_THRESHOLD_BYTES` | Size at which streaming starts | 64 MiB |
 | `STREAM_CHUNK_ROWS` | Rows per streaming micro-batch | `100000` |
+| `STREAM_CHUNK_CELL_BUDGET` | Maximum cells per streaming micro-batch; caps rows at budget ÷ declared columns (`0` disables) | `1000000` |
 | `DRIFT_ENABLED` | Compare feeds against historical baselines | `false` |
 | `DATASHELL_HISTORY_RETENTION_DAYS` | Ledger retention; `0` keeps forever | `0` |
 
@@ -488,11 +489,22 @@ Reference-machine observations (single node, 13 GB RAM):
 | In-memory, 1M rows | ~3.3M rows/s, ~0.7–0.8 GB peak RSS |
 | Streaming, 5M rows of Parquet | ~1–2 s, ~1 GB peak RSS |
 | Streaming, 5M rows of CSV | ~30 s, ~3 GB peak RSS |
+| Streaming, 1 GiB Parquet, 100 columns × 32 B strings | ~105 s, ~2.1 GB peak RSS |
+| Streaming, 1 GiB CSV, 100 columns × 32 B strings | ~62 s, ~1.1 GB peak RSS |
 
 The CSV cost is intentional: CSV columns arrive as strings, so the strict per-row
 caster runs to preserve exact rejection diagnostics. Convert very large CSV feeds to
 Parquet where possible. **These are observations, not capacity guarantees.** Memory
 grows with rows processed; the streaming path is not constant-memory.
+
+Wide-schema feeds are now measured, not inferred. At the 1 GiB cap, a 100-column
+schema with 32-byte strings completed in both formats with matched footing and zero
+unaccounted rows. Peak RSS was ~1.1 GiB for CSV and ~2.1 GiB for Parquet, so budget
+at least 3 GiB of free RAM per active wide-schema Parquet run. The effective
+micro-batch is capped by `STREAM_CHUNK_CELL_BUDGET` (1,000,000 cells by default —
+10,000 rows for a 100-column feed), even when `STREAM_CHUNK_ROWS` is larger.
+See the [benchmark procedure](docs/production/BENCHMARK_PROCEDURE.md#4-procedure-b--large-file-capacity-the-1-gib-cap)
+for the raw measurements and caveats.
 
 Measure your own envelope before sizing a host:
 
@@ -536,7 +548,7 @@ root filesystem. See [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
 The Airflow provider has its own test suite under
 [`integrations/airflow/tests`](integrations/airflow/tests). The main test suite
-currently contains 522 tests; the provider suite contains 9.
+currently contains 525 tests; the provider suite contains 9.
 
 If you change the OpenAPI surface, regenerate the committed document with
 `python scripts/export_openapi.py --out docs/openapi.yaml`. If you change release
@@ -562,7 +574,7 @@ production.
 | Live Stripe billing | Not exercised. The adapter is draft-invoice-only; no code path moves money. |
 | OpenTelemetry collector | Activation path tested in-process; no end-to-end collector run in CI. |
 | PyPI distribution | Not published under this name; install from source. |
-| Wide-schema capacity | Unmeasured; the published capacity envelope uses a narrow schema. |
+| Wide-schema capacity | Measured for 100-column, 32-byte-string feeds at 1 GiB (CSV and Parquet). Wider schemas, wider cell values, and larger wide files remain unmeasured. |
 | Consumer contract | A consumer that reads the delivery target by path without resolving `<target>.generation.json` can observe a superseded generation. |
 
 The full blocker list, owners, and evidence status are maintained in

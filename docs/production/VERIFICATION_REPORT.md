@@ -1,6 +1,7 @@
 # Data Shell — Verification Report
 
 **Date:** 2026-10-19  
+**Last updated:** 2026-10-21 (wide-schema capacity evidence)
 **Branch:** `data_delivery-certificate`  
 **Starting Commit:** `0ae5316`
 
@@ -238,6 +239,7 @@ $ bandit -q -r datashell web -c .bandit -ll
 | Small file (1,000 rows) | `test_small_file_1000_rows` | PASS |
 | Medium file (10,000 rows) | `test_medium_file_10000_rows` | PASS |
 | Large file (100,000 rows) | `test_large_file_100000_rows` | PASS |
+| Wide-schema capacity (1 GiB, 100 columns × 32 B, CSV and Parquet) | `benchmarks/large_file_capacity_test.py --columns 100 --string-width 32` | PASS — footing matched, 0 unaccounted; CSV 1,115.3 MiB peak, Parquet 2,127.3 MiB peak |
 | Resource limits enforced | `test_concurrent_runs_bounded` | PASS |
 
 ---

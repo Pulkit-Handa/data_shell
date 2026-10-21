@@ -13,7 +13,7 @@ import pytest
 
 pytest.importorskip("polars")
 
-from datashell.contract.models import DataContract
+from datashell.contract.models import DataContract, SchemaColumn
 from datashell.pipeline.runner import DataShellPipeline
 
 
@@ -149,3 +149,33 @@ class TestResourceLimits:
         """Stream chunk size is positive."""
         from datashell.core.config import settings
         assert settings.stream_chunk_rows >= 1
+        assert settings.stream_chunk_cell_budget >= 0
+
+    def test_wide_schema_caps_stream_chunk_rows(self, tmp_path, monkeypatch):
+        """A wide schema cannot inherit the full narrow-schema row chunk."""
+        from datashell.core.config import settings
+
+        monkeypatch.setattr(settings, "stream_chunk_cell_budget", 1_000_000)
+        contract = _make_contract(tmp_path)
+        contract.spec.sources[0].schema_ = [
+            SchemaColumn(name=f"c{i}", polars_type="Utf8", nullable=False)
+            for i in range(100)
+        ]
+        pipeline = DataShellPipeline(contract)
+
+        assert pipeline._effective_chunk_size(None) == 10_000
+        assert pipeline._effective_chunk_size(5_000) == 5_000
+
+    def test_cell_budget_can_be_disabled(self, tmp_path, monkeypatch):
+        """Operators can opt out and use STREAM_CHUNK_ROWS literally."""
+        from datashell.core.config import settings
+
+        monkeypatch.setattr(settings, "stream_chunk_cell_budget", 0)
+        contract = _make_contract(tmp_path)
+        contract.spec.sources[0].schema_ = [
+            SchemaColumn(name=f"c{i}", polars_type="Utf8", nullable=False)
+            for i in range(100)
+        ]
+        pipeline = DataShellPipeline(contract)
+
+        assert pipeline._effective_chunk_size(None) == settings.stream_chunk_rows

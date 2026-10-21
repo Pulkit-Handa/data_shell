@@ -1,7 +1,7 @@
 # Data Shell — Release Checklist
 
-**Version:** 1.1
-**Date:** 2026-10-20
+**Version:** 1.2
+**Date:** 2026-10-21
 **Target:** Controlled production pilot (Target A)
 
 > **Status legend.** **LOCAL-VERIFIED** = executed in the development
@@ -81,8 +81,9 @@
 | Benchmark harness | **LOCAL-VERIFIED** | `test_capacity.py`; `benchmarks/large_file_capacity_test.py` |
 | Resource limits enforced | **LOCAL-VERIFIED** | Upload, concurrency, disk limits |
 | Streaming auto-threshold | **LOCAL-VERIFIED** | `STREAM_AUTO_THRESHOLD_BYTES` |
-| 1 GiB / 27.55M rows capacity run | **LOCAL-VERIFIED** | 173.14 s, ~159k rows/s, 752.8 MiB peak RSS, footing matched, 0 unaccounted |
-| **Target-host capacity qualification** | **TARGET — BLOCKED** | Re-measure on the pilot host per `BENCHMARK_PROCEDURE.md` § 7; then set `MAX_UPLOAD_SIZE_BYTES` to the largest passing size. |
+| 1 GiB / 27.55M rows capacity run | **LOCAL-VERIFIED** | 121.88 s, ~226k rows/s, 837.2 MiB peak RSS, footing matched, 0 unaccounted |
+| 1 GiB / 100-column wide-schema runs | **LOCAL-VERIFIED** | CSV: 61.65 s, 1,115.3 MiB peak RSS; Parquet: 104.71 s, 2,127.3 MiB peak RSS (1,891.8 MiB with `MIMALLOC_PURGE_DELAY=0`); both footing matched, 0 unaccounted |
+| **Target-host capacity qualification** | **TARGET — BLOCKED** | Re-measure narrow and wide envelopes on the pilot host per `BENCHMARK_PROCEDURE.md` § 7; then set `MAX_UPLOAD_SIZE_BYTES` to the largest passing size. |
 
 ### Gate 7: Operations
 

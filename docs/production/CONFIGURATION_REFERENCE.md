@@ -62,7 +62,8 @@ This document is the **authoritative source** for all Data Shell configuration. 
 | `DATASHELL_DISK_HEADROOM_MULTIPLIER` | `2.0` | Multiplier for per-run free-space preflight. |
 | `DUCKDB_MEMORY_LIMIT` | `1GB` | Memory limit for DuckDB. Must be a positive size (e.g., `512MB`, `1GB`). |
 | `RATE_LIMIT_REQUESTS_PER_MINUTE` | `120` | Token bucket rate limit per API key. |
-| `STREAM_CHUNK_ROWS` | `100000` | Rows per micro-batch in streaming mode. Must be >= 1. |
+| `STREAM_CHUNK_ROWS` | `100000` | Rows per micro-batch in streaming mode. Must be >= 1. The effective batch may be smaller for wide schemas; see `STREAM_CHUNK_CELL_BUDGET`. |
+| `STREAM_CHUNK_CELL_BUDGET` | `1000000` | Maximum cells (rows × declared columns) per streaming micro-batch. Caps the effective rows at `budget / column_count`. Set to `0` to use `STREAM_CHUNK_ROWS` literally. Must be >= 0. |
 | `STREAM_AUTO_THRESHOLD_BYTES` | `67108864` (64 MiB) | Files at or above this size use streaming automatically. |
 | `DATASHELL_INGEST_MODE` | `auto` | Ingest backend policy: `auto` (promote by size), `memory` (always in-memory), `stream` (always out-of-core). Explicit CLI `--streaming`/`--no-streaming` or API request field beats this. |
 | `DATASHELL_DELIVERY_COMPRESSION` | `zstd` | Parquet codec for delivered targets and quarantine snapshots (`snappy`, `zstd`, `gzip`, `lz4`, `brotli`, `uncompressed`). One setting covers both in-memory (Polars) and streaming (pyarrow) writers. |
