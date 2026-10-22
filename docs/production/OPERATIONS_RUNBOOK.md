@@ -215,7 +215,41 @@ If certificate verification fails for a published artifact:
 
 ### 6.2 Alerts
 
-Import `deploy/prometheus-alerts.yaml` into Prometheus and configure alert routing.
+Import `deploy/prometheus-alerts.yaml` into Prometheus and configure alert
+routing for the metric-threshold rules (HTTP errors/latency, capacity, disk).
+
+The application also delivers the state-driven conditions directly to a
+human-operated webhook (`DATASHELL_ALERT_WEBHOOK_URL`):
+
+| Alert | Severity | Meaning |
+|---|---|---|
+| `DataShellPipelineFailures` | warning | a run failed before publishing |
+| `DataShellPendingLedgerEntries` | page | published artifacts are not reconciled in the ledger |
+| `DataShellPublicationRecoveryErrors` | page | startup recovery could not determine the committed generation |
+| `DataShellDeliveryVerification` | warning | synthetic check; no production condition |
+
+Delivery evidence and recoverable state:
+
+```bash
+# One JSON line per attempt, including the terminal outcome and HTTP status.
+tail -n 20 "$DATASHELL_OUTPUT_DIR/alerts/alert-deliveries.jsonl"
+
+# Alerts that have not yet been delivered. Do not delete these.
+find "$DATASHELL_OUTPUT_DIR/alerts/pending" -name 'alert_*.json'
+
+# Retry now; startup retries automatically.
+python -c "from datashell.core.alerts import retry_pending_alerts; print(retry_pending_alerts())"
+
+# Redacted configuration check (never prints the URL path or secret).
+python -c "from datashell.core.alerts import check_alert_configuration; print(check_alert_configuration())"
+```
+
+`datashell_alert_deliveries_total{outcome=...}` and
+`datashell_alert_delivery_pending` expose delivery health. A rising
+`not_configured` or `failed` outcome means the on-call channel is not receiving
+alerts: fix the webhook/secret and retry; do not silence the metric. Follow
+`DEPLOYMENT_VERIFICATION.md` § 11.5 when a receiver returns 401/403 (permanent
+auth failure) or 429/5xx (bounded retry).
 
 ### 6.3 Log Investigation
 

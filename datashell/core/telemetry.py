@@ -130,6 +130,25 @@ PUBLICATION_RECOVERY_JOURNALS = Gauge(
     "Publication journals recovered at the last startup recovery",
 )
 
+# Alert delivery is a separate lifecycle from run accounting: an alert can be
+# created correctly and still fail to reach a human. These metrics make that
+# distinction observable without putting alert IDs (unbounded cardinality) in
+# labels.
+ALERT_DELIVERIES_TOTAL = Counter(
+    "datashell_alert_deliveries_total",
+    "Alert delivery attempts by terminal outcome",
+    ["outcome"],
+)
+ALERT_DELIVERY_DURATION_SECONDS = Histogram(
+    "datashell_alert_delivery_duration_seconds",
+    "End-to-end alert delivery duration in seconds (including bounded retries)",
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0],
+)
+ALERT_DELIVERY_PENDING = Gauge(
+    "datashell_alert_delivery_pending",
+    "Alerts persisted locally whose delivery has not succeeded",
+)
+
 
 # ----------------- Structured Logging -----------------
 

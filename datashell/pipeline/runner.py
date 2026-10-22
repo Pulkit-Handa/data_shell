@@ -16,6 +16,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from datashell.contract.models import DataContract, QualityBehavior
+from datashell.core.alerts import build_failed_run_alert, emit_alert, emit_run_alerts
 from datashell.core.commit import (
     publish_transactionally,
     recover_pending_publications,
@@ -630,7 +631,7 @@ class DataShellPipeline:
                     certificate_digest=payload["certificate_digest"],
                     ledger_status="PENDING",
                 )
-        emit_run_event({
+        run_event = {
             "event": "run.completed",
             "run_id": run_id,
             "tenant_id": self.tenant_id,
@@ -652,11 +653,34 @@ class DataShellPipeline:
             "audit_path": str(audit_artifact_path) if audit_artifact_path else None,
             "target_path": outcome.target_path,
             "quarantine_path": outcome.quarantine_path,
-        })
+        }
+        emit_run_event(run_event)
+        # Alert delivery is a separate lifecycle from telemetry. The same
+        # terminal state that feeds the Prometheus rule feeds the human
+        # dispatcher, so the two cannot drift apart.
+        emit_run_alerts(run_event)
         return ledger_status
 
     def _record_failed_run(self, run_id: str, contract_name: str, error: BaseException) -> None:
         """Best-effort forensic entry for a run that failed before delivery."""
+        # Emit before the ledger bookkeeping: a failure to record history must
+        # never suppress the alert that a human needs to see.
+        try:
+            emit_alert(
+                build_failed_run_alert(
+                    run_id=run_id,
+                    tenant_id=self.tenant_id,
+                    contract_name=contract_name,
+                    contract_version=self.contract.metadata.version,
+                    error=error,
+                )
+            )
+        except Exception as alert_error:  # noqa: BLE001 - must not mask the run error
+            telemetry_logger.error(
+                "Failed-run alert dispatch could not be started",
+                run_id=run_id,
+                error_type=type(alert_error).__name__,
+            )
         try:
             if self.history_tracker.get_run(run_id, self.tenant_id):
                 return

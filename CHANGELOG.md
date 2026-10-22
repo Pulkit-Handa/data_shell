@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Alert delivery to a human-operated endpoint.** `DataShellPipelineFailures`,
+  `DataShellPendingLedgerEntries`, and `DataShellPublicationRecoveryErrors` are
+  now emitted by the normal pipeline failure/startup-recovery paths, not only
+  as Prometheus signals. Alerts are signed with HMAC-SHA256, include the alert
+  ID, severity, timestamp, source, condition, evidence, recommended action, and
+  runbook link, and are sent to `DATASHELL_ALERT_WEBHOOK_URL` with a bounded
+  timeout, retry budget, exponential backoff, and `Retry-After` support.
+  Delivery is durable (`<output_dir>/alerts/alert-deliveries.jsonl`), idempotent
+  (deterministic alert IDs), and recoverable (failed alerts remain in
+  `<output_dir>/alerts/pending/` and are retried at startup). New metrics:
+  `datashell_alert_deliveries_total`, `datashell_alert_delivery_duration_seconds`,
+  `datashell_alert_delivery_pending`.
+- **Executable alert-delivery verification.** `scripts/verify_alert_delivery.py`
+  drives a real failing run through the normal pipeline path, waits for the
+  actual transport outcome, and optionally sends a synthetic
+  `DataShellDeliveryVerification` alert. `--local-sink` proves the local
+  lifecycle/transport; configured-endpoint mode is the target O7 procedure.
+  Regression coverage is in `tests/test_alert_delivery.py` (31 tests). The
+  target endpoint/recipient gate remains outstanding; no target credentials or
+  recipient are included in this repository.
+
 ## [2.0.1] - 2026-10-22
 
 ### Added

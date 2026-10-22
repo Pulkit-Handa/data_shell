@@ -445,6 +445,30 @@ class EnterpriseSettings(BaseModel):
     webhook_timeout_seconds: float = Field(
         default_factory=lambda: float(os.getenv("DATASHELL_WEBHOOK_TIMEOUT_SECONDS", "5")))
 
+    # Human alert delivery. ``DATASHELL_ALERT_WEBHOOK_URL`` is an
+    # operator-controlled endpoint (a Slack/Teams incoming webhook or an
+    # incident-tool relay) that accepts the signed alert JSON documented in
+    # docs/production/DEPLOYMENT_VERIFICATION.md section 11. It is deliberately
+    # separate from the run-event webhook above: run events are operational
+    # telemetry, while these are actionable alerts that must be delivered and
+    # evidenced. The signing secret falls back to DATASHELL_HMAC_SECRET when
+    # no dedicated secret is configured.
+    alert_webhook_url: str | None = Field(
+        default_factory=lambda: (os.getenv("DATASHELL_ALERT_WEBHOOK_URL", "") or "").strip() or None
+    )
+    alert_webhook_secret: str = Field(
+        default_factory=lambda: (os.getenv("DATASHELL_ALERT_WEBHOOK_SECRET", "") or "").strip()
+    )
+    alert_timeout_seconds: float = Field(
+        default_factory=lambda: float(os.getenv("DATASHELL_ALERT_TIMEOUT_SECONDS", "5"))
+    )
+    alert_max_attempts: int = Field(
+        default_factory=lambda: int(os.getenv("DATASHELL_ALERT_MAX_ATTEMPTS", "3"))
+    )
+    alert_backoff_seconds: float = Field(
+        default_factory=lambda: float(os.getenv("DATASHELL_ALERT_BACKOFF_SECONDS", "1"))
+    )
+
     # Settlement billing adapter. Dry-run (offline, deterministic) is the
     # default so no deployment can move money by accident. Stripe is opt-in:
     # it requires an explicit secret key, runs in test mode unless separately
@@ -638,6 +662,24 @@ class EnterpriseSettings(BaseModel):
             raise RuntimeError("DRIFT_METRIC_MIN_BASELINE_SAMPLES must be a positive integer")
         if self.webhook_timeout_seconds <= 0:
             raise RuntimeError("DATASHELL_WEBHOOK_TIMEOUT_SECONDS must be positive")
+        if self.alert_timeout_seconds <= 0:
+            raise RuntimeError("DATASHELL_ALERT_TIMEOUT_SECONDS must be positive")
+        if not (1 <= self.alert_max_attempts <= 10):
+            raise RuntimeError("DATASHELL_ALERT_MAX_ATTEMPTS must be between 1 and 10")
+        if not (0 <= self.alert_backoff_seconds <= 30):
+            raise RuntimeError("DATASHELL_ALERT_BACKOFF_SECONDS must be between 0 and 30")
+        if self.alert_webhook_url:
+            from urllib.parse import urlsplit
+            parsed_alert_webhook = urlsplit(self.alert_webhook_url)
+            if parsed_alert_webhook.scheme not in ("http", "https") or not parsed_alert_webhook.netloc:
+                raise RuntimeError("DATASHELL_ALERT_WEBHOOK_URL must be an absolute http(s) URL")
+            if parsed_alert_webhook.username or parsed_alert_webhook.password:
+                raise RuntimeError(
+                    "DATASHELL_ALERT_WEBHOOK_URL must not embed credentials; "
+                    "use DATASHELL_ALERT_WEBHOOK_SECRET for signing"
+                )
+            if self.is_production_mode and parsed_alert_webhook.scheme != "https":
+                raise RuntimeError("DATASHELL_ALERT_WEBHOOK_URL must use https in production")
         if self.billing_provider not in ("dry-run", "stripe"):
             raise RuntimeError("DATASHELL_BILLING_PROVIDER must be 'dry-run' or 'stripe'")
         if self.billing_provider == "stripe":

@@ -4,6 +4,8 @@
 #     --from-literal=master-api-key="$(openssl rand -hex 32)" \
 #     --from-literal=hmac-signing-secret="$(openssl rand -hex 32)"
 #     --from-literal=hmac-keyring='{}' # replace with retained key IDs/secrets during rotation
+#     --from-literal=alert-webhook-url="https://hooks.example.com/services/..." \
+#     --from-literal=alert-webhook-secret="$(openssl rand -hex 32)"
 #
 # Hardcoded placeholder secrets in source control are strictly forbidden and rejected at startup.
 apiVersion: v1
@@ -107,6 +109,27 @@ spec:
               name: datashell-secrets
               key: hmac-keyring
               optional: true
+        # Human alert delivery. Keep the URL and signing secret in the secret
+        # store, never in the ConfigMap. Absent keys disable delivery; the
+        # service still starts and records alerts as pending locally.
+        - name: DATASHELL_ALERT_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: datashell-secrets
+              key: alert-webhook-url
+              optional: true
+        - name: DATASHELL_ALERT_WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: datashell-secrets
+              key: alert-webhook-secret
+              optional: true
+        - name: DATASHELL_ALERT_TIMEOUT_SECONDS
+          value: "5"
+        - name: DATASHELL_ALERT_MAX_ATTEMPTS
+          value: "3"
+        - name: DATASHELL_ALERT_BACKOFF_SECONDS
+          value: "1"
         - name: MAX_UPLOAD_SIZE_BYTES
           # 20 GiB built-in default, set explicitly for the reference deployment.
           value: "21474836480"
