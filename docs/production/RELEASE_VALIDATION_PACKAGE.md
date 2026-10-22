@@ -1,8 +1,9 @@
 # Data Shell — Target-Host Release Validation Package
 
-**Version:** 1.1
-**Date:** 2026-10-21
-**Branch:** `production_hardening`
+**Version:** 1.2
+**Date:** 2026-10-23
+**Branch:** `fix/alert-delivery-to-human` (alert-delivery implementation);
+the 2026-10-21 record in § 3 was produced on `production_hardening`.
 
 This is the **index and gate matrix** for qualifying a deployment of Data
 Shell in a target environment. It states, for every mandatory gate: what
@@ -25,7 +26,7 @@ or system outside this repository.
 | Capacity and concurrency | [`BENCHMARK_PROCEDURE.md`](BENCHMARK_PROCEDURE.md) + `benchmarks/large_file_capacity_test.py`, `benchmarks/volumetric_stress_test.py`, `benchmarks/api_latency_load_test.py` | Throughput, latency percentiles, peak RSS, storage growth, concurrency ceiling, narrow and 100-column wide-schema envelopes, pass criteria |
 | Backup / restore drill | [`BACKUP_RESTORE_DRILL.md`](BACKUP_RESTORE_DRILL.md) + `scripts/backup_restore_drill.py` | Backup coverage, isolated restore, certificate re-verification, ledger reconciliation |
 | RPO / RTO measurement | `BACKUP_RESTORE_DRILL.md` § 3, § 4 | Recovery point (backup interval), recovery duration, restoration drill worksheet |
-| Alert delivery | `DEPLOYMENT_VERIFICATION.md` § 11 + `scripts/alert_signal_test.py` + `deploy/prometheus-alerts.yaml` | Signal generation (locally verified) and external delivery (target) |
+| Alert delivery | `DEPLOYMENT_VERIFICATION.md` § 11 + `scripts/alert_signal_test.py` + `scripts/verify_alert_delivery.py` + `datashell/core/alerts.py` + `deploy/prometheus-alerts.yaml` | Signal generation, the application alert lifecycle, signed transport, local delivery evidence, and target/recipient confirmation |
 | Rollback and recovery | `DEPLOYMENT_VERIFICATION.md` § 13 + [`INCIDENT_RESPONSE.md`](INCIDENT_RESPONSE.md) | Rollback procedure, trigger conditions, per-incident recovery |
 | Independent security review | [`SECURITY_REVIEW_PACKAGE.md`](SECURITY_REVIEW_PACKAGE.md) | Architecture, trust boundaries, authz matrix, data flow, crypto model, key lifecycle, dependencies, test map, reviewer output template |
 | Publication semantics | [`GENERATION_CONTRACT.md`](GENERATION_CONTRACT.md) | The commit point, the reader contract, and what is explicitly not claimed |
@@ -60,7 +61,7 @@ requires a party or system outside this repository.
 | P3 | No mixed generation observed | A reader resolving the pointer sees one complete generation | Pointer + immutable lineage per run | `GENERATION_CONTRACT.md`; reader-contract tests | **LOCAL-VERIFIED** |
 | P4 | Interrupted publication | Kill at each boundary → old or new valid generation | Journal recovery suite | `pytest tests/test_fault_injection.py` | **LOCAL-VERIFIED** |
 | P5 | Ledger divergence is durable and repairable | Pending records persist and replay idempotently | Outbox + reconciliation | `pytest tests/test_ledger_outbox.py` | **LOCAL-VERIFIED** |
-| P6 | Pending work is observable | Skipped/errored recovery is counted, logged, and metric-exposed | `datashell_pending_ledger_entries`, `datashell_publication_recovery_errors` | `scripts/alert_signal_test.py` | **LOCAL-VERIFIED** (signal); **TARGET** (delivery) |
+| P6 | Pending work is observable | Skipped/errored recovery is counted, logged, metric-exposed, and turned into a human alert | `datashell_pending_ledger_entries`, `datashell_publication_recovery_errors`, `datashell_alert_deliveries_total` | `scripts/alert_signal_test.py`; `scripts/verify_alert_delivery.py --local-sink --json` | **LOCAL-VERIFIED** (signal + lifecycle/transport); **TARGET** (human delivery) |
 | P7 | Concurrency on the supported topology | One replica, one job; writers serialised by the journal lock | Manifests + lock | `k8s-deployment.yaml`, `docker-compose.yml` | **LOCAL-VERIFIED** |
 
 ### 2.3 Security
@@ -85,7 +86,7 @@ requires a party or system outside this repository.
 | O4 | Metrics protected | `/metrics` requires a credential | 401 without key | `DEPLOYMENT_VERIFICATION.md` § 3 | **LOCAL-VERIFIED** |
 | O5 | Correlation identifiers | Every request carries a request id | `X-Request-ID` response header | `DEPLOYMENT_VERIFICATION.md` | **LOCAL-VERIFIED** |
 | O6 | Alert signals | Each documented condition produces its signal | 10/10 signal checks | `scripts/alert_signal_test.py` | **LOCAL-VERIFIED** (signal) |
-| O7 | **Alert delivery** | The notification reaches the on-call channel | Delivered notification | `DEPLOYMENT_VERIFICATION.md` § 11 | **TARGET — BLOCKED** |
+| O7 | **Alert delivery** | The notification reaches the on-call channel | Local: normal failing-run path + signed transport delivered two alerts (HTTP 200) to a loopback receiver. Target: delivered notification plus human acknowledgement. | `python scripts/verify_alert_delivery.py --local-sink --json`; configured-endpoint mode in `DEPLOYMENT_VERIFICATION.md` § 11 | **LOCAL-VERIFIED** (lifecycle + transport); **TARGET — OUTSTANDING** (endpoint/recipient) |
 | O8 | Runbooks are executable | Each incident has detection → containment → recovery → verification | `INCIDENT_RESPONSE.md` | Review + target drill | **LOCAL-VERIFIED** (written) / **TARGET** (exercised) |
 | O9 | **Named operator / authority** | Service owner, data owner, security owner, release authority assigned | Signed checklist | `INCIDENT_RESPONSE.md` § 0 | **EXTERNAL — BLOCKED** |
 
@@ -147,6 +148,28 @@ being handed off. It is a record of a local run, not of a target deployment.
 | 16 | Markdown link + path-reference resolver | 53 relative links, **0 broken**; 0 missing referenced files | 0 |
 | 17 | `git diff --check` | clean (no whitespace errors) | 0 |
 
+### 3.1 Alert-delivery implementation evidence (2026-10-23)
+
+Rows 1–17 above are the 2026-10-21 `production_hardening` record and are kept
+unchanged. The following commands were executed on `fix/alert-delivery-to-human`
+against the alert-lifecycle change:
+
+| # | Command | Result | Exit |
+|---|---|---|---|
+| 18 | `python -m pytest tests -q` | **572 passed, 2 skipped** | 0 |
+| 19 | `python -m pytest tests/test_alert_delivery.py -q` | **31 passed** (payload, rule mapping, HMAC, dedup, timeout, retry/backoff, `Retry-After`, permanent 4xx, missing config, recovery, normal failing-run lifecycle, startup recovery, config validation) | 0 |
+| 20 | `python scripts/verify_alert_delivery.py --local-sink --json` | **PASS** — `DataShellPipelineFailures` alert `alert_6c0c0919119657f29b3171fb` (run `dm_run_12602111da90`) delivered in 260.4 ms; synthetic verification alert `alert_adc9ff9ae0b39fb0d5f9d8e2` delivered in 1.6 ms; 2 signed requests received; every signature valid, every payload complete, and the receiver saw both expected alert IDs | 0 |
+| 21 | `ruff check .`; `mypy datashell/`; `bandit -q -r datashell -c .bandit -ll`; `python -m compileall -q datashell tests scripts` | clean | 0 |
+| 22 | `python scripts/alert_signal_test.py` | **10/10** signal checks passed (still signals only) | 0 |
+
+This proves the **local** path: a real failing run through the normal pipeline
+created an alert from the same terminal state that feeds the Prometheus rule,
+the signed payload was accepted by a real HTTP receiver, and the delivery was
+recorded with a terminal outcome. It does **not** prove that a target-host
+endpoint accepted an alert or that a human read one. No target webhook URL,
+credential, or recipient exists in this environment; those remain the O7
+target/recipient steps in `DEPLOYMENT_VERIFICATION.md` § 11.
+
 **What this record does not cover.** The local run is a single process on a
 developer workstation with no container, no ingress, no shared filesystem, no
 load balancer, and no real users. It therefore does **not** evidence any row
@@ -185,8 +208,10 @@ which also carries the 14 **stop conditions** that abort the session.
    largest size that passes.
 8. **Backup / restore drill and RPO/RTO** — `BACKUP_RESTORE_DRILL.md` § 4;
    fill in every blank in the worksheet.
-9. **Alert signals and delivery** — `scripts/alert_signal_test.py` locally, then
-   `DEPLOYMENT_VERIFICATION.md` § 11 on the target.
+9. **Alert signals and delivery** — `scripts/alert_signal_test.py` and
+   `scripts/verify_alert_delivery.py --local-sink --json` locally, then the
+   configured-endpoint procedure in `DEPLOYMENT_VERIFICATION.md` § 11 on the
+   target, including recipient acknowledgement.
 10. **Migration and rollback rehearsal** — § 10, § 13.
 11. **Evidence capture** — § 14: attach every command's output to the release
     checklist.
@@ -199,17 +224,19 @@ which also carries the 14 **stop conditions** that abort the session.
 
 **General production is approved only when every row in § 2 is
 `LOCAL-VERIFIED` or `TARGET`-verified with recorded evidence, and no
-`EXTERNAL — BLOCKED` row remains.** Six rows are fully blocked today — **S7**
-(independent security review), **O2** (production RPO/RTO), **O7** (alert
-delivery), **O9** (named operator / authority), **F4** (production capacity),
-and **F6** (migration and rollback) — with a further target-host component on
-**F5** (container start). None of them has been executed on a target host or by
-an external party, so the verdict is:
+`EXTERNAL — BLOCKED` row remains.** Five rows are fully blocked today — **S7**
+(independent security review), **O2** (production RPO/RTO), **O9** (named
+operator / authority), **F4** (production capacity), and **F6** (migration and
+rollback) — with a further target-host component on **F5** (container start)
+and **O7**. O7's application lifecycle and signed transport are now locally
+verified (§ 3.1), but no target endpoint or human recipient was available, so
+**O7 is not closed**. None of the target/external components has been executed
+on a target host or by an external party, so the verdict is:
 
 > **NOT APPROVED FOR GENERAL PRODUCTION.**
 > **CONTROLLED PILOT CANDIDATE** within the scope in § 6, once the pilot's own
-> prerequisites (owner assignment, alert delivery, and a capacity figure from
-> the target host) are met.
+> prerequisites (owner assignment, target alert delivery to a named recipient,
+> and a capacity figure from the target host) are met.
 
 ---
 

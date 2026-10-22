@@ -492,6 +492,13 @@ issue for an exploitable defect.
   labels to avoid cardinality blow-up.
 - **Webhooks:** when configured, terminal runs emit a signed `run.completed` event
   with bounded retries. Delivery is best-effort and cannot fail a run.
+- **Human alerts:** when `DATASHELL_ALERT_WEBHOOK_URL` is configured, pipeline
+  failures and the two startup-recovery conditions produce a signed, durable
+  alert with the alert ID, severity, timestamp, source, evidence, and a runbook
+  action. Failed deliveries are retried at startup; every attempt is recorded in
+  `<output_dir>/alerts/alert-deliveries.jsonl`. `scripts/verify_alert_delivery.py`
+  exercises the path; target/recipient confirmation is still required (see the
+  release checklist).
 - **Tracing:** opt-in OpenTelemetry spans via `datashell-engine[otel]` and
   `OTEL_EXPORTER_OTLP_ENDPOINT`.
 - **Ledger queries:** CLI and HTTP surfaces expose run history, quarantine search,
@@ -609,7 +616,7 @@ production.
 | Target-host deployment verification | **Outstanding** — blocking general production. |
 | Production capacity qualification | **Outstanding** — benchmark on the pilot host and set `MAX_UPLOAD_SIZE_BYTES` from the result. |
 | Production backup/restore (RPO/RTO) | **Outstanding** — the local drill is not a production drill. |
-| Alert delivery to a human | **Outstanding** — rule definitions exist; delivery has not been exercised on the target. |
+| Alert delivery to a human | **Implemented locally; target/recipient confirmation outstanding** — the normal failure/recovery path creates, signs, persists, and retries alerts; a local HTTP receiver accepted them. No target webhook or human acknowledgement has been recorded, so this gate is not closed. |
 | Live Stripe billing | Not exercised. The adapter is draft-invoice-only; no code path moves money. |
 | OpenTelemetry collector | Export verified end to end against a real collector in CI (`otel-collector-e2e`). Forwarding to a production tracing backend is an operator concern. |
 | PyPI distribution | Published under the name `datashell-engine` — the `datashell` name on PyPI belongs to an unrelated project. The import package and the CLI keep their names. |

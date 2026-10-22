@@ -29,6 +29,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from datashell import __version__
 from datashell.contract.models import DataContract
 from datashell.contract.registry import ContractRegistry
+from datashell.core.alerts import emit_startup_alerts, retry_pending_alerts_async
 from datashell.core.config import settings
 from datashell.core.ledger import BoundaryLedger
 from datashell.core.observability import configure_otel
@@ -130,6 +131,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "Publication journal recovery reported errors",
             **recovery,
         )
+    # Turn the same recovery state into human notifications. Delivery is
+    # asynchronous and durable; a failed delivery never blocks readiness and
+    # leaves a pending record for the next retry.
+    emit_startup_alerts(recovery)
+    retry_pending_alerts_async()
     seed_default_contracts(registry)
     # Enforce configured ledger retention at startup. A non-positive retention
     # keeps history forever, so this is a no-op by default.

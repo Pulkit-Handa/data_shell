@@ -96,9 +96,10 @@
 | Health checks | **LOCAL-VERIFIED** | `/health` and `/ready` endpoints |
 | Metrics endpoint | **LOCAL-VERIFIED** | Authenticated `/metrics` |
 | Alert rules and metrics defined | **LOCAL-VERIFIED** | `deploy/prometheus-alerts.yaml`; `scripts/alert_signal_test.py` — 10/10 signals verified |
+| Alert lifecycle and signed transport | **LOCAL-VERIFIED** | `scripts/verify_alert_delivery.py --local-sink --json` — normal failing run + synthetic check delivered two signed alerts (HTTP 200); `tests/test_alert_delivery.py` — 31 passed |
 | OpenTelemetry export reaches a real collector | **LOCAL-VERIFIED** | `scripts/run_otel_collector_e2e.sh` (CI job `otel-collector-e2e`) — the collector receives the gateway's span over OTLP/gRPC |
 | Rollback procedure | **LOCAL-VERIFIED** | `DEPLOYMENT_VERIFICATION.md` § 13 + `INCIDENT_RESPONSE.md` |
-| **Alert delivery to a human** | **TARGET — BLOCKED** | A generated signal is not a delivered alert. Confirm receipt in the on-call channel. |
+| **Alert delivery to a target human channel** | **TARGET — OUTSTANDING** | The application path is locally verified, but no target webhook, credential, or recipient was available. Run `scripts/verify_alert_delivery.py --json` on the target and retain recipient acknowledgement. A generated signal or local sink is not O7 evidence. |
 | **Rollback rehearsal** | **TARGET — BLOCKED** | Redeploy the previous image on the target host and confirm readiness. |
 
 ### Gate 8: Data Handling
@@ -155,7 +156,7 @@ external party.
 | 2 | Target-host deployment, startup, migration, rollback rehearsal | Operations | Production approval | **TARGET — BLOCKED** |
 | 3 | Target-host capacity qualification; set `MAX_UPLOAD_SIZE_BYTES` | Performance engineering | Capacity sign-off | **TARGET — BLOCKED** |
 | 4 | Production backup/restore drill; measure RPO and RTO | Operations | DR sign-off | **TARGET — BLOCKED** |
-| 5 | Alert delivery confirmed to the on-call channel | Operations | Alerting sign-off | **TARGET — BLOCKED** |
+| 5 | Alert delivery confirmed to the named on-call recipient from the target host | Operations | Alerting sign-off | **TARGET — OUTSTANDING** |
 | 6 | Independent security review (signed report) | Security team | Production approval | **EXTERNAL — BLOCKED** |
 | 7 | Secret manager integration | Operations | Production deployment | **REQUIRED** |
 
@@ -190,9 +191,12 @@ external party.
 **CONTROLLED-PILOT CANDIDATE**, subject to the pilot prerequisites in
 `RELEASE_VALIDATION_PACKAGE.md` § 6.
 
-All engineering gates are **LOCAL-VERIFIED** against this working tree: 466
+All engineering gates are **LOCAL-VERIFIED** against this working tree: 572
 tests, 9 Airflow tests, clean `bandit` and `pip-audit`, a reproducible build, a
-green end-to-end run→verify, a green backup/restore drill, and 10/10 alert
-*signals*. Six gates remain unevidenced — the five target-host steps above and
-the independent security review — and none of them may be recorded as passed
-until real evidence from the target host or the reviewer exists.
+green end-to-end run→verify, a green backup/restore drill, 10/10 alert
+*signals*, and a locally exercised alert lifecycle that delivered signed
+payloads to a real HTTP receiver. Six gates remain unevidenced — the five
+target-host steps above and the independent security review. The alert-delivery
+gate is one of those five: its implementation is local, but target receipt and
+human acknowledgement are outstanding. None of the six may be recorded as
+passed until real evidence from the target host or the reviewer exists.

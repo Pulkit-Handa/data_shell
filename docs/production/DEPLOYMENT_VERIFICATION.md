@@ -82,7 +82,7 @@ down-migration is required.
 | Python | 3.11 – 3.14 | `python3 --version` |
 | Filesystem | Local POSIX filesystem supporting `fcntl.flock` and atomic `os.replace` | `stat -f -c %T <volume>` must not report `nfs`/`cifs` |
 | Storage | Persistent volume sized `MAX_UPLOAD_SIZE_BYTES × DATASHELL_DISK_HEADROOM_MULTIPLIER` | `df -h <volume>` |
-| Secrets | `DATASHELL_API_KEY`, `DATASHELL_HMAC_SECRET` (or `DATASHELL_ED25519_PRIVATE_KEY`) injected from the secret manager | `printenv \| grep -c DATASHELL_` |
+| Secrets | `DATASHELL_API_KEY`, `DATASHELL_HMAC_SECRET` (or `DATASHELL_ED25519_PRIVATE_KEY`) injected from the secret manager. For O7, also `DATASHELL_ALERT_WEBHOOK_URL` and `DATASHELL_ALERT_WEBHOOK_SECRET`. | `printenv \| grep -c DATASHELL_` |
 | Signer | Ed25519 recommended for independent verification; HMAC acceptable for an agreed internal trust model | § 2 |
 | Operator | A named human owner for the deployment and the rollback decision | recorded in the release checklist |
 
@@ -301,24 +301,138 @@ from the pre-upgrade backup (§ 12).
 
 ## 11. Monitoring and alert delivery
 
+### 11.1 Metrics and state-driven alerts
+
 ```bash
 curl -s -H "X-API-Key: $DATASHELL_API_KEY" http://127.0.0.1:8000/metrics \
-  | grep -E "^datashell_(runs_total|rows_delivered_total|http_requests_total)"
+  | grep -E "^datashell_(runs_total|rows_delivered_total|http_requests_total|alert_)"
 ```
 
-**Expected:** the counters are present and increase with real traffic.
+**Expected:** the counters are present and increase with real traffic, and
+`datashell_alert_deliveries_total` appears once an alert is dispatched.
 
-Confirm the alert rules fire by triggering the condition, not by inspecting the
-rule file. `deploy/prometheus-alerts.yaml` ships the rule definitions; the
-rules that matter for the pilot are:
+`deploy/prometheus-alerts.yaml` ships the metric-threshold rules (server
+errors, latency, capacity, disk); those still require Prometheus plus
+Alertmanager (or an equivalent evaluator) to route a notification. The
+application additionally owns the last mile for the three **state-driven**
+conditions below: the same terminal state that feeds the metric creates a
+signed JSON alert and sends it to `DATASHELL_ALERT_WEBHOOK_URL`. This does not
+replace Prometheus routing; it is the deterministic delivery path for events
+the application already knows about.
 
-| Condition | Signal | Expected operator response |
+| Condition | Alert rule | Severity | Expected operator response |
+|---|---|---|---|
+| A run fails | `DataShellPipelineFailures` | warning | inspect run log/audit, `INCIDENT_RESPONSE.md` § 1 |
+| Published run not in ledger | `DataShellPendingLedgerEntries` | page | preserve outbox, `INCIDENT_RESPONSE.md` § 2 |
+| Recovery could not recover a journal | `DataShellPublicationRecoveryErrors` | page | preserve journal, `INCIDENT_RESPONSE.md` § 8 |
+| Disk pressure | `DataShellLowStorageCapacity` | page | free space; `/ready` will fail |
+| Sustained request rejections | `DataShellRunCapacitySaturated` / 5xx rule | warning | capacity is saturated; the limit is enforced, not broken |
+| Certificate verification failures | `datashell_certificate_verification_failures_total` rising | page | investigate tampering or a key rotation |
+
+### 11.2 Configuration
+
+Inject these into the **same service environment** that runs the pipeline. Do
+not put the webhook URL or signing secret in the image, a contract, or a log.
+
+| Variable | Required | Meaning |
 |---|---|---|
-| Ledger reconciliation incomplete | ERROR log `Unreconciled pending ledger entries remain after startup recovery` | reconciliation repair runbook |
-| Publication recovery incomplete | ERROR log `Publication journal recovery reported errors` | publication-failure runbook |
-| Disk pressure | `datashell_storage_free_bytes` below `MIN_FREE_DISK_BYTES` | free space; `/ready` will fail |
-| Sustained request rejections | `datashell_http_requests_total{status_code="503"}` rising | capacity is saturated; the limit is enforced, not broken |
-| Certificate verification failures | `datashell_certificate_verification_failures_total` rising | investigate tampering or a key rotation |
+| `DATASHELL_ALERT_WEBHOOK_URL` | yes, for delivery | Absolute `https://` URL of the human-operated receiver (Slack/Teams incoming webhook, incident-tool relay, or an internal relay). Credentials in the URL are rejected. |
+| `DATASHELL_ALERT_WEBHOOK_SECRET` | recommended | HMAC-SHA256 secret. Falls back to `DATASHELL_HMAC_SECRET`; use a dedicated secret when the receiver is outside the trust boundary. |
+| `DATASHELL_ALERT_TIMEOUT_SECONDS` | no (5) | Per-attempt timeout, must be > 0. |
+| `DATASHELL_ALERT_MAX_ATTEMPTS` | no (3) | Total attempts, 1–10. Only network errors, timeouts, 408/425/429/5xx are retried. |
+| `DATASHELL_ALERT_BACKOFF_SECONDS` | no (1) | Initial exponential backoff, 0–30; `Retry-After` is honoured up to 30 s. |
+
+Startup fails closed on an invalid URL, embedded credentials, a production
+`http://` URL, or out-of-range retry values. `python -c "from
+datashell.core.alerts import check_alert_configuration as c; print(c())"` prints
+the effective (redacted) configuration.
+
+### 11.3 Local lifecycle and transport check
+
+Run this before touching the target. It drives a real failing run through the
+normal pipeline path, waits for the resulting `DataShellPipelineFailures`
+alert, and independently sends a synthetic `DataShellDeliveryVerification`
+alert to an ephemeral loopback receiver.
+
+```bash
+python scripts/verify_alert_delivery.py --local-sink --json
+```
+
+**Expected:** `"status": "PASS"`, at least one `lifecycle-transport` check with
+`"http_status": 200`, one `transport-alert-delivered` check, and the
+`receiver-signature-valid` / `receiver-payload-complete` checks green.
+
+This is local integration evidence only. It does not prove that a deployed
+receiver accepted an alert or that a human received one.
+
+### 11.4 Target delivery (the O7 gate)
+
+Run on the target host, or inside the deployed container, with the service's
+real environment. Do **not** use `--local-sink`: that would bypass the target
+webhook and would not be O7 evidence.
+
+```bash
+# 1. The URL and secret are present, but the secret is never printed.
+python -c "from datashell.core.alerts import check_alert_configuration as c; print(c())"
+
+# 2. Drive the normal failure path and the synthetic transport check.
+python scripts/verify_alert_delivery.py --json \
+  | tee alert-delivery-$(date -u +%Y%m%dT%H%M%SZ).json
+
+# 3. Inspect the durable outcome, pending records, and metrics.
+python - <<'PY'
+import json
+from pathlib import Path
+from datashell.core.config import settings
+root = settings.output_dir / "alerts"
+for line in (root / "alert-deliveries.jsonl").read_text().splitlines():
+    print(json.dumps(json.loads(line), sort_keys=True))
+print("pending:", len(list((root / "pending").glob("alert_*.json"))))
+PY
+curl -s -H "X-API-Key: $DATASHELL_API_KEY" http://127.0.0.1:8000/metrics \
+  | grep -E "^datashell_alert_"
+```
+
+**Expected:** exit 0 and `"status": "PASS"`; `lifecycle-alert-created` and
+`lifecycle-transport` PASS; each final delivery record has
+`"outcome": "delivered"` and a 2xx `http_status`; `pending` is `0`; the
+`datashell_alert_deliveries_total{outcome="delivered"}` counter increased.
+
+**Then confirm the recipient.** Open the on-call channel and verify the
+message text contains the rule, severity, `alert_id`, `correlation_id`, and a
+runbook link. Retain a screenshot or message permalink together with the
+command JSON. A 2xx from a relay is not a human acknowledgement.
+
+The metric-threshold rules in `deploy/prometheus-alerts.yaml` are not sent by
+this application path. Separately confirm the deployed Prometheus/Alertmanager
+route delivers at least one of those rules (for example a synthetic low-storage
+alert) to the same human channel; that is part of the O7 gate, not something
+`verify_alert_delivery.py` can prove.
+
+Each request carries `X-DataShell-Event: alert.firing`,
+`X-DataShell-Alert-ID`, `X-DataShell-Correlation-ID`, `X-DataShell-Delivery`,
+`X-DataShell-Timestamp`, and `X-DataShell-Signature:
+sha256=<HMAC-SHA256(secret, "<timestamp>.<raw body>")>`. The JSON body contains
+`schema_version`, `event`, `status`, `alert_id`, `rule`, `severity`,
+`timestamp`, `correlation_id`, `source`, `service`, `environment`, `summary`,
+`description`, `evidence`, `recommended_action`, `runbook_url`, `synthetic`,
+and Slack/Teams-compatible `text`/`content`.
+
+### 11.5 Failure and recovery
+
+A non-2xx, timeout, or network failure is recorded in
+`<output_dir>/alerts/alert-deliveries.jsonl`; the alert remains at
+`<output_dir>/alerts/pending/alert_*.json`. It is retried at the next startup
+and can be retried immediately:
+
+```bash
+python -c "from datashell.core.alerts import retry_pending_alerts; print(retry_pending_alerts())"
+```
+
+**Expected:** the pending file disappears only after a `delivered` outcome.
+Never delete a pending file to make the gate look green. If the receiver
+returns 401/403, fix the receiver authentication/secret out of band; those are
+permanent errors and are not retried automatically.
 
 ---
 

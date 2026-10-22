@@ -85,12 +85,29 @@ span arrives. The same check runs in CI as the `otel-collector-e2e` job.
 | `DRIFT_MAX_RATE_ABS_DELTA` | `0.10` | Maximum absolute delta for null/rate metrics (proportion points). |
 | `DRIFT_METRIC_MIN_BASELINE_SAMPLES` | `1` | Minimum baseline samples before metric drift is evaluated. |
 
-### 1.6 Webhook Configuration
+### 1.6 Webhook and Alert-Delivery Configuration
+
+The run-event webhook and the human alert webhook are deliberately separate.
+`DATASHELL_RUN_WEBHOOK_URL` is operational telemetry; an alert is an
+actionable notification that is persisted and retried until it is delivered.
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATASHELL_RUN_WEBHOOK_URL` | — | HTTPS URL for signed `run.completed` events. Required HTTPS in production. |
 | `DATASHELL_WEBHOOK_TIMEOUT_SECONDS` | `5` | Timeout for webhook delivery. Must be > 0. |
+| `DATASHELL_ALERT_WEBHOOK_URL` | — | HTTPS URL of the human-operated alert receiver (Slack/Teams webhook, incident relay). Required for delivery; URL-embedded credentials are rejected; HTTPS is required in production. |
+| `DATASHELL_ALERT_WEBHOOK_SECRET` | — | HMAC-SHA256 secret used to sign alerts. Falls back to `DATASHELL_HMAC_SECRET`. |
+| `DATASHELL_ALERT_TIMEOUT_SECONDS` | `5` | Per-attempt alert timeout in seconds. Must be > 0. |
+| `DATASHELL_ALERT_MAX_ATTEMPTS` | `3` | Total delivery attempts, 1–10. Retries cover network errors, timeouts, 408, 425, 429, and 5xx; other 4xx responses are permanent. |
+| `DATASHELL_ALERT_BACKOFF_SECONDS` | `1` | Initial exponential backoff between attempts, 0–30 seconds. `Retry-After` is honoured up to 30 seconds. |
+
+Alerts cover `DataShellPipelineFailures`, `DataShellPendingLedgerEntries`, and
+`DataShellPublicationRecoveryErrors`. Delivery evidence is written to
+`<output_dir>/alerts/alert-deliveries.jsonl`; undelivered alerts are kept in
+`<output_dir>/alerts/pending/` and retried at startup or with
+`datashell.core.alerts.retry_pending_alerts()`. See
+[`DEPLOYMENT_VERIFICATION.md`](DEPLOYMENT_VERIFICATION.md) § 11 for the target
+procedure and payload/signature contract.
 
 ### 1.7 Billing Configuration
 
