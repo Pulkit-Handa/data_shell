@@ -7,6 +7,10 @@ Extends the boundary ledger's persistence model with the settlement domain:
   superseding one. ``idempotency_key`` is unique per tenant so replayed
   calculation requests return the original statement instead of creating a
   duplicate.
+* ``settlement_receipts`` — append-only signed evidence. The issuance receipt
+  is written atomically with the statement; every lifecycle transition appends
+  a receipt chained to its predecessor. Verification reads these rows instead
+  of signing the current row.
 * ``settlement_events`` — append-only lifecycle transitions (created,
   disputed, approved, superseded, cancelled, billing instruction created...).
 * ``disputes`` — dispute records and their resolutions.
@@ -25,6 +29,7 @@ provided by this layer alone.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from datetime import UTC, datetime
@@ -202,6 +207,28 @@ class SettlementLedger:
                 )
                 """
             )
+            # Append-only signed evidence. A receipt is written in the same
+            # transaction as the settlement/transition it describes and is
+            # never updated or re-signed. Verification reads these rows; it
+            # must never build a fresh receipt from the current row.
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS settlement_receipts (
+                    receipt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    settlement_id TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL,
+                    receipt_kind TEXT NOT NULL,
+                    receipt_digest TEXT NOT NULL,
+                    receipt_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE (settlement_id, tenant_id, receipt_digest)
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_settlement_receipts_settlement "
+                "ON settlement_receipts(settlement_id, tenant_id, receipt_id)"
+            )
 
     # ------------------------------------------------------- contract versions
 
@@ -285,12 +312,18 @@ class SettlementLedger:
             ).fetchone()
         return self._settlement_dict(row) if row else None
 
-    def save_settlement(self, statement: SettlementStatement) -> bool:
+    def save_settlement(self, statement: SettlementStatement, *,
+                        receipt: dict[str, Any] | None = None) -> bool:
         """Insert an immutable settlement statement (idempotent on its ID).
 
         Returns True when a new row was inserted and False when an identical
         statement already existed (the caller reports ``created=False`` so a
         replay is never misreported as a new financial record).
+
+        When ``receipt`` is supplied it is persisted atomically in the same
+        transaction as the statement. A receipt is never created or replaced
+        for an already-existing row: re-signing whatever currently sits in the
+        database would authenticate post-hoc tampering.
 
         The statement ID is deterministic in (run, contract version), so a
         re-calculation of the same logical request produces the same ID. When
@@ -339,11 +372,75 @@ class SettlementLedger:
                     statement.created_at,
                 ),
             )
+            if receipt is not None:
+                self._insert_receipt(conn, statement.settlement_id, statement.tenant_id,
+                                     receipt)
             self._insert_event(conn, statement.settlement_id, statement.tenant_id,
                                "CREATED", None, statement.settlement_status.value, statement.actor,
                                f"settlement calculated: "
                                f"{statement.calculation.gross_amount_minor} minor {statement.currency}")
         return True
+
+    def _insert_receipt(self, conn: sqlite3.Connection, settlement_id: str,
+                        tenant_id: str, receipt: dict[str, Any]) -> bool:
+        """Append a signed receipt inside the caller's transaction.
+
+        The digest covers the complete receipt (including its signature), so a
+        later lifecycle receipt can bind it without trusting mutable columns.
+        """
+        if not isinstance(receipt, dict):
+            raise SettlementLedgerError("settlement receipt must be a mapping")
+        receipt_json = json.dumps(receipt, sort_keys=True, separators=(",", ":"), default=str)
+        digest = hashlib.sha256(receipt_json.encode("utf-8")).hexdigest()
+        kind = receipt.get("receipt_kind")
+        if not isinstance(kind, str) or not kind:
+            kind = "ISSUANCE"
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO settlement_receipts "
+            "(settlement_id, tenant_id, receipt_kind, receipt_digest, receipt_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (settlement_id, tenant_id, kind, digest, receipt_json, _utcnow()),
+        )
+        return cur.rowcount > 0
+
+    def save_settlement_receipt(self, settlement_id: str, tenant_id: str,
+                                receipt: dict[str, Any]) -> bool:
+        """Persist a signed receipt for an existing settlement.
+
+        Receipts are append-only; re-inserting the exact same receipt is a
+        no-op. There is deliberately no update method.
+        """
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM settlements WHERE settlement_id = ? AND tenant_id = ?",
+                (settlement_id, tenant_id),
+            ).fetchone()
+            if not row:
+                raise SettlementLedgerError(
+                    f"settlement '{settlement_id}' does not exist for tenant '{tenant_id}'")
+            return self._insert_receipt(conn, settlement_id, tenant_id, receipt)
+
+    def get_settlement_receipts(self, settlement_id: str, tenant_id: str
+                                ) -> list[dict[str, Any]]:
+        """Return stored receipts oldest-first for signature-chain verification."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT receipt_json FROM settlement_receipts "
+                "WHERE settlement_id = ? AND tenant_id = ? ORDER BY receipt_id",
+                (settlement_id, tenant_id),
+            ).fetchall()
+        return [json.loads(row["receipt_json"]) for row in rows]
+
+    def get_latest_settlement_receipt(self, settlement_id: str, tenant_id: str
+                                      ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT receipt_json FROM settlement_receipts "
+                "WHERE settlement_id = ? AND tenant_id = ? "
+                "ORDER BY receipt_id DESC LIMIT 1",
+                (settlement_id, tenant_id),
+            ).fetchone()
+        return json.loads(row["receipt_json"]) if row else None
 
     def _insert_event(self, conn: sqlite3.Connection, settlement_id: str, tenant_id: str,
                       event_type: str, from_status: str | None, to_status: str | None,
@@ -384,13 +481,15 @@ class SettlementLedger:
 
     def transition_status(self, settlement_id: str, tenant_id: str, to_status: SettlementStatus,
                           actor: str, reason: str, *, event_type: str = "STATUS_TRANSITION",
-                          payload: dict[str, Any] | None = None) -> bool:
+                          payload: dict[str, Any] | None = None,
+                          receipt: dict[str, Any] | None = None) -> bool:
         """Record a lifecycle transition as an append-only event.
 
         Historical rows are not rewritten: the event log carries the
         transition history, and the settlement row's status column reflects the
-        current state. Returns False when the settlement does not exist for the
-        tenant.
+        current state. When ``receipt`` is supplied, the signed transition
+        receipt is appended in the same transaction as the status update.
+        Returns False when the settlement does not exist for the tenant.
         """
         with self._connect() as conn:
             row = conn.execute(
@@ -406,6 +505,8 @@ class SettlementLedger:
             )
             self._insert_event(conn, settlement_id, tenant_id, event_type, from_status,
                                to_status.value, actor, reason, payload)
+            if receipt is not None:
+                self._insert_receipt(conn, settlement_id, tenant_id, receipt)
         return True
 
     def get_events(self, settlement_id: str, tenant_id: str) -> list[dict[str, Any]]:
