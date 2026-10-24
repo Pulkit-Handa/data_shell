@@ -210,7 +210,7 @@ python scripts/verify_distribution_contents.py --dist-dir dist
 |---|---|---|
 | Certificate verification fails closed | `tests/test_artifact_verifier_security.py` | A tampered/invalid signature never dereferences artifact paths; a validly signed certificate cannot make the verifier read outside the storage roots |
 | Authz / capabilities | `tests/test_security_audit.py` | Route-level capability enforcement |
-| Path traversal / sandbox | `tests/test_boundary_hardening.py` | Output-root traversal, reserved-namespace writes, cross-tenant delivery paths are refused |
+| Path traversal / sandbox | `tests/test_boundary_hardening.py`, `tests/test_quarantine_sandbox.py` | Output-root traversal, reserved-namespace writes, cross-tenant delivery/quarantine paths, and database-sidecar names are refused |
 | Tenant isolation | `tests/test_tenant_isolation.py` | Cross-tenant access denied for runs, quarantine, usage; admin cross-tenant access allowed |
 | Key lifecycle | `tests/test_ed25519_signing.py` | Asymmetric signing/verification, key rotation |
 | Secret handling | `tests/test_production_runtime_hardening.py` | Production refuses missing/placeholder/weak secrets; wildcard CORS and proxy trust refused |

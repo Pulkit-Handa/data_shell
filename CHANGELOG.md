@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target endpoint/recipient gate remains outstanding; no target credentials or
   recipient are included in this repository.
 
+### Security
+- **Tenant-scoped quarantine paths.** `spec.delivery.quarantinePath` is now
+  validated with the same tenant boundary as delivery targets. In production it
+  must resolve inside the authenticated tenant's quarantine namespace; the
+  legacy shared `./output/quarantine` root is rebased into that namespace, while
+  explicit paths under another tenant's quarantine or delivery directory are
+  refused. Database files, lock files, and SQLite sidecars (`.db-wal`,
+  `.db-shm`, `-journal`, ...) are rejected for both quarantine and delivery
+  paths, so a contract can no longer create a directory at a live database
+  path and take the ledger or credential store offline. Regression coverage:
+  `tests/test_quarantine_sandbox.py`.
+
 ## [2.0.1] - 2026-10-22
 
 ### Added

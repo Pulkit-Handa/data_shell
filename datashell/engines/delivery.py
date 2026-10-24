@@ -112,7 +112,9 @@ class DeliveryEngine:
         quarantine_path_str = self.delivery_spec.quarantinePath
         if quarantine_path_str:
             quarantine_dir = FilesystemSandbox.sanitize_and_validate_path(
-                quarantine_path_str, tenant_id=self.tenant_id
+                quarantine_path_str,
+                tenant_id=self.tenant_id,
+                is_quarantine_path=True,
             )
         else:
             quarantine_dir = settings.get_tenant_quarantine_dir(self.tenant_id)
