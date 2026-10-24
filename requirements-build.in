@@ -9,6 +9,7 @@
 #    pip-compile --generate-hashes --allow-unsafe \
 #        --output-file=requirements-build.lock requirements-build.in
 #
-setuptools
+# Floor is the first release without GHSA-xmj3-9gf7-h52w.
+setuptools>=84.1.0
 wheel
 build
