@@ -283,10 +283,13 @@ Delivery targets, quarantine paths, and staging directories must stay inside
 approved roots:
 
 - In development: the tenant delivery directory (`output/tenants/<tenant>/`),
-  the output directory, and the system temp directory.
-- In production: only the tenant delivery directory. System temp, `output/`
-  internals, databases, and engine artifact names (`.staged_*`, `*_audit.json`,
-  ...) are rejected.
+  the tenant quarantine directory, and the system temp directory.
+- In production: only the tenant delivery directory for targets and the tenant
+  quarantine directory for quarantine artifacts. System temp, `output/`
+  internals, databases (including SQLite `-wal`/`-shm`/`-journal` sidecars),
+  and engine artifact names (`.staged_*`, `*_audit.json`, ...) are rejected.
+  A contract that declares the legacy shared `./output/quarantine` root is
+  rebased into the authenticated tenant's quarantine namespace.
 
 If a run fails with `PathSecurityViolation`, the message names the offending
 path and the approved roots. Relative target paths resolve under the tenant

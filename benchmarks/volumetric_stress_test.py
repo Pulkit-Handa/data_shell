@@ -113,7 +113,7 @@ def create_stress_contract() -> DataContract:
             },
             "delivery": DeliverySpec(
                 targets=[DeliveryTarget(path="./stress_output.parquet", mode="overwrite")],
-                quarantinePath="./stress_quarantine"
+                quarantinePath="./output/quarantine"
             )
         }
     )

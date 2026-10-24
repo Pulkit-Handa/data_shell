@@ -328,7 +328,12 @@ class DeliverySpec(BaseModel):
     @classmethod
     def validate_quarantine_path(cls, v: str | None) -> str | None:
         if v:
-            FilesystemSandbox.sanitize_and_validate_path(v, create_parent=False)
+            # Tenant-specific containment is enforced at run time, when the
+            # authenticated tenant is known. Contract validation still rejects
+            # traversal, protected system roots, and database/sidecar names.
+            FilesystemSandbox.sanitize_and_validate_path(
+                v, create_parent=False, is_quarantine_path=True
+            )
         return v
 
 
