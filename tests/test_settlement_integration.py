@@ -606,6 +606,167 @@ class TestSettlementReceipts:
             tampered, delivery_certificate=cert_data)["status"] == "TAMPERED_OR_INVALID_SIGNATURE"
 
 
+class TestStoredReceiptTamperEvidence:
+    """The receipt that verification checks must be the one stored at issuance.
+
+    A verifier that re-signs the current row would report an attacker-edited
+    settlement as authentic. These tests mutate the SQLite rows directly and
+    assert verification fails closed.
+    """
+
+    def _settled(self, harness):
+        run_id, audit, _ = _run_delivery(harness, _records())
+        _register(harness, _commercial())
+        row, _ = harness.service.calculate(
+            tenant_id=ALPHA, run_id=run_id, contract_id="ctr_test", actor="test")
+        return row, audit
+
+    def _edit_settlement_calculation(self, harness, settlement_id: str, delta: int) -> None:
+        with sqlite3.connect(harness.db) as conn:
+            row = conn.execute(
+                "SELECT calculation_json, gross_amount_minor FROM settlements "
+                "WHERE settlement_id = ?", (settlement_id,)).fetchone()
+            calculation = json.loads(row[0])
+            calculation["gross_amount_minor"] += delta
+            conn.execute(
+                "UPDATE settlements SET calculation_json = ?, gross_amount_minor = ? "
+                "WHERE settlement_id = ?",
+                (json.dumps(calculation), row[1] + delta, settlement_id))
+
+    def test_receipt_is_persisted_at_issuance(self, harness):
+        row, _ = self._settled(harness)
+        stored = harness.ledger.get_settlement_receipts(row["settlement_id"], ALPHA)
+        assert len(stored) == 1
+        assert stored[0]["receipt_kind"] == "ISSUANCE"
+        assert stored[0]["settlement_evidence"]["calculation"]["gross_amount_minor"] == 25
+        # Reading the receipt returns the stored evidence; it does not re-sign.
+        issued = harness.service.issue_receipt(row["settlement_id"], ALPHA)
+        assert issued == stored[0]
+        assert harness.service.verify_settlement(
+            row["settlement_id"], ALPHA)["status"] == "AUTHENTIC_AND_UNMODIFIED"
+
+    def test_db_calculation_tampering_is_not_reported_authentic(self, harness):
+        row, _ = self._settled(harness)
+        self._edit_settlement_calculation(harness, row["settlement_id"], delta=10_000)
+
+        report = harness.service.verify_settlement(row["settlement_id"], ALPHA)
+        assert report["status"] != "AUTHENTIC_AND_UNMODIFIED"
+        assert report["status"] in (
+            "SETTLEMENT_EVIDENCE_MISMATCH", "TAMPERED_OR_INVALID_SIGNATURE")
+        assert report["signature_valid"] is False
+
+    def test_mirror_column_tampering_is_not_reported_authentic(self, harness):
+        row, _ = self._settled(harness)
+        with sqlite3.connect(harness.db) as conn:
+            conn.execute(
+                "UPDATE settlements SET gross_amount_minor = 999999 WHERE settlement_id = ?",
+                (row["settlement_id"],))
+
+        report = harness.service.verify_settlement(row["settlement_id"], ALPHA)
+        assert report["status"] == "SETTLEMENT_EVIDENCE_MISMATCH"
+        assert "gross_amount_minor" in report["detail"]
+
+    def test_missing_receipt_fails_closed_instead_of_re_signing(self, harness):
+        row, _ = self._settled(harness)
+        with sqlite3.connect(harness.db) as conn:
+            conn.execute("DELETE FROM settlement_receipts WHERE settlement_id = ?",
+                         (row["settlement_id"],))
+        # Even after tampering, verification must not fabricate new evidence.
+        self._edit_settlement_calculation(harness, row["settlement_id"], delta=1)
+
+        report = harness.service.verify_settlement(row["settlement_id"], ALPHA)
+        assert report["status"] == "RECEIPT_NOT_FOUND"
+        assert report["signature_valid"] is False
+        with pytest.raises(SettlementServiceError, match="no stored receipt"):
+            harness.service.issue_receipt(row["settlement_id"], ALPHA)
+
+    def test_stored_receipt_edit_breaks_the_signature(self, harness):
+        row, _ = self._settled(harness)
+        with sqlite3.connect(harness.db) as conn:
+            stored_json = conn.execute(
+                "SELECT receipt_json FROM settlement_receipts WHERE settlement_id = ?",
+                (row["settlement_id"],)).fetchone()[0]
+            receipt = json.loads(stored_json)
+            receipt["settlement_evidence"]["calculation"]["gross_amount_minor"] = 1
+            conn.execute(
+                "UPDATE settlement_receipts SET receipt_json = ? WHERE settlement_id = ?",
+                (json.dumps(receipt), row["settlement_id"]))
+
+        report = harness.service.verify_settlement(row["settlement_id"], ALPHA)
+        assert report["status"] == "TAMPERED_OR_INVALID_SIGNATURE"
+
+    def test_transition_receipts_cover_legitimate_status_changes(self, harness):
+        row, _ = self._settled(harness)
+        harness.service.open_dispute(
+            settlement_id=row["settlement_id"], tenant_id=ALPHA,
+            disputing_party="buyer-x", reason="quantity questioned", actor="buyer-x")
+
+        receipts = harness.ledger.get_settlement_receipts(row["settlement_id"], ALPHA)
+        assert [r["receipt_kind"] for r in receipts] == ["ISSUANCE", "TRANSITION"]
+        assert receipts[1]["previous_receipt_digest"]
+        assert harness.service.verify_settlement(
+            row["settlement_id"], ALPHA)["status"] == "AUTHENTIC_AND_UNMODIFIED"
+
+    def test_status_tampering_after_transition_is_detected(self, harness):
+        row, _ = self._settled(harness)
+        harness.service.open_dispute(
+            settlement_id=row["settlement_id"], tenant_id=ALPHA,
+            disputing_party="buyer-x", reason="quantity questioned", actor="buyer-x")
+        with sqlite3.connect(harness.db) as conn:
+            conn.execute(
+                "UPDATE settlements SET settlement_status = 'READY_FOR_BILLING' "
+                "WHERE settlement_id = ?", (row["settlement_id"],))
+
+        report = harness.service.verify_settlement(row["settlement_id"], ALPHA)
+        assert report["status"] == "SETTLEMENT_EVIDENCE_MISMATCH"
+        assert "settlement_status" in report["detail"]
+
+    def test_deleted_transition_receipt_breaks_the_chain(self, harness):
+        row, _ = self._settled(harness)
+        harness.service.open_dispute(
+            settlement_id=row["settlement_id"], tenant_id=ALPHA,
+            disputing_party="buyer-x", reason="quantity questioned", actor="buyer-x")
+        with sqlite3.connect(harness.db) as conn:
+            first = conn.execute(
+                "SELECT receipt_id FROM settlement_receipts WHERE settlement_id = ? "
+                "ORDER BY receipt_id LIMIT 1", (row["settlement_id"],)).fetchone()[0]
+            conn.execute("DELETE FROM settlement_receipts WHERE receipt_id = ?", (first,))
+
+        report = harness.service.verify_settlement(row["settlement_id"], ALPHA)
+        assert report["status"] == "RECEIPT_CHAIN_BROKEN"
+        assert report["signature_valid"] is True
+
+    def test_tampering_cannot_be_laundered_through_a_transition(self, harness):
+        row, _ = self._settled(harness)
+        self._edit_settlement_calculation(harness, row["settlement_id"], delta=500)
+        with pytest.raises(SettlementServiceError, match="does not match the current row"):
+            harness.service.open_dispute(
+                settlement_id=row["settlement_id"], tenant_id=ALPHA,
+                disputing_party="buyer-x", reason="launder attempt", actor="buyer-x")
+        # No transition receipt was signed over the tampered row.
+        receipts = harness.ledger.get_settlement_receipts(row["settlement_id"], ALPHA)
+        assert [r["receipt_kind"] for r in receipts] == ["ISSUANCE"]
+        assert harness.service.verify_settlement(
+            row["settlement_id"], ALPHA)["status"] != "AUTHENTIC_AND_UNMODIFIED"
+
+    def test_stored_chain_verifies_with_ed25519(self, harness, monkeypatch):
+        private_pem, public_pem = generate_keypair_pem()
+        monkeypatch.setattr(settings, "ed25519_private_key", private_pem)
+        monkeypatch.setattr(settings, "ed25519_active_key_id", "test-ed25519-v1")
+        monkeypatch.setattr(settings, "ed25519_trusted_keys", {"test-ed25519-v1": public_pem})
+
+        row, _ = self._settled(harness)
+        harness.service.open_dispute(
+            settlement_id=row["settlement_id"], tenant_id=ALPHA,
+            disputing_party="buyer-x", reason="review", actor="buyer-x")
+        receipts = harness.ledger.get_settlement_receipts(row["settlement_id"], ALPHA)
+        assert all(r["digital_signature"]["algorithm"] == "Ed25519" for r in receipts)
+        report = harness.service.verify_settlement(row["settlement_id"], ALPHA)
+        assert report["status"] == "AUTHENTIC_AND_UNMODIFIED"
+        assert report["third_party_verifiable"] is True
+        assert report["receipt_count"] == 2
+
+
 # ------------------------------------------------------------------- billing
 
 

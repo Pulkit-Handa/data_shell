@@ -24,6 +24,7 @@ from datashell.settlement.certificate import (
     build_settlement_receipt,
     certificate_digest,
     verify_settlement_receipt,
+    verify_settlement_receipt_chain,
 )
 from datashell.settlement.engine import (
     calculate_settlement,
@@ -34,6 +35,7 @@ from datashell.settlement.models import (
     Dispute,
     DisputeResolution,
     DisputeStatus,
+    SettlementStatement,
     SettlementStatus,
 )
 from datashell.settlement.registry import CommercialContractRegistry, CommercialContractRegistryError
@@ -140,10 +142,13 @@ class SettlementService:
             unique_entities_delivered=unique_entities_delivered,
         )
 
-        # 7. Persist immutably (idempotent on statement ID and key). The
-        #    reported `created` flag reflects whether a new row was inserted.
+        # 7. Persist the statement and its signed receipt atomically
+        #    (idempotent on statement ID and key). The receipt captures the
+        #    evidence at issuance; verification later compares against this
+        #    stored signature instead of re-signing the current database row.
+        receipt = build_settlement_receipt(statement, cert_data, receipt_kind="ISSUANCE")
         try:
-            created = self.ledger.save_settlement(statement)
+            created = self.ledger.save_settlement(statement, receipt=receipt)
         except Exception as exc:
             raise SettlementServiceError(f"settlement persistence failed: {exc}") from exc
 
@@ -207,23 +212,35 @@ class SettlementService:
 
     # ------------------------------------------------------- receipt + verify
 
+    @staticmethod
+    def _statement_from_row(row: dict[str, Any]) -> SettlementStatement:
+        return SettlementStatement(**{**row, "calculation": row["calculation"]})
+
     def issue_receipt(self, settlement_id: str, tenant_id: str) -> dict[str, Any]:
-        """Build the signed settlement receipt for a stored statement."""
+        """Return the stored signed receipt for a settlement.
+
+        Receipts are issued and persisted atomically with the statement (and
+        with every lifecycle transition). They are never regenerated on demand:
+        re-signing whatever currently sits in the database would authenticate
+        post-hoc tampering.
+        """
         row = self.ledger.get_settlement(settlement_id, tenant_id)
         if row is None:
             raise SettlementServiceError(f"settlement '{settlement_id}' not found for tenant '{tenant_id}'")
-        run = self.boundary.get_run(row["run_id"], tenant_id)
-        if not run or not run.get("audit_path"):
-            raise SettlementServiceError("run evidence missing; cannot issue receipt")
-        import json
-        with open(run["audit_path"], encoding="utf-8") as handle:
-            cert_data = json.load(handle)
-        from datashell.settlement.models import SettlementStatement
-        statement = SettlementStatement(**{**row, "calculation": row["calculation"]})
-        return build_settlement_receipt(statement, cert_data)
+        receipt = self.ledger.get_latest_settlement_receipt(settlement_id, tenant_id)
+        if receipt is None:
+            raise SettlementServiceError(
+                f"settlement '{settlement_id}' has no stored receipt; refusing to re-sign the current row")
+        return receipt
 
     def verify_settlement(self, settlement_id: str, tenant_id: str) -> dict[str, Any]:
-        """Verify a stored settlement: re-check receipt signature + delivery certificate."""
+        """Verify the stored receipt chain against the row and delivery certificate.
+
+        The signed evidence comes from the receipt persisted at issuance (and
+        each later transition) — never from a fresh signature over the current
+        database row. A DB edit therefore produces
+        ``SETTLEMENT_EVIDENCE_MISMATCH`` rather than ``AUTHENTIC_AND_UNMODIFIED``.
+        """
         row = self.ledger.get_settlement(settlement_id, tenant_id)
         if row is None:
             raise SettlementServiceError(f"settlement '{settlement_id}' not found for tenant '{tenant_id}'")
@@ -233,11 +250,84 @@ class SettlementService:
         import json
         with open(run["audit_path"], encoding="utf-8") as handle:
             cert_data = json.load(handle)
-        from datashell.settlement.models import SettlementStatement
-        statement = SettlementStatement(**{**row, "calculation": row["calculation"]})
-        receipt = build_settlement_receipt(statement, cert_data)
-        return verify_settlement_receipt(receipt, delivery_certificate=cert_data,
-                                         expected_statement=statement)
+        statement = self._statement_from_row(row)
+        receipts = self.ledger.get_settlement_receipts(settlement_id, tenant_id)
+        return verify_settlement_receipt_chain(
+            receipts,
+            delivery_certificate=cert_data,
+            expected_statement=statement,
+            expected_row=row,
+        )
+
+    # ------------------------------------------------------- signed transitions
+
+    def _build_transition_receipt(self, row: dict[str, Any], *,
+                                  to_status: SettlementStatus, event_type: str,
+                                  actor: str, reason: str,
+                                  payload: dict[str, Any] | None) -> dict[str, Any]:
+        """Extend the signed evidence to a new lifecycle state.
+
+        The new receipt is built from the *previously signed evidence*, not
+        from the current DB row. First the stored receipt is verified against
+        the row; then only the status field changes. This prevents a tampered
+        row from being laundered through a legitimate transition.
+        """
+        settlement_id = row["settlement_id"]
+        tenant_id = row["tenant_id"]
+        latest = self.ledger.get_latest_settlement_receipt(settlement_id, tenant_id)
+        if latest is None:
+            raise SettlementServiceError(
+                f"settlement '{settlement_id}' has no stored receipt; "
+                "refusing to sign an unsigned state transition")
+        current = self._statement_from_row(row)
+        report = verify_settlement_receipt(
+            latest, expected_statement=current, expected_row=row)
+        if report.get("signature_valid") is not True or \
+                report.get("status") != "AUTHENTIC_AND_UNMODIFIED":
+            raise SettlementServiceError(
+                f"stored settlement receipt does not match the current row "
+                f"({report.get('status')}); refusing to sign a state transition")
+        evidence = latest.get("settlement_evidence")
+        if not isinstance(evidence, dict):
+            raise SettlementServiceError(
+                "stored settlement receipt has no settlement evidence; refusing to transition")
+        signed_statement = SettlementStatement(**evidence)
+        if signed_statement.settlement_status != SettlementStatus(row["settlement_status"]):
+            raise SettlementServiceError(
+                "signed settlement status does not match the current row; "
+                "refusing to sign a state transition")
+        updated = signed_statement.model_copy(update={"settlement_status": to_status})
+        return build_settlement_receipt(
+            updated,
+            delivery_certificate_digest=latest["delivery_certificate_digest"],
+            previous_receipt=latest,
+            receipt_kind="TRANSITION",
+            transition={
+                "event_type": event_type,
+                "from_status": row["settlement_status"],
+                "to_status": to_status.value,
+                "actor": actor,
+                "reason": reason,
+                "payload": payload or {},
+            },
+        )
+
+    def transition_status(self, *, settlement_id: str, tenant_id: str,
+                          to_status: SettlementStatus, actor: str, reason: str,
+                          event_type: str = "STATUS_TRANSITION",
+                          payload: dict[str, Any] | None = None) -> bool:
+        """Apply a lifecycle transition and persist its signed receipt."""
+        row = self.ledger.get_settlement(settlement_id, tenant_id)
+        if row is None:
+            raise SettlementServiceError(
+                f"settlement '{settlement_id}' not found for tenant '{tenant_id}'")
+        target = to_status if isinstance(to_status, SettlementStatus) else SettlementStatus(to_status)
+        receipt = self._build_transition_receipt(
+            row, to_status=target, event_type=event_type, actor=actor,
+            reason=reason, payload=payload)
+        return self.ledger.transition_status(
+            settlement_id, tenant_id, target, actor, reason,
+            event_type=event_type, payload=payload, receipt=receipt)
 
     # ---------------------------------------------------------------- disputes
 
@@ -260,9 +350,10 @@ class SettlementService:
             supporting_explanation=supporting_explanation,
         )
         self.ledger.save_dispute(dispute)
-        self.ledger.transition_status(
-            settlement_id, tenant_id, SettlementStatus.DISPUTED, actor or disputing_party,
-            f"dispute opened: {reason}",
+        self.transition_status(
+            settlement_id=settlement_id, tenant_id=tenant_id,
+            to_status=SettlementStatus.DISPUTED, actor=actor or disputing_party,
+            reason=f"dispute opened: {reason}",
             event_type="DISPUTE_OPENED",
             payload={"dispute_id": dispute.dispute_id, "reason": reason},
         )
@@ -283,17 +374,19 @@ class SettlementService:
         )
         settlement_id = dispute["settlement_id"]
         if resolution == DisputeResolution.REJECT_SETTLEMENT:
-            self.ledger.transition_status(
-                settlement_id, tenant_id, SettlementStatus.CANCELLED, resolution_actor,
-                f"dispute resolved: {resolution.value}",
+            self.transition_status(
+                settlement_id=settlement_id, tenant_id=tenant_id,
+                to_status=SettlementStatus.CANCELLED, actor=resolution_actor,
+                reason=f"dispute resolved: {resolution.value}",
                 event_type="DISPUTE_RESOLVED",
                 payload={"dispute_id": dispute_id, "resolution": resolution.value},
             )
         elif resolution in (DisputeResolution.ACCEPT_AS_IS, DisputeResolution.CORRECT_CALCULATION,
                             DisputeResolution.REPLACE_WITH_NEW_SETTLEMENT):
-            self.ledger.transition_status(
-                settlement_id, tenant_id, SettlementStatus.READY_FOR_BILLING, resolution_actor,
-                f"dispute resolved: {resolution.value}",
+            self.transition_status(
+                settlement_id=settlement_id, tenant_id=tenant_id,
+                to_status=SettlementStatus.READY_FOR_BILLING, actor=resolution_actor,
+                reason=f"dispute resolved: {resolution.value}",
                 event_type="DISPUTE_RESOLVED",
                 payload={"dispute_id": dispute_id, "resolution": resolution.value},
             )
@@ -307,9 +400,10 @@ class SettlementService:
         row = self.ledger.get_settlement(settlement_id, tenant_id)
         if row is None:
             raise SettlementServiceError(f"settlement '{settlement_id}' not found for tenant '{tenant_id}'")
-        self.ledger.transition_status(
-            settlement_id, tenant_id, SettlementStatus.SUPERSEDED, actor,
-            f"superseded by {replacement.get('settlement_id')}",
+        self.transition_status(
+            settlement_id=settlement_id, tenant_id=tenant_id,
+            to_status=SettlementStatus.SUPERSEDED, actor=actor,
+            reason=f"superseded by {replacement.get('settlement_id')}",
             event_type="SUPERSEDED",
             payload={"replacement_settlement_id": replacement.get("settlement_id")},
         )

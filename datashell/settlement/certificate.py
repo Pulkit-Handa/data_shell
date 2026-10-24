@@ -48,22 +48,54 @@ def certificate_digest(cert_data: dict[str, Any]) -> str:
     return CryptoEngine.canonical_json_hash(payload)
 
 
+def receipt_digest(receipt: dict[str, Any]) -> str:
+    """Digest over the complete signed receipt, including its signature.
+
+    Used to chain lifecycle receipts: each transition receipt binds the digest
+    of the receipt that preceded it, so deleting or editing any stored receipt
+    breaks the chain even when the remaining signatures are valid.
+    """
+    if not isinstance(receipt, dict):
+        raise SettlementCertificateError("settlement receipt must be a mapping")
+    return CryptoEngine.canonical_json_hash(receipt)
+
+
 def build_settlement_receipt(
     statement: SettlementStatement,
-    delivery_certificate: dict[str, Any],
+    delivery_certificate: dict[str, Any] | None = None,
+    *,
+    delivery_certificate_digest: str | None = None,
+    previous_receipt: dict[str, Any] | None = None,
+    transition: dict[str, Any] | None = None,
+    receipt_kind: str = "ISSUANCE",
 ) -> dict[str, Any]:
     """Produce the signed settlement receipt for a calculated statement.
 
     The receipt embeds the statement's signed payload and the delivery
     certificate digest, then signs the whole envelope exactly like an audit
     certificate so independent verification uses the same trusted keyrings.
+
+    Lifecycle transitions produce a new receipt chained to the previous one via
+    ``previous_receipt_digest``. Receipts are normally persisted by the ledger at
+    issuance and transition time; verification must use those stored receipts
+    rather than re-signing the current database row.
     """
-    if not isinstance(delivery_certificate, dict):
-        raise SettlementCertificateError("delivery certificate must be a mapping")
-    delivery_digest = certificate_digest(delivery_certificate)
+    if delivery_certificate is not None:
+        if not isinstance(delivery_certificate, dict):
+            raise SettlementCertificateError("delivery certificate must be a mapping")
+        if delivery_certificate_digest is not None:
+            raise SettlementCertificateError(
+                "supply either a delivery certificate or its digest, not both")
+        delivery_digest = certificate_digest(delivery_certificate)
+    elif isinstance(delivery_certificate_digest, str) and delivery_certificate_digest:
+        delivery_digest = delivery_certificate_digest
+    else:
+        raise SettlementCertificateError(
+            "a delivery certificate or its digest is required to build a settlement receipt")
 
     receipt_payload = {
         "receipt_version": SETTLEMENT_RECEIPT_VERSION,
+        "receipt_kind": receipt_kind,
         "schema": "settlement_receipt",
         "settlement_id": statement.settlement_id,
         "tenant_id": statement.tenant_id,
@@ -76,6 +108,10 @@ def build_settlement_receipt(
         },
         "settlement_evidence": statement.model_dump(mode="json"),
     }
+    if previous_receipt is not None:
+        receipt_payload["previous_receipt_digest"] = receipt_digest(previous_receipt)
+    if transition is not None:
+        receipt_payload["transition"] = transition
 
     # Sign with the same envelope semantics as audit certificates: the
     # signature_header is part of the signed content (matching the audit
@@ -116,11 +152,37 @@ def build_settlement_receipt(
     return receipt_payload
 
 
+# Fields that must be identical between the signed evidence and the current
+# database row. ``idempotency_key`` is deliberately excluded because the ledger
+# may attach one to an existing deterministic statement after issuance; it is
+# request metadata, not financial evidence.
+_BOUND_STATEMENT_FIELDS = (
+    "settlement_id",
+    "tenant_id",
+    "contract_id",
+    "contract_version",
+    "contract_digest",
+    "run_id",
+    "certificate_digest",
+    "calculation",
+    "currency",
+    "acceptance_status",
+    "settlement_status",
+    "reason_codes",
+    "explanation",
+    "actor",
+    "superseding_settlement_id",
+    "billing_instruction_id",
+    "created_at",
+)
+
+
 def verify_settlement_receipt(
     receipt: dict[str, Any],
     *,
     delivery_certificate: dict[str, Any] | None = None,
     expected_statement: SettlementStatement | None = None,
+    expected_row: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Verify a settlement receipt's signature and its bindings.
 
@@ -131,8 +193,11 @@ def verify_settlement_receipt(
        certificate, it must match, and the certificate itself must verify
        through the existing artifact verifier.
     3. If the expected statement is supplied, the receipt's settlement
-       evidence must equal it exactly — tampering with any settlement-critical
-       field (amounts, units, contract digest, status) fails verification.
+       evidence must equal it — tampering with any settlement-critical field
+       (amounts, units, contract digest, status) fails verification.
+    4. If the expected database row is supplied, mirrored financial columns
+       (gross amount, qualified units, pricing model) must agree with the
+       signed calculation.
     """
     if not isinstance(receipt, dict):
         return _receipt_report(False, "INVALID_RECEIPT_STRUCTURE", "receipt is not a mapping",
@@ -193,6 +258,31 @@ def verify_settlement_receipt(
                                "settlement receipt does not bind a delivery certificate digest",
                                third_party=third_party, artifacts_verified=False)
 
+    # The outer identifiers and contract block are signed alongside the
+    # evidence; reject a receipt whose own sections tell different stories.
+    for field in ("settlement_id", "tenant_id", "run_id"):
+        if receipt.get(field) != evidence.get(field):
+            return _receipt_report(
+                False, "INVALID_RECEIPT_STRUCTURE",
+                f"receipt field '{field}' disagrees with its settlement evidence",
+                third_party=third_party, artifacts_verified=False)
+    contract = receipt.get("contract")
+    if not isinstance(contract, dict):
+        return _receipt_report(False, "INVALID_RECEIPT_STRUCTURE",
+                               "settlement receipt is missing its contract binding",
+                               third_party=third_party, artifacts_verified=False)
+    for field in ("contract_id", "contract_version", "contract_digest"):
+        if contract.get(field) != evidence.get(field):
+            return _receipt_report(
+                False, "INVALID_RECEIPT_STRUCTURE",
+                f"receipt contract field '{field}' disagrees with its settlement evidence",
+                third_party=third_party, artifacts_verified=False)
+    if evidence.get("certificate_digest") != declared_digest:
+        return _receipt_report(
+            False, "INVALID_RECEIPT_STRUCTURE",
+            "receipt delivery-certificate binding disagrees with its settlement evidence",
+            third_party=third_party, artifacts_verified=False)
+
     artifacts_status = "DELIVERY_CERTIFICATE_NOT_SUPPLIED"
     if delivery_certificate is not None:
         recomputed = certificate_digest(delivery_certificate)
@@ -211,22 +301,126 @@ def verify_settlement_receipt(
 
     if expected_statement is not None:
         expected_dump = expected_statement.model_dump(mode="json")
-        for field in ("settlement_id", "contract_digest", "run_id", "certificate_digest",
-                      "calculation", "acceptance_status", "settlement_status",
-                      "gross_amount_minor", "qualified_units"):
-            if field in expected_dump:
-                ev_value = evidence.get(field)
-                exp_value = expected_dump[field]
-                if ev_value != exp_value:
-                    return _receipt_report(
-                        False, "SETTLEMENT_EVIDENCE_MISMATCH",
-                        f"settlement-critical field '{field}' does not match the verified statement",
-                        third_party=third_party, artifacts_verified=False)
+        for field in _BOUND_STATEMENT_FIELDS:
+            # ``idempotency_key`` is intentionally not bound: see the constant
+            # definition above.
+            if field in expected_dump and evidence.get(field) != expected_dump[field]:
+                return _receipt_report(
+                    False, "SETTLEMENT_EVIDENCE_MISMATCH",
+                    f"settlement-critical field '{field}' does not match the verified statement",
+                    third_party=third_party, artifacts_verified=False)
+
+    if expected_row is not None:
+        calculation = evidence.get("calculation")
+        for field in _BOUND_STATEMENT_FIELDS:
+            if field in expected_row and expected_row.get(field) != evidence.get(field):
+                return _receipt_report(
+                    False, "SETTLEMENT_EVIDENCE_MISMATCH",
+                    f"stored settlement column '{field}' does not match the signed evidence",
+                    third_party=third_party, artifacts_verified=False)
+        # These columns mirror values inside ``calculation_json`` but are
+        # stored separately for indexing/dashboards; a DB edit may change only
+        # the mirror column, so compare them explicitly.
+        mirrored = {
+            "gross_amount_minor": calculation.get("gross_amount_minor") if isinstance(calculation, dict) else None,
+            "qualified_units": calculation.get("qualified_units") if isinstance(calculation, dict) else None,
+            "pricing_model": calculation.get("pricing_model") if isinstance(calculation, dict) else None,
+            "calculation_version": calculation.get("calculation_version") if isinstance(calculation, dict) else None,
+        }
+        for column, signed_value in mirrored.items():
+            if column in expected_row and expected_row.get(column) != signed_value:
+                return _receipt_report(
+                    False, "SETTLEMENT_EVIDENCE_MISMATCH",
+                    f"stored settlement column '{column}' does not match the signed calculation",
+                    third_party=third_party, artifacts_verified=False)
 
     return _receipt_report(True, "AUTHENTIC_AND_UNMODIFIED",
                            "settlement receipt is authentic and binds the settlement evidence",
-                           third_party=third_party, artifacts_verified=True,
+                           third_party=third_party,
+                           artifacts_verified=delivery_certificate is not None,
                            artifacts_status=artifacts_status)
+
+
+def verify_settlement_receipt_chain(
+    receipts: list[dict[str, Any]],
+    *,
+    delivery_certificate: dict[str, Any] | None = None,
+    expected_statement: SettlementStatement | None = None,
+    expected_row: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Verify the stored receipt chain and bind it to the current row.
+
+    Receipts are ordered oldest-first. The first receipt is the issuance
+    receipt; every later receipt must name the digest of its predecessor. The
+    newest receipt must match the current statement/row. Failures are reported
+    as ``RECEIPT_NOT_FOUND``, ``RECEIPT_CHAIN_BROKEN``, or the specific
+    signature/binding error from :func:`verify_settlement_receipt`.
+
+    Verification never creates or re-signs a receipt: an attacker who can edit
+    the database cannot turn a modified row into "authentic" evidence.
+    """
+    if not isinstance(receipts, list) or not receipts:
+        return _receipt_report(
+            False, "RECEIPT_NOT_FOUND",
+            "no stored settlement receipt exists for this settlement; refusing to re-sign the current row",
+            third_party=False, artifacts_verified=False)
+
+    previous_digest: str | None = None
+    final_report: dict[str, Any] | None = None
+    for index, receipt in enumerate(receipts):
+        is_latest = index == len(receipts) - 1
+        report = verify_settlement_receipt(
+            receipt,
+            delivery_certificate=delivery_certificate,
+            expected_statement=expected_statement if is_latest else None,
+            expected_row=expected_row if is_latest else None,
+        )
+        if report.get("status") != "AUTHENTIC_AND_UNMODIFIED":
+            report = dict(report)
+            report["receipt_count"] = len(receipts)
+            report["receipt_index"] = index
+            return report
+
+        declared_previous = receipt.get("previous_receipt_digest") if isinstance(receipt, dict) else None
+        if index == 0:
+            if declared_previous is not None:
+                return _chain_report(
+                    "RECEIPT_CHAIN_BROKEN",
+                    "the first stored receipt references a predecessor that is missing",
+                    report, receipt_count=len(receipts), receipt_index=index)
+        elif declared_previous != previous_digest:
+            return _chain_report(
+                "RECEIPT_CHAIN_BROKEN",
+                "a stored receipt does not reference its predecessor's digest",
+                report, receipt_count=len(receipts), receipt_index=index)
+
+        previous_digest = receipt_digest(receipt)
+        final_report = report
+
+    if final_report is None:  # defensive: the loop always sets it for non-empty input
+        return _receipt_report(False, "RECEIPT_NOT_FOUND",
+                               "no stored settlement receipt could be verified",
+                               third_party=False, artifacts_verified=False)
+    final_report = dict(final_report)
+    final_report["receipt_count"] = len(receipts)
+    final_report["receipt_digest"] = previous_digest
+    return final_report
+
+
+def _chain_report(status_code: str, detail: str, report: dict[str, Any], *,
+                  receipt_count: int, receipt_index: int) -> dict[str, Any]:
+    """Build a failure report for a validly signed but broken receipt chain."""
+    return {
+        "signature_valid": bool(report.get("signature_valid")),
+        "signature_algorithm": report.get("signature_algorithm", ""),
+        "third_party_verifiable": bool(report.get("third_party_verifiable")),
+        "artifacts_verified": bool(report.get("artifacts_verified")),
+        "artifacts_status": report.get("artifacts_status", "NOT_CHECKED"),
+        "status": status_code,
+        "detail": detail,
+        "receipt_count": receipt_count,
+        "receipt_index": receipt_index,
+    }
 
 
 def _receipt_report(sig_valid: bool, status_code: str, detail: str, *,

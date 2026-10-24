@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recipient are included in this repository.
 
 ### Security
+- **Settlement receipts are persisted and verified instead of re-signed.**
+  The signed issuance receipt is now stored atomically with the settlement
+  (`settlement_receipts`), and every lifecycle transition appends a receipt
+  chained to its predecessor. `settlement verify` reads the stored chain and
+  compares its signed evidence with the current row; it no longer builds a
+  fresh receipt from the current database values. Database edits, receipt
+  edits, and deleted receipts therefore fail closed
+  (`SETTLEMENT_EVIDENCE_MISMATCH`, `TAMPERED_OR_INVALID_SIGNATURE`,
+  `RECEIPT_NOT_FOUND`, or `RECEIPT_CHAIN_BROKEN`) instead of being reported as
+  `AUTHENTIC_AND_UNMODIFIED`. Regression coverage:
+  `tests/test_settlement_integration.py::TestStoredReceiptTamperEvidence`.
 - **Tenant-scoped quarantine paths.** `spec.delivery.quarantinePath` is now
   validated with the same tenant boundary as delivery targets. In production it
   must resolve inside the authenticated tenant's quarantine namespace; the

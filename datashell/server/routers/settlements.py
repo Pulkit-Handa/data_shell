@@ -280,10 +280,15 @@ def approve_settlement(
     if row["settlement_status"] != "READY_FOR_BILLING":
         raise HTTPException(status_code=409,
                             detail=f"settlement status '{row['settlement_status']}' is not approvable")
-    _settlement_service.ledger.transition_status(
-        settlement_id, client.tenant_id, SettlementStatus.READY_FOR_BILLING,
-        f"api:{client.role.value}", f"explicit billing approval: {payload.reason}",
-        event_type="BILLING_APPROVED", payload={"reason": payload.reason})
+    try:
+        _settlement_service.transition_status(
+            settlement_id=settlement_id, tenant_id=client.tenant_id,
+            to_status=SettlementStatus.READY_FOR_BILLING,
+            actor=f"api:{client.role.value}",
+            reason=f"explicit billing approval: {payload.reason}",
+            event_type="BILLING_APPROVED", payload={"reason": payload.reason})
+    except SettlementServiceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"settlement_id": settlement_id, "status": "READY_FOR_BILLING",
             "approved": True, "actor": f"api:{client.role.value}"}
 

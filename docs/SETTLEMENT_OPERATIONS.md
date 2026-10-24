@@ -223,7 +223,7 @@ contract terms in force, evidence chain, billing instructions.
 | Timeout treated as failure, then double creation | Ambiguous outcomes recorded `UNRESOLVED`; retries refused pending reconciliation |
 | Billing a failed/tampered delivery | Certificate verification precedes calculation; failed reconciliation yields `REJECTED`, zero gross, non-billable |
 | Cross-tenant financial leakage | Tenant scoping on every read/write; cross-tenant reads 404 |
-| Operator editing the SQLite file | Signed receipts + delivery certificates make post-hoc edits detectable; verification recomputes bindings (no external anchor — see limitations) |
+| Operator editing the SQLite file | Signed receipts are stored at issuance/transition and verification compares them with the current row; it never re-signs the row. Post-hoc edits and deleted receipts fail closed (no external anchor — see limitations) |
 | Secret leakage in logs | Only key IDs and non-secret references are recorded |
 
 ---
@@ -271,7 +271,9 @@ are machine-specific; re-run the script rather than quoting these blindly.
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | `exit 4` on calculate | Missing run for tenant, invalid certificate, invalid contract reference | Read the message; confirm run id/tenant and re-verify the certificate |
-| `verify` → `TAMPERED_OR_INVALID_SIGNATURE` | Statement/receipt edited, or signing key not provisioned | Compare against the stored row; ensure the key ID is in the trust store |
+| `verify` → `TAMPERED_OR_INVALID_SIGNATURE` | Receipt edited, or signing key not provisioned | Ensure the key ID is in the trust store; investigate any edit to `settlement_receipts` |
+| `verify` → `SETTLEMENT_EVIDENCE_MISMATCH` | The settlement row (or a mirrored amount column) was edited after issuance | Restore from backup and treat the row as compromised; verification never re-signs it |
+| `verify` → `RECEIPT_NOT_FOUND` / `RECEIPT_CHAIN_BROKEN` | Receipt rows were deleted (including legacy rows issued before receipt persistence) | Investigate database integrity; a receipt cannot be recreated from the current row without re-introducing the tampering risk |
 | `verify` → `DELIVERY_CERTIFICATE_DIGEST_MISMATCH` | A different/edited certificate supplied | Use the certificate referenced by the receipt |
 | Billing preview 409 / exit 4 | Status not `READY_FOR_BILLING` or open dispute | Show the statement and resolve the dispute |
 | Billing retry returns `RECONCILIATION_REQUIRED` | Prior ambiguous provider outcome | Reconcile with the provider dashboard, then record the outcome |

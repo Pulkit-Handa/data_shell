@@ -233,21 +233,32 @@ trust semantics as audit certificates, binding:
 * the full settlement statement (calculation inputs and result), and
 * a `signature_header` that is part of the signed content.
 
+The issuance receipt is **stored in the settlement ledger in the same
+transaction as the statement** (`settlement_receipts`). Every lifecycle
+transition appends another signed receipt chained to its predecessor via
+`previous_receipt_digest`. Verification reads those stored receipts; it never
+creates a fresh signature over the current row, so an operator who edits the
+SQLite database cannot have the modified values re-signed as authentic.
+
 Verification (`settlement verify`, `POST /api/v1/settlements/{id}/verify`)
 performs, in order:
 
-1. signature algorithm + trusted key resolution and signature validity
-   (same rules as certificate verification);
-2. delivery-certificate digest recomputation and re-verification of the
+1. load the stored receipt chain (missing receipts fail closed with
+   `RECEIPT_NOT_FOUND`; a missing/deleted link fails with
+   `RECEIPT_CHAIN_BROKEN`);
+2. signature algorithm + trusted key resolution and signature validity for
+   every stored receipt (same rules as certificate verification);
+3. delivery-certificate digest recomputation and re-verification of the
    certificate through the existing artifact verifier;
-3. if the expected statement is supplied, field-by-field equality of every
-   settlement-critical field (amounts, units, statuses, contract digest,
-   certificate digest, run id).
+4. field-by-field equality of the newest receipt's signed evidence with the
+   current statement and row, including all settlement-critical fields
+   (amounts, units, statuses, contract id/version/digest, certificate digest,
+   run id) and the mirrored financial columns.
 
 Tampering with **any** settlement-critical field invalidates the receipt
 (`TAMPERED_OR_INVALID_SIGNATURE`), a swapped certificate fails
-(`DELIVERY_CERTIFICATE_DIGEST_MISMATCH`), and a forged statement fails
-(`SETTLEMENT_EVIDENCE_MISMATCH`).
+(`DELIVERY_CERTIFICATE_DIGEST_MISMATCH`), and a forged or database-edited
+statement fails (`SETTLEMENT_EVIDENCE_MISMATCH`).
 
 Algorithms, stated truthfully:
 
@@ -325,8 +336,12 @@ open dispute always blocks billing regardless of the acceptance spec.
 * **Application-level immutability.** Settlement rows are never updated by
   the application, but a privileged SQLite operator can still edit the file.
   There is no externally anchored hash chain; tamper-evidence comes from the
-  signed receipt plus the delivery certificate, which is why verification
-  recomputes bindings rather than trusting the row.
+  stored signed receipt chain plus the delivery certificate. Verification
+  compares the stored evidence with the current row and never re-signs it, so
+  edits (or receipt deletion) fail closed rather than being reported as
+  authentic. Anchoring the receipt digest outside the database remains the
+  mitigation against an operator who can rewrite the database *and* the
+  receipt chain together before verification.
 * **Single-file SQLite storage.** Settlement and boundary ledgers share one
   SQLite database with WAL and a 5-second busy timeout. Concurrency is fine
   for the reference single-replica deployment; horizontal scaling requires
